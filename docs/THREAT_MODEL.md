@@ -1,0 +1,20 @@
+# Threat model (Phase 1, single machine)
+
+Assets: the owner's files in the workspace, API keys, prompts/data sent to model providers, the task database.
+Trust boundary: only the owner (CLI) is trusted. Models, files read, web pages, tool output, and model-proposed success criteria are untrusted.
+
+| Threat | Mitigation in code | Residual risk |
+|---|---|---|
+| Prompt injection via file / web / tool output | Output wrapped as untrusted data; permissions decided in code (policy, approvals), not by text; injection heuristics only raise an audit flag | A model can still be *misled* within permitted actions (e.g. write wrong content to an allowed file). Real-model resistance is unmeasured |
+| Agent escapes the workspace | `WorkspaceGuard`: `..`, absolute paths, drive switches, symlinks/junctions (realpath of nearest ancestor), `.aeon/` and `.git/` protected | TOCTOU between check and use by another local process |
+| SSRF / reaching local services | URL checks, DNS resolution check, redirect re-validation, size/time caps; private, loopback, link-local, metadata ranges blocked | DNS rebinding between the resolve check and the connect; no egress firewall |
+| Command execution | Only `sandbox.exec`: allow-listed images, argv (no shell), `--network none`, read-only root, dropped caps, no-new-privileges, memory/CPU/pid limits, per-task scratch mount; always needs approval by default | Docker daemon / kernel escapes; allowed images are pulled by Docker over the network; real Docker path untested here |
+| Approval abuse (approve X, run Y) | Approval is bound to a hash of task + step + tool + exact args; the chosen action is persisted so it cannot change after approval; expiry 24 h; late approval refused | The summary shown must be understood by the owner |
+| Secret leakage | Keys from env or the platform store (DPAPI / Secret Service / 0600 file), passed to helper processes over stdin, never argv; exact-value + pattern redaction on state, audit, errors, prompts; keys never in URLs | Linux 0600 fallback is not encrypted; same-user malware can use DPAPI-protected secrets; secrets in unrecognised formats; **redaction can corrupt files** the agent reads and rewrites (D10). Prompts sent to external providers contain whatever the agent read |
+| Data sent to third parties | External providers require explicit `--consent`; fallback only to consented providers and only if the owner enabled it | EXAONE API terms say usage metadata is always collected and input/output may be used for training depending on consent settings; terms and privacy policy wording conflict (see research notes) |
+| Duplicate / zombie execution | Lease + fencing; effect journal; persisted pending action | External side effects are at-least-once; a crash between effect and journal write can repeat it |
+| Runaway cost / loops | Step budget, retry cap, local daily call/token budgets, quota waits | Free tiers can change or end; app-level limits do not guarantee a $0 bill on paid clouds |
+| Malicious dependency | Zero runtime dependencies (Node built-ins only); two dev dependencies | Supply chain of `typescript` / `@types/node` |
+| Model claims false success | Verification against files/HTTP; model-proposed criteria are labelled weaker than user-supplied ones | A badly chosen criterion can pass while the real goal is unmet |
+
+Out of scope until later phases: cloud runtimes, device pairing, memory poisoning, multi-device authorization, deploy credentials.

@@ -1,0 +1,21 @@
+{
+  "name": "aeon-agent",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Aeon Agent - continuity-first open-source personal AI agent",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "node --test \"test/*.test.ts\"",
+    "typecheck": "tsc --noEmit",
+    "aeon": "node src/node/cli.ts",
+    "test:live": "node --test \"test/live/*.test.ts\""
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  }
+}
