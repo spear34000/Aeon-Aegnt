@@ -26,6 +26,8 @@ export interface AeonServerOptions {
   serverName?: string;
   /** Directory with the built web UI. Served without authentication (it is public code). */
   webRoot?: string;
+  /** Test seam: decides whether a request comes from the machine running Aeon. Defaults to a loopback check. */
+  isLocalRequest?: (req: IncomingMessage) => boolean;
   /** Scheduler pass interval; 0 disables the background loop (tests drive ticks manually). */
   tickIntervalMs?: number;
   maxBodyBytes?: number;
@@ -126,6 +128,10 @@ export class AeonServer {
   }
 
   // ---------------------------------------------------------------- plumbing
+
+  private isLocal(req: IncomingMessage): boolean {
+    return this.o.isLocalRequest ? this.o.isLocalRequest(req) : isLoopback(req.socket.remoteAddress);
+  }
 
   private json(res: ServerResponse, status: number, body: unknown): void {
     const data = JSON.stringify(body);
@@ -285,6 +291,12 @@ export class AeonServer {
       } catch (e) {
         throw new HttpError(400, (e as Error).message);
       }
+      // Changing where prompts and keys go (providers, consent, endpoints) is as sensitive as a secret: a lost or
+      // compromised phone must not be able to point the stored key at another host. Local machine only.
+      const cur = loadConfig(this.o.configDir);
+      const sensitive = ["providers", "dataConsent", "fallbackAllowed", "ollamaBaseUrl", "openaiCompatBaseUrl"] as const;
+      const changed = sensitive.filter((k) => JSON.stringify(cur[k] ?? null) !== JSON.stringify(cfg[k] ?? null));
+      if (changed.length > 0 && !this.isLocal(req)) throw new HttpError(403, `changing ${changed.join(", ")} is only allowed from the machine running Aeon`);
       saveConfig(this.o.configDir, cfg);
       await this.o.onConfigChanged?.();
       return this.json(res, 200, { config: cfg });
@@ -294,7 +306,7 @@ export class AeonServer {
     if (path === "/v1/secrets" && method === "GET") return this.json(res, 200, { backend: this.o.secrets.kind, names: await this.o.secrets.list() });
     const secMatch = /^\/v1\/secrets\/([A-Z][A-Z0-9_]{1,63})$/.exec(path);
     if (secMatch) {
-      if (!isLoopback(req.socket.remoteAddress)) throw new HttpError(403, "secrets can only be changed from the machine running Aeon");
+      if (!this.isLocal(req)) throw new HttpError(403, "secrets can only be changed from the machine running Aeon");
       const name = secMatch[1]!;
       assertSecretName(name);
       if (method === "PUT") {

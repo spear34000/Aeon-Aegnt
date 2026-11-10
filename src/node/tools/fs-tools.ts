@@ -17,6 +17,7 @@ function assessPath(guard: WorkspaceGuard, risk: ToolAssessment["risk"], verb: s
 
 export function fsTools(guard: WorkspaceGuard): Tool[] {
   const read: Tool = {
+    exposesWorkspaceData: true,
     name: "fs.read",
     description: "Read a UTF-8 text file inside the workspace.",
     argsHint: '{"path":"relative/path"}',
@@ -80,6 +81,7 @@ export function fsTools(guard: WorkspaceGuard): Tool[] {
   };
 
   const list: Tool = {
+    exposesWorkspaceData: true,
     name: "fs.list",
     description: "List a directory inside the workspace.",
     argsHint: '{"path":"."}',

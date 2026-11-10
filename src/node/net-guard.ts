@@ -112,6 +112,8 @@ export interface SafeFetchOptions {
   resolver?: Resolver;
   /** Only meaningful together with `fetchImpl` (skips the pre-flight DNS check). */
   skipDns?: boolean;
+  /** TEST ONLY: lets the pinned transport reach loopback so size/time caps can be exercised on real sockets. Tools never set this. */
+  testAllowPrivate?: boolean;
 }
 
 interface Raw {
@@ -135,7 +137,7 @@ function pinnedRequest(url: URL, o: Required<Pick<SafeFetchOptions, "timeoutMs" 
     resolver(hostname).then(
       (addrs) => {
         if (addrs.length === 0) return cb(new Error("host did not resolve"));
-        for (const a of addrs) if (isPrivateAddress(a.address)) return cb(new Error("host resolves to a private address"));
+        for (const a of addrs) if (!o.testAllowPrivate && isPrivateAddress(a.address)) return cb(new Error("host resolves to a private address"));
         if (options.all) cb(null, addrs);
         else cb(null, addrs[0]!.address, addrs[0]!.family);
       },
@@ -144,34 +146,43 @@ function pinnedRequest(url: URL, o: Required<Pick<SafeFetchOptions, "timeoutMs" 
   };
   const doRequest = url.protocol === "https:" ? httpsRequest : httpRequest;
   return new Promise<Raw>((resolve, reject) => {
+    let settled = false;
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      fn();
+    };
     const req = doRequest(
       url,
       {
         method: o.method ?? "GET",
         lookup: lookup as never,
-        timeout: o.timeoutMs,
+        timeout: o.timeoutMs, // idle timeout only; the wall-clock cap is the abort signal below
+        signal: AbortSignal.timeout(o.timeoutMs), // total time, so a slow-drip response cannot hold the task forever
         headers: { "user-agent": "aeon-agent", ...(o.body !== undefined ? { "content-type": "text/plain; charset=utf-8", "content-length": Buffer.byteLength(o.body) } : {}) },
       },
       (res) => {
         const chunks: Buffer[] = [];
         let size = 0;
         let truncated = false;
+        const done = () =>
+          finish(() => resolve({ status: res.statusCode ?? 0, headers: res.headers, text: Buffer.concat(chunks).toString("utf8"), truncated }));
         res.on("data", (c: Buffer) => {
-          if (size >= o.maxBytes) {
-            truncated = true;
-            return;
-          }
           const room = o.maxBytes - size;
           chunks.push(c.length > room ? c.subarray(0, room) : c);
-          if (c.length > room) truncated = true;
           size += Math.min(c.length, room);
+          if (c.length >= room) {
+            truncated = true;
+            done();
+            res.destroy(); // stop downloading once the cap is reached
+          }
         });
-        res.on("end", () => resolve({ status: res.statusCode ?? 0, headers: res.headers, text: Buffer.concat(chunks).toString("utf8"), truncated }));
-        res.on("error", reject);
+        res.on("end", done);
+        res.on("error", (e) => finish(() => reject(e)));
       },
     );
     req.on("timeout", () => req.destroy(new Error("request timed out")));
-    req.on("error", reject);
+    req.on("error", (e) => finish(() => reject(e)));
     req.end(o.body);
   });
 }

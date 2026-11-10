@@ -201,7 +201,8 @@ export class Agent implements TaskRunner {
     if (!tool) return finish(`ERROR: tool no longer available: ${p.tool}`, false);
 
     const assessment = tool.assess(p.args);
-    const tainted = steps.some((s) => s.ok && s.tool === "fs.read");
+    // Once anything workspace-derived has been shown to the model, outgoing requests could leak it.
+    const tainted = steps.some((s) => s.ok && this.cfg.tools.get(s.tool)?.exposesWorkspaceData === true);
     const decision = this.cfg.policy.evaluate({ tool: tool.name, assessment, tainted });
     await ctx.audit("tool_requested", {
       tool: tool.name,

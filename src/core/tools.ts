@@ -34,6 +34,8 @@ export interface Tool {
   /** Pure classification of a call. Must not perform the action. */
   assess(args: unknown): ToolAssessment;
   run(args: unknown, ctx: ToolContext): Promise<ToolResult>;
+  /** True if the output can contain workspace-derived data (file contents, listings, command output). */
+  exposesWorkspaceData?: boolean;
 }
 
 export class ToolRegistry {

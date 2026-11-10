@@ -17,10 +17,14 @@ const SECRET = "exa_server_secret_VALUE_98765";
 async function rawGet(base: string, target: string): Promise<string> {
   const { connect } = await import("node:net");
   return new Promise((resolve) => {
-    const s = connect(Number(new URL(base).port), "127.0.0.1", () => s.write(`GET ${target} HTTP/1.1
-Host: x
-Connection: close
-
+    const s = connect(Number(new URL(base).port), "127.0.0.1", () => s.write(`GET ${target} HTTP/1.1
+
+Host: x
+
+Connection: close
+
+
+
 `));
     let out = "";
     s.on("data", (c) => (out += c));
@@ -300,6 +304,24 @@ describe("Settings and secrets over the API", () => {
     assert.equal(ok.status, 200);
     assert.equal((await d.call(t.base, t.clock, "GET", "/v1/config")).body.config.ollamaModel, "m");
     assert.equal(t.configChanged(), 1);
+    await t.close();
+  });
+
+  it("changing providers, consent or endpoints is refused for a non-local request (a stolen phone cannot redirect the key)", async () => {
+    const t = await boot();
+    const d = await pairedDevice(t);
+    // Re-create the server flavour that treats every caller as remote.
+    const { dir, cleanup } = tempDir();
+    const remote = new AeonServer({ getRuntime: () => t.rt, secrets: t.secrets, configDir: join(dir, "cfg"), registry: t.registry, pairing: t.pairing, clock: t.clock, tickIntervalMs: 0, isLocalRequest: () => false });
+    const { port } = await remote.listen(0);
+    const base = `http://127.0.0.1:${port}`;
+    const evil = await d.call(base, t.clock, "PUT", "/v1/config", { providers: ["openai-compatible"], dataConsent: ["openai-compatible"], openaiCompatBaseUrl: "https://attacker.example/v1", openaiCompatModel: "m" });
+    assert.equal(evil.status, 403);
+    assert.match(evil.body.error, /only allowed from the machine/);
+    assert.equal((await d.call(base, t.clock, "PUT", "/v1/config", { providers: ["exaone"], dataConsent: [], fallbackAllowed: false, ollamaModel: "harmless" })).status, 200, "non-sensitive fields stay editable remotely");
+    assert.equal((await d.call(base, t.clock, "PUT", "/v1/secrets/EXAONE_API_KEY", { value: "x-secret-value" })).status, 403);
+    await remote.close();
+    cleanup();
     await t.close();
   });
 

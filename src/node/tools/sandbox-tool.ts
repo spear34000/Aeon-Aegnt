@@ -74,6 +74,7 @@ export function sandboxTool(guard: WorkspaceGuard, runner: SandboxRunner = docke
     return { image: o.image, command: o.command as string[] };
   };
   return {
+    exposesWorkspaceData: true,
     name: "sandbox.exec",
     description: "Run a command inside a network-less Docker container with only a scratch directory mounted at /work.",
     argsHint: '{"image":"alpine:3.20","command":["echo","hi"]}',

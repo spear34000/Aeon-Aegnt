@@ -34,7 +34,7 @@ Any failure returns `401 {"error":"unauthorized"}` with no hint which check fail
 | `GET /v1/approvals?status=pending` · `POST /v1/approvals/{id}/decide` `{decision:"approved"\|"denied"}` | approvals; each can be decided once |
 | `GET /v1/events` (SSE) | audit events; resume with `Last-Event-ID` or `?after=` |
 | `GET /v1/usage` | model calls and tokens |
-| `GET/PUT /v1/config` | non-secret settings (strictly validated; no secret fields) |
+| `GET/PUT /v1/config` | non-secret settings (strictly validated; no secret fields). Changing providers, consent, fallback or endpoint URLs is accepted **only from the machine running Aeon** |
 | `GET /v1/secrets` · `PUT/DELETE /v1/secrets/{NAME}` | names only; values are write-only and accepted **only from the machine running Aeon** (loopback), never over the LAN |
 | `GET /v1/devices` · `DELETE /v1/devices/{id}` | list (no keys) · revoke |
 
