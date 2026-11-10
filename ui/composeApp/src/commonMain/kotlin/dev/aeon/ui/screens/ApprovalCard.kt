@@ -106,11 +106,22 @@ fun ApprovalCard(a: Approval, seenAt: Long?, sourceLabel: String, onDecide: (Boo
                 }
             }
         }
-        // 6 result line
-        if (a.irreversible) {
-            Text("휴지통을 거치지 않습니다. 되돌릴 수 없습니다.", color = s.danger, style = MaterialTheme.typography.labelMedium)
-        } else {
-            Text("되돌릴 수 있는 작업입니다.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+        // The exact action, as the server recorded it (command line, URL with query, body preview). Copyable.
+        Column(
+            Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(AeonShape.CONTROL.dp)).padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text("정확한 내용", style = MaterialTheme.typography.labelMedium, color = s.fg3)
+            SelectionContainer { Text(a.summary, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface) }
+        }
+        // 6 result line. Fails closed: Aeon has no undo, so it never claims an action is reversible.
+        if (a.irreversible || a.risk != "read") {
+            Text(
+                if (a.irreversible) "휴지통을 거치지 않습니다. 되돌릴 수 없습니다."
+                else "Aeon에는 이 작업을 되돌리는 기능이 없습니다. 되돌릴 수 있는지 확인되지 않았습니다.",
+                color = s.danger,
+                style = MaterialTheme.typography.labelMedium,
+            )
         }
         // 7 decision buttons: same size, deny on the left, allow on the right
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

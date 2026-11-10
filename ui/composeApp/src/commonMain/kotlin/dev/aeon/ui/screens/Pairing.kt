@@ -44,6 +44,18 @@ import dev.aeon.ui.state.UiState
 
 const val PAIR_CODE_LEN = 16
 
+private val LOCAL_HOSTS = setOf("127.0.0.1", "localhost", "::1", "[::1]")
+
+/**
+ * True when the address is plain HTTP to a host other than this PC. Parsed with a real URL parser (not substring
+ * matching). Anything that does not parse is treated as remote and plain, which is the safe side.
+ */
+fun isPlainRemoteHttp(raw: String): Boolean {
+    val parsed = runCatching { io.ktor.http.Url(raw.trim()) }.getOrNull() ?: return true
+    val plain = parsed.protocol == io.ktor.http.URLProtocol.HTTP
+    return plain && parsed.host.lowercase() !in LOCAL_HOSTS
+}
+
 /** Groups the pairing code as XXXX-XXXX-XXXX-XXXX while typing; ignores dashes, spaces and case. */
 fun formatPairCode(raw: String): String {
     val n = Signing.normalizeCode(raw).take(PAIR_CODE_LEN)
@@ -64,7 +76,7 @@ fun ConnectScreen(state: UiState, model: AppModel, modifier: Modifier = Modifier
     var code by remember { mutableStateOf("") }
     var acceptHttp by remember { mutableStateOf(false) }
     val s = LocalAeonStatus.current
-    val plainHttp = url.trim().startsWith("http://") && !url.contains("127.0.0.1") && !url.contains("localhost")
+    val plainHttp = isPlainRemoteHttp(url)
     val codeReady = Signing.normalizeCode(code).length == PAIR_CODE_LEN
     val canConnect = codeReady && (!plainHttp || acceptHttp) && state.connection !is Connection.Connecting && !state.busy
 
