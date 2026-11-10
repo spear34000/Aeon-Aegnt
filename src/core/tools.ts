@@ -9,6 +9,8 @@ export interface ToolAssessment {
   resources: string[];
   /** Set by the tool when args are out of its allowed scope (path escape, private network, ...). */
   violation?: string;
+  /** True if the action cannot be undone (no trash, no backup). Shown on the approval card. */
+  irreversible?: boolean;
   /** The request can carry data to a remote host (e.g. a URL with a query string). */
   exfilRisk?: boolean;
 }

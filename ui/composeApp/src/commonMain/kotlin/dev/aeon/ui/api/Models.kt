@@ -77,6 +77,8 @@ data class Approval(
     val tool: String,
     val summary: String,
     val risk: String,
+    val resources: List<String> = emptyList(),
+    val irreversible: Boolean = false,
     val status: String,
     val createdAt: Long = 0,
     val expiresAt: Long = 0,

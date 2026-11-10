@@ -31,7 +31,7 @@ Any failure returns `401 {"error":"unauthorized"}` with no hint which check fail
 | `GET /v1/tasks` · `POST /v1/tasks` | list (summaries) · create `{ goal, criteria?[], runAfter? }` |
 | `GET /v1/tasks/{id}` | detail incl. plan, steps, verification evidence |
 | `POST /v1/tasks/{id}/cancel` · `/verify` · `/confirm` | cancel · re-verify against reality · owner confirmation |
-| `GET /v1/approvals?status=pending` · `POST /v1/approvals/{id}/decide` `{decision:"approved"\|"denied"}` | approvals; each can be decided once |
+| `GET /v1/approvals?status=pending` · `POST /v1/approvals/{id}/decide` `{decision:"approved"\|"denied"}` | approvals; each can be decided once. Each approval carries `resources` (paths/URLs, shown first 3) and `irreversible` (true for permanent deletes, overwrites, command runs, external sends) |
 | `GET /v1/events` (SSE) | audit events; resume with `Last-Event-ID` or `?after=` |
 | `GET /v1/usage` | model calls and tokens |
 | `GET/PUT /v1/config` | non-secret settings (strictly validated; no secret fields). Changing providers, consent, fallback or endpoint URLs is accepted **only from the machine running Aeon** |
@@ -41,5 +41,7 @@ Any failure returns `401 {"error":"unauthorized"}` with no hint which check fail
 Static files (the web UI, when `--web` is given) are served without authentication because they are public code; they carry CSP, `X-Frame-Options: DENY` and `nosniff`.
 
 ## Known limits
+
+Pairing codes are 80 bits (16 base32 characters, 4-4-4-4 display); the 5-attempt lockout limits guessing.
 
 No transport encryption on plain HTTP; one owner, all paired devices have full control; SSE polls the audit table once per second; no push notifications yet (Phase 6).

@@ -1,4 +1,5 @@
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
+import com.android.build.api.dsl.KotlinMultiplatformAndroidLibraryExtension
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 
 plugins {
@@ -8,8 +9,20 @@ plugins {
     alias(libs.plugins.kotlinSerialization)
 }
 
+val androidEnabled = gradle.extra["aeon.androidEnabled"] as Boolean
+if (androidEnabled) apply(plugin = "com.android.kotlin.multiplatform.library")
+
 kotlin {
     jvm("desktop")
+
+    if (androidEnabled) {
+        // The plugin is applied conditionally, so there is no generated accessor: configure its extension by name.
+        (this as ExtensionAware).extensions.configure<KotlinMultiplatformAndroidLibraryExtension>("android") {
+            namespace = "dev.aeon.ui.shared"
+            compileSdk = 37
+            minSdk = 26
+        }
+    }
 
     @OptIn(ExperimentalWasmDsl::class)
     wasmJs {
@@ -27,6 +40,8 @@ kotlin {
             // Plugin accessors resolve the matching Material3 version (it is versioned separately from Compose).
             implementation(compose.runtime)
             implementation(compose.foundation)
+            implementation(compose.components.resources)
+            implementation("org.jetbrains.compose.material:material-icons-core:1.7.3")
             implementation(compose.material3)
             implementation(compose.ui)
             implementation(libs.ktor.client.core)
@@ -49,6 +64,12 @@ kotlin {
                 implementation(libs.ktor.client.cio)
             }
         }
+        if (androidEnabled) {
+            getByName("androidMain").dependencies {
+                implementation(libs.ktor.client.cio)
+                implementation(libs.kotlinx.coroutines.android)
+            }
+        }
         wasmJsMain.dependencies {
             implementation(libs.ktor.client.js)
         }
@@ -60,6 +81,10 @@ tasks.withType<Test>().configureEach {
     // Lets the integration tests start the real Node server from the repository root.
     systemProperty("aeon.repoRoot", rootDir.parentFile.absolutePath)
     testLogging { events("passed", "failed", "skipped"); showStandardStreams = false; exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL }
+}
+
+compose.resources {
+    packageOfResClass = "dev.aeon.ui.generated.resources"
 }
 
 compose.desktop {

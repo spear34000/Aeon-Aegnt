@@ -158,14 +158,14 @@ export class PairingManager {
 
   newCode(now: number): PairingCode {
     this.codes = this.codes.filter((c) => c.expiresAt > now);
-    const code = base32(randomBytes(12)); // 20 chars
+    const code = base32(randomBytes(10)); // 16 chars = 80 bits, shown as 4-4-4-4
     const c = { code, expiresAt: now + this.ttlMs };
     this.codes.push(c);
     return c;
   }
 
   static format(code: string): string {
-    return code.match(/.{1,5}/g)!.join("-");
+    return code.match(/.{1,4}/g)!.join("-");
   }
 
   static normalize(code: string): string {

@@ -32,6 +32,8 @@ const mkApproval = (id: string, taskId: string, expiresAt: number): Approval => 
   tool: "fs.delete",
   summary: "delete x",
   risk: "delete",
+  resources: [],
+  irreversible: true,
   status: "pending",
   createdAt: 1000,
   expiresAt,

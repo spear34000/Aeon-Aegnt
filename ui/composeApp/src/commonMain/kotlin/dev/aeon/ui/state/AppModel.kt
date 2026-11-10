@@ -4,6 +4,7 @@ import dev.aeon.ui.api.AeonClient
 import dev.aeon.ui.api.AeonConfig
 import dev.aeon.ui.api.AeonException
 import dev.aeon.ui.api.Approval
+import dev.aeon.ui.api.DeviceInfo
 import dev.aeon.ui.api.ServerStatus
 import dev.aeon.ui.api.TaskDetail
 import dev.aeon.ui.api.TaskSummary
@@ -29,26 +30,57 @@ sealed interface Connection {
     data class Offline(val reason: String) : Connection
 }
 
+/** Which main area is visible. The conversation is the default place (design: chat-first). */
+enum class Section { Chat, Tasks, Approvals, Settings }
+
+enum class SettingsPage { Models, Keys, Devices, Usage, About }
+
 data class UiState(
     val connection: Connection = Connection.Unpaired,
     val serverUrl: String = "http://127.0.0.1:7421",
+    val section: Section = Section.Chat,
+    val settingsPage: SettingsPage = SettingsPage.Models,
     val tasks: List<TaskSummary> = emptyList(),
     val approvals: List<Approval> = emptyList(),
+    val recentApprovals: List<Approval> = emptyList(),
     val status: ServerStatus? = null,
+    /** null = "new conversation" composer. */
     val selectedTaskId: String? = null,
     val selectedTask: TaskDetail? = null,
+    /** Phone: the task detail is shown on top of the conversation/list. */
+    val showDetail: Boolean = false,
     val config: AeonConfig? = null,
+    /** Unsaved edits to the model settings. null when nothing is being edited. */
+    val draft: AeonConfig? = null,
     val secretNames: List<String> = emptyList(),
     val secretsBackend: String = "",
+    val devices: List<DeviceInfo> = emptyList(),
     val usage: List<UsageRecord> = emptyList(),
     /** Last user-visible problem (cleared on the next successful action). */
     val message: String? = null,
     val busy: Boolean = false,
-)
+    /** Monotonic time (ms) when the approval list was last seen with a new card; used for the 1 s allow delay. */
+    val approvalSeenAt: Map<String, Long> = emptyMap(),
+) {
+    val pendingCount: Int get() = approvals.count { it.status == "pending" }
+
+    /** How many model settings differ from the saved ones. */
+    val dirtyCount: Int
+        get() {
+            val c = config ?: return 0
+            val d = draft ?: return 0
+            var n = 0
+            if (c.providers != d.providers) n++
+            if (c.dataConsent != d.dataConsent) n++
+            if (c.fallbackAllowed != d.fallbackAllowed) n++
+            if (c.ollamaModel != d.ollamaModel) n++
+            return n
+        }
+}
 
 /**
- * Screen-independent state and actions shared by the Windows, web (and later Android) UIs.
- * It polls the local API; there is no business logic here beyond calling the API and reporting failures.
+ * Screen-independent state and actions shared by the Windows, web and Android UIs.
+ * It polls the local API. The UI holds no business logic beyond calling the API and reporting failures.
  */
 class AppModel(
     private val client: AeonClient,
@@ -56,8 +88,9 @@ class AppModel(
     private val crypto: DeviceCrypto,
     private val scope: CoroutineScope,
     private val pollMillis: Long = 2000,
+    defaultServerUrl: String = "http://127.0.0.1:7421",
 ) {
-    private val _state = MutableStateFlow(UiState())
+    private val _state = MutableStateFlow(UiState(serverUrl = defaultServerUrl))
     val state: StateFlow<UiState> = _state.asStateFlow()
     private var poller: Job? = null
 
@@ -80,6 +113,17 @@ class AppModel(
         poller?.cancel()
         poller = null
     }
+
+    fun go(section: Section) = _state.update { it.copy(section = section, showDetail = false) }
+
+    fun openSettings(page: SettingsPage) {
+        _state.update { it.copy(section = Section.Settings, settingsPage = page, showDetail = false) }
+        if (page == SettingsPage.Devices) scope.launch { runCatching { client.devices() }.onSuccess { d -> _state.update { it.copy(devices = d) } } }
+        if (page == SettingsPage.Usage) scope.launch { runCatching { client.usage() }.onSuccess { u -> _state.update { it.copy(usage = u) } } }
+    }
+
+    /** Clears the current selection and shows the new-conversation composer. */
+    fun newConversation() = _state.update { it.copy(section = Section.Chat, selectedTaskId = null, selectedTask = null, showDetail = false) }
 
     fun pair(serverUrl: String, code: String) {
         scope.launch {
@@ -141,22 +185,28 @@ class AppModel(
             val status = client.status()
             val tasks = client.tasks()
             val approvals = client.approvals("pending")
+            val recent = client.approvals(null).filter { it.status != "pending" }.takeLast(20).reversed()
             val selectedId = _state.value.selectedTaskId
             val detail = if (selectedId != null) runCatching { client.task(selectedId) }.getOrNull() else null
-            _state.update {
-                it.copy(
+            val now = dev.aeon.ui.platform.nowMillis()
+            _state.update { s ->
+                val seen = s.approvalSeenAt.toMutableMap()
+                for (a in approvals) if (!seen.containsKey(a.id)) seen[a.id] = now
+                s.copy(
                     connection = Connection.Connected(status.name),
                     status = status,
                     tasks = tasks,
                     approvals = approvals,
-                    selectedTask = detail ?: it.selectedTask,
+                    recentApprovals = recent,
+                    selectedTask = detail ?: s.selectedTask,
+                    approvalSeenAt = seen,
                 )
             }
         } catch (e: AeonException) {
             if (e.status == 401) {
                 // Revoked or clock skew: stop hammering the server and ask the user to pair again.
                 stop()
-                _state.update { it.copy(connection = Connection.Unpaired, message = "This device is no longer authorised (revoked, or the clock differs by more than a minute). Pair it again.") }
+                _state.update { it.copy(connection = Connection.Unpaired, message = "This device is no longer authorised. Pair it again.") }
                 store.remove(KEY_DEVICE)
             } else {
                 _state.update { it.copy(connection = Connection.Offline(describe(e))) }
@@ -166,39 +216,47 @@ class AppModel(
         }
     }
 
-    fun selectTask(id: String?) {
-        _state.update { it.copy(selectedTaskId = id, selectedTask = if (id == _state.value.selectedTaskId) it.selectedTask else null) }
+    fun selectTask(id: String?, asDetail: Boolean = false) {
+        _state.update { it.copy(selectedTaskId = id, selectedTask = null, showDetail = asDetail, section = Section.Chat) }
         if (id != null) scope.launch { runCatching { client.task(id) }.onSuccess { d -> _state.update { it.copy(selectedTask = d) } } }
     }
 
+    fun closeDetail() = _state.update { it.copy(showDetail = false) }
+
     fun createTask(goal: String, checks: List<String>) {
-        action("Task created") {
-            val criteria = checks.filter { it.isNotBlank() }.map { parseCheck(it) ?: throw IllegalArgumentException("Bad check: $it (use file_exists:PATH or file_contains:PATH:TEXT)") }
+        action("Task started") {
+            val criteria = checks.filter { it.isNotBlank() }.map { parseCheck(it) ?: throw IllegalArgumentException("Check format: file_exists:PATH or file_contains:PATH:TEXT") }
             val t = client.createTask(goal.trim(), criteria)
-            _state.update { it.copy(selectedTaskId = t.id) }
+            _state.update { it.copy(selectedTaskId = t.id, selectedTask = null) }
         }
     }
 
-    fun decide(approvalId: String, approve: Boolean) = action(if (approve) "Approved" else "Denied") { client.decide(approvalId, approve) }
-    fun cancel(id: String) = action("Cancel requested") { client.cancel(id) }
-    fun reverify(id: String) = action("Re-verified against the real files") { client.reverify(id) }
-    fun confirm(id: String) = action("Confirmed by you") { client.confirm(id) }
+    fun decide(approvalId: String, approve: Boolean) = action(if (approve) "Allowed once" else "Denied") { client.decide(approvalId, approve) }
+    fun cancel(id: String) = action("Stopping") { client.cancel(id) }
+    fun reverify(id: String) = action("Checked again") { client.reverify(id) }
+    fun confirm(id: String) = action("Marked as checked by you") { client.confirm(id) }
 
     fun loadSettings() {
         action(null) {
             val cfg = client.config()
             val sec = client.secretNames()
-            val usage = client.usage()
-            _state.update { it.copy(config = cfg, secretNames = sec.names, secretsBackend = sec.backend, usage = usage) }
+            _state.update { it.copy(config = cfg, draft = it.draft ?: cfg, secretNames = sec.names, secretsBackend = sec.backend) }
         }
     }
 
-    fun saveConfig(cfg: AeonConfig) = action("Settings saved") {
-        val saved = client.saveConfig(cfg)
-        _state.update { it.copy(config = saved) }
+    fun editDraft(change: (AeonConfig) -> AeonConfig) = _state.update { s -> s.copy(draft = change(s.draft ?: s.config ?: AeonConfig())) }
+
+    fun revertDraft() = _state.update { it.copy(draft = it.config) }
+
+    fun saveDraft() {
+        val d = _state.value.draft ?: return
+        action("Saved") {
+            val saved = client.saveConfig(d)
+            _state.update { it.copy(config = saved, draft = saved) }
+        }
     }
 
-    fun setSecret(name: String, value: String) = action("Key stored") {
+    fun setSecret(name: String, value: String) = action("Key saved") {
         client.setSecret(name, value)
         val sec = client.secretNames()
         _state.update { it.copy(secretNames = sec.names, secretsBackend = sec.backend) }
@@ -208,6 +266,11 @@ class AppModel(
         client.deleteSecret(name)
         val sec = client.secretNames()
         _state.update { it.copy(secretNames = sec.names) }
+    }
+
+    fun revokeDevice(id: String) = action("Device removed") {
+        client.revokeDevice(id)
+        _state.update { it.copy(devices = client.devices()) }
     }
 
     fun dismissMessage() = _state.update { it.copy(message = null) }

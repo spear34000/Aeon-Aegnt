@@ -174,3 +174,7 @@ actual fun defaultDeviceName(): String = "${System.getProperty("user.name") ?: "
 private val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").withZone(ZoneId.systemDefault())
 
 actual fun formatDateTime(millis: Long): String = formatter.format(Instant.ofEpochMilli(millis))
+
+actual fun pageAllowsSigning(): Boolean = true
+
+actual fun pageHostLabel(): String = "127.0.0.1"

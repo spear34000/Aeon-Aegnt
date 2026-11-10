@@ -46,6 +46,7 @@ export function httpTools(opts: Opts = {}): Tool[] {
         risk: "network_write",
         summary: `POST ${clip(c.url.toString(), 300)} body(${o.body.length} chars): ${clip(JSON.stringify(o.body), 200)}`,
         resources: [c.url.toString()],
+        irreversible: true,
       };
     },
     async run(args) {

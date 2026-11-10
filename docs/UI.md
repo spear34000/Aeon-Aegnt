@@ -1,12 +1,39 @@
 # User interfaces (decision D13: Kotlin / Compose Multiplatform)
 
+## Second implementation (design v0.1 applied, 2026-11-10)
+
+The UI now follows the UX Pilot design export (two revisions, the second with a "design ↔ implementation" alignment page). Verified in this session:
+
+| Target | How it was checked |
+|---|---|
+| Android phone (API 37 emulator) | Installed and run. Pairing with the real `serve` (16-character code, typed raw, grouped on screen), task creation, approval card (risk band, tomorrow expiry, irreversible line, allow after 1 s), approval, file really deleted, result labelled "에이전트 보고: 완료" with "확인 안 됨 · 검사 기준 없음", settings (models with save bar, consent, fallback). Screenshots taken. |
+| Web (Compose for Web) | Built and served by `serve --web`, loaded in the browser pane: pairing, layouts at phone width, 1024 and 1280 (sidebar 220 + list 380 + conversation). |
+| Windows (Compose Desktop) | Compiles; `desktopTest` passes (8 tests against the real server). Not re-launched after the redesign. |
+
+Design items implemented: 4-4-4-4 pairing input (80-bit code), HTTP acknowledgement, web block screen off-localhost, five tool names, irreversible line on deletes, absolute expiry over one hour and countdown under, approval card rules (deny by default focus, allow after 1 s, same-size buttons), verification badges with words, agent report labelled as the agent's words, save bar for model settings, device list with revoke confirmation, Pretendard (Regular and SemiBold), light and dark tokens, Material icons instead of text glyphs (the web font lacks the symbols).
+
+Deviations (what the design asks that is not built, or was built differently):
+
+- A conversation is one task. Multi-turn chat is not implemented; the "new conversation" composer creates a task.
+- The approval card has no one-sentence reason: the server does not store the model's reasoning for an action.
+- Per-call approval for every cloud model call is not implemented. Cloud use is governed by the consent switch (with a confirmation dialog). Per-call approval would block every step.
+- Verification evidence uses plain labels ("파일이 있음"); the checks read the files directly, not through `fs.list` / `fs.read`.
+- Provider order changes with up and down buttons, not drag.
+- Anthropic and Google key rows are not shown (no connector exists for them).
+- Not built: the "leave with unsaved changes" dialog, the "different model" notice toggle, approval tap-through from notifications, the "approval rules" menu (removed in the design), automatic device revocation after 30 days (removed in the design).
+- The trash/undo feature was not added; the design marks deletes as irreversible, which matches the code.
+- Pairing codes are 80 bits (16 characters) to match the 4-4-4-4 display, down from 95 bits.
+- The Korean font is the full Pretendard OTF (about 1.6 MB per weight), not the KS X 1001 subset the design suggests; the APK grows accordingly.
+- Web: Compose's fallback-font download is blocked by the page's CSP (console error only); the icons no longer need it.
+
+
 All UIs share one Kotlin codebase (`ui/composeApp`): API client, request signing, state, and screens. Each platform has its own shell and security storage. They talk to the [local API](API.md); no UI contains agent logic.
 
 | Platform | Shell | Device key storage | Status |
 |---|---|---|---|
-| **Windows** (Compose Desktop) | permanent sidebar, task list + detail side by side, window title shows how many approvals are waiting | ECDSA P-256 key encrypted with Windows DPAPI (current user) | **Built; launched and run on Windows 11.** Not yet packaged as an installer |
-| **Web** (Compose for Web, Kotlin/Wasm) | adaptive: wide = sidebar layout, narrow = bottom navigation + single pane | non-extractable WebCrypto key in IndexedDB | **Built and exercised in a real browser against the real server** (pairing, creating a task, wide/narrow layouts) |
-| **Android** (Compose) | bottom navigation, single pane | Android Keystore (planned) | **Not built.** Needs the Android SDK and the owner's acceptance of Google's SDK licence (see below) |
+| **Windows** (Compose Desktop) | sidebar 220 + list 380 + conversation, window title shows how many approvals are waiting | ECDSA P-256 key encrypted with Windows DPAPI (current user) | **Built; launched and run on Windows 11.** Not yet packaged as an installer |
+| **Web** (Compose for Web, Kotlin/Wasm) | adaptive: 1100dp and up = wide layout, below = bottom tabs | non-extractable WebCrypto key in IndexedDB | **Built and exercised in a real browser against the real server** (pairing, creating a task, wide and phone layouts) |
+| **Android** (Compose) | bottom tabs 대화 · 작업 · 승인 · 설정 | Android Keystore (hardware-backed where available) | **Built and run on an API 37 emulator** (second implementation). Not signed or published |
 | macOS | – | – | CLI only (D11) |
 
 ## Build and run

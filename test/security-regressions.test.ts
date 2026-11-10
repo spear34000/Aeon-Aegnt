@@ -254,3 +254,15 @@ describe("Protected directories cannot be reached through Windows path aliasing"
     cleanup();
   });
 });
+
+describe("Pairing code format matches the design (16 characters, 4-4-4-4, 80 bits)", () => {
+  it("is grouped in fours and uses the base32 alphabet", async () => {
+    const { PairingManager, DeviceRegistry } = await import("../src/node/server/device-auth.ts");
+    const pm = new PairingManager(new DeviceRegistry(null));
+    const c = pm.newCode(0);
+    assert.equal(c.code.length, 16);
+    assert.match(c.code, /^[A-Z2-7]{16}$/);
+    assert.match(PairingManager.format(c.code), /^[A-Z2-7]{4}-[A-Z2-7]{4}-[A-Z2-7]{4}-[A-Z2-7]{4}$/);
+    assert.equal(PairingManager.normalize("abcd-efgh ijkl-mnop"), "ABCDEFGHIJKLMNOP");
+  });
+});

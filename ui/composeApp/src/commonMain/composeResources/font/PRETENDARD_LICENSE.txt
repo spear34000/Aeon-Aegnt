@@ -1,0 +1,2 @@
+Pretendard (c) Kil Hong Jang, distributed under the SIL Open Font License 1.1.
+Source: npm package "pretendard" 1.3.9 (dist/public/static). Full license text: https://openfontlicense.org

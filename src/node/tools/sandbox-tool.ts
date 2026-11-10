@@ -81,7 +81,7 @@ export function sandboxTool(guard: WorkspaceGuard, runner: SandboxRunner = docke
     assess(a) {
       const p = parse(a);
       if (typeof p === "string") return { risk: "exec", summary: "sandbox exec (blocked)", resources: [], violation: p };
-      return { risk: "exec", summary: `docker run ${p.image} ${p.command.join(" ")}`.slice(0, 300), resources: [p.image] };
+      return { risk: "exec", summary: `docker run ${p.image} ${p.command.join(" ")}`.slice(0, 300), resources: [p.image], irreversible: true };
     },
     async run(args, ctx) {
       const p = parse(args);

@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { Tool, ToolAssessment } from "../../core/tools.ts";
 import type { WorkspaceGuard } from "../fs-guard.ts";
@@ -42,7 +42,9 @@ export function fsTools(guard: WorkspaceGuard): Tool[] {
     description: "Create or overwrite a UTF-8 text file inside the workspace.",
     argsHint: '{"path":"relative/path","content":"text"}',
     assess: (a) => {
-      const base = assessPath(guard, "write", "Write file", a);
+      const base0 = assessPath(guard, "write", "Write file", a);
+      const overwrites = base0.resources[0] !== undefined && existsSync(base0.resources[0]);
+      const base = { ...base0, irreversible: overwrites };
       const content = (a as { content?: unknown } | null)?.content;
       if (!base.violation && typeof content !== "string") return { ...base, violation: "content must be a string" };
       return base;
@@ -66,7 +68,7 @@ export function fsTools(guard: WorkspaceGuard): Tool[] {
     name: "fs.delete",
     description: "Delete a file inside the workspace (requires owner approval).",
     argsHint: '{"path":"relative/path"}',
-    assess: (a) => assessPath(guard, "delete", "DELETE file", a),
+    assess: (a) => ({ ...assessPath(guard, "delete", "DELETE file", a), irreversible: true }),
     async run(args) {
       const r = guard.resolve(pathArg(args));
       if (!r.ok) return { ok: false, output: r.violation };

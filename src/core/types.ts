@@ -110,6 +110,9 @@ export interface Approval {
   tool: string;
   summary: string;
   risk: string;
+  /** Paths or URLs the action touches, shown on the card (first 3, plus a count). */
+  resources: string[];
+  irreversible: boolean;
   status: ApprovalStatus;
   createdAt: number;
   expiresAt: number;

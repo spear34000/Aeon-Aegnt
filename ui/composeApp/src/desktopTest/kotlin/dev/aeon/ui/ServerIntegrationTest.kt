@@ -78,7 +78,7 @@ class ServerIntegrationTest {
             val line = reader.readLine() ?: break
             lines += line
             Regex("listening on http://127\\.0\\.0\\.1:(\\d+)").find(line)?.let { port = it.groupValues[1].toInt() }
-            if (line.trim().matches(Regex("[A-Z2-7]{5}(-[A-Z2-7]{4,5}){3}"))) code = line.trim()
+            if (line.trim().matches(Regex("[A-Z2-7]{4}(-[A-Z2-7]{4}){3}"))) code = line.trim()
         }
         // Keep draining so the child never blocks on a full pipe.
         Thread { runCatching { reader.forEachLine { } } }.apply { isDaemon = true }.start()

@@ -103,3 +103,14 @@ fun pageOrigin(): String = jsOrigin()
 private fun unusedJsAny(x: JsAny) = x
 @Suppress("unused")
 private fun unusedToJsString(s: String) = s.toJsString()
+
+private fun jsHostname(): String = js("window.location.hostname")
+private fun jsSecure(): Boolean = js("window.isSecureContext === true")
+
+/** Signing works on a secure context; the UI is only offered from this PC (localhost / 127.0.0.1) or https. */
+actual fun pageAllowsSigning(): Boolean {
+    val host = jsHostname()
+    return jsSecure() && (host == "localhost" || host == "127.0.0.1" || host == "[::1]" || jsOrigin().startsWith("https:"))
+}
+
+actual fun pageHostLabel(): String = jsHostname()

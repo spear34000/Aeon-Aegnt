@@ -235,6 +235,8 @@ export class Agent implements TaskRunner {
           tool: tool.name,
           summary: this.cfg.redactor.redact(assessment.summary),
           risk: assessment.risk,
+          resources: assessment.resources.map((r) => this.cfg.redactor.redact(r)).slice(0, 50),
+          irreversible: assessment.irreversible === true,
           status: "pending" as const,
           createdAt: now,
           expiresAt: now + (this.cfg.approvalTtlMs ?? 24 * 3_600_000),

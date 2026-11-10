@@ -13,7 +13,7 @@ import dev.aeon.ui.api.AeonClient
 import dev.aeon.ui.platform.createDeviceCrypto
 import dev.aeon.ui.platform.createKeyValueStore
 import dev.aeon.ui.screens.AppRoot
-import dev.aeon.ui.screens.WideLayout
+import dev.aeon.ui.screens.AdaptiveLayout
 import dev.aeon.ui.state.AppModel
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.CoroutineScope
@@ -40,6 +40,6 @@ fun main() = application {
         state = rememberWindowState(size = DpSize(1180.dp, 760.dp)),
     ) {
         window.minimumSize = java.awt.Dimension(900, 560)
-        AppRoot(model) { s, m -> WideLayout(s, m) }
+        AppRoot(model) { s, m -> AdaptiveLayout(s, m) }
     }
 }
