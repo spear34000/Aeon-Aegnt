@@ -40,6 +40,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -234,19 +235,66 @@ private val EXAMPLES = listOf(
     Example("폴더 정리", "다운로드 폴더에서 지난달 영수증만 찾아 2025 영수증 폴더로 복사해 줘"),
     Example("문서 요약", "회의록 폴더의 파일을 읽고 요약 문서를 새로 만들어 줘"),
     Example("중복 파일 찾기", "작업 폴더에서 내용이 같은 파일을 찾아 목록으로 알려 줘"),
+    Example("웹 페이지 읽기", "https://example.com 페이지를 읽고 한 문단으로 요약해 줘"),
 )
 
-/** 둘러보기: example goals. Tapping one opens a new conversation with the text typed in, ready to edit. */
+/** A tool the agent really has (names match the server's tool registry). */
+private data class ToolEntry(val name: String, val what: String, val risk: Int, val note: String)
+
+private val TOOLS = listOf(
+    ToolEntry("fs.list", "폴더 안의 파일 목록 보기", 1, "작업 폴더 안에서만"),
+    ToolEntry("fs.read", "파일 내용 읽기", 1, "작업 폴더 안에서만, 비밀값은 가려서 모델에 전달"),
+    ToolEntry("fs.write", "파일 새로 만들기 / 덮어쓰기", 2, "작업 폴더 안에서만"),
+    ToolEntry("fs.delete", "파일 삭제", 3, "휴지통을 거치지 않음. 되돌릴 수 없음"),
+    ToolEntry("http.get", "웹 주소 읽기", 2, "내부망 주소 차단. 작업 폴더를 읽은 뒤에는 승인 요청"),
+    ToolEntry("http.post", "외부 서버로 데이터 보내기", 3, "보내는 내용을 승인 카드에 그대로 표시"),
+    ToolEntry("sandbox.exec", "격리된 컨테이너에서 명령 실행", 3, "Docker 필요. 이 기기에서는 아직 검증하지 못함"),
+)
+
+private data class Planned(val name: String, val what: String)
+
+/** Not built yet. Shown so nobody assumes they work. */
+private val PLANNED = listOf(
+    Planned("MCP 서버", "외부 도구 서버(캘린더, 메신저, 코드 저장소 등)를 연결하는 표준 방식"),
+    Planned("스킬", "반복 작업을 묶어 둔 절차 모음"),
+    Planned("메신저·메일", "받은 메시지를 읽고 답장 초안 만들기"),
+    Planned("예약 실행", "정해진 시각에 작업 시작"),
+)
+
+/** 둘러보기: what Aeon can do today (real tools), what is not built yet, and example goals to start from. */
 @Composable
 fun ExploreScreen(model: AppModel, modifier: Modifier = Modifier) {
     val s = LocalAeonStatus.current
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("이런 일을 시켜 볼 수 있어요", style = MaterialTheme.typography.titleMedium)
-        Text("예시 문구입니다. 눌러서 고친 뒤 보내세요. 삭제나 명령 실행은 먼저 물어봅니다.", style = MaterialTheme.typography.bodySmall, color = s.fg3)
+        SectionLabel("바로 시켜 보기")
+        Text("눌러서 고친 뒤 보내세요. 삭제·전송·명령 실행은 먼저 물어봅니다.", style = MaterialTheme.typography.bodySmall, color = s.fg3)
         EXAMPLES.forEach { e ->
             Card(Modifier.clickable { model.startWith(e.text) }) {
                 Text(e.title, style = MaterialTheme.typography.titleMedium)
                 Text(e.text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        SectionLabel("에이전트가 쓰는 도구 (연결됨)")
+        TOOLS.forEach { t ->
+            Card {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(t.name, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                    val (label, color) = when (t.risk) { 1 -> "위험 낮음" to s.ok; 2 -> "위험 보통" to s.warn; else -> "위험 높음" to s.danger }
+                    Text(label, color = color, style = MaterialTheme.typography.labelMedium)
+                }
+                Text(t.what, style = MaterialTheme.typography.bodyMedium)
+                Text(t.note, style = MaterialTheme.typography.bodySmall, color = s.fg3)
+            }
+        }
+        SectionLabel("아직 연결되지 않음")
+        Text("아래는 만들지 않은 기능입니다. 지금은 쓸 수 없습니다.", style = MaterialTheme.typography.bodySmall, color = s.fg3)
+        PLANNED.forEach { p ->
+            Card {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(p.name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                    Text("아직 없음", color = s.fg3, style = MaterialTheme.typography.labelMedium)
+                }
+                Text(p.what, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
