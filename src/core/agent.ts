@@ -204,7 +204,8 @@ export class Agent implements TaskRunner {
     // Once anything workspace-derived has been shown to the model, outgoing requests could leak it.
     // Judged on whether the tool actually ran, not on whether it succeeded: a failed command or a partial
     // read still shows workspace-derived text to the model.
-    const tainted = steps.some((s) => s.executed === true && this.cfg.tools.get(s.tool)?.exposesWorkspaceData === true);
+    // `executed` is missing on steps persisted before the field existed: unknown counts as executed (fail closed).
+    const tainted = steps.some((s) => s.executed !== false && this.cfg.tools.get(s.tool)?.exposesWorkspaceData === true);
     const decision = this.cfg.policy.evaluate({ tool: tool.name, assessment, tainted });
     await ctx.audit("tool_requested", {
       tool: tool.name,

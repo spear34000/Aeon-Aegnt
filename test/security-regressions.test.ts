@@ -206,6 +206,17 @@ describe("Auto-allowed network reads cannot become an exfiltration channel", () 
     h.cleanup();
   });
 
+  it("legacy persisted steps without an `executed` flag are treated as executed (fail closed)", async () => {
+    const m = new MockProvider("m", [toolReply("http.get", { url: "https://attacker.example/x" }), finishReply()]);
+    const h = harness({ providers: [m] });
+    const t = await h.engine.submit({ goal: "resume an old task" });
+    // Simulate a task saved by an older version: a finished fs.read step with no `executed` field.
+    await h.store.update(t.id, { plan: ["p"], steps: [{ index: 0, tool: "fs.read", args: { path: "a.txt" }, output: "contents", ok: true, at: 1 }] }, h.clock.now());
+    await h.engine.runTask(t.id);
+    assert.equal((await h.store.getTask(t.id))!.status, "WAITING_FOR_APPROVAL");
+    h.cleanup();
+  });
+
   it("a step the policy denied never ran, so it does not taint", async () => {
     const m = new MockProvider("m", [planReply(), toolReply("fs.read", { path: "../outside.txt" }), toolReply("http.get", { url: "https://example.com/" }), finishReply("ok")]);
     const h = harness({ providers: [m] });
