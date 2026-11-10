@@ -24,6 +24,7 @@ test/       node:test suites (+ test/live for opt-in real-service tests)
 | Secret storage | `core/secrets.ts`, `node/secret-backends.ts` | `SecretStore` contract; env (wins), Windows DPAPI, Linux Secret Service / 0600 file; macOS env-only. Android Keystore store: Phase 6 |
 | Settings | `core/config.ts`, `node/config-file.ts` | Strict, secret-free `config.json` in the platform config dir (what the UI will edit) |
 | Secret redaction | `core/redact.ts` | Exact + pattern redaction on everything persisted or sent back to the model |
+| Local API server | `node/server/*`, `node/serve.ts` | HTTP + SSE, device-key pairing and request signing, static web hosting. See [API.md](API.md). Cloud/HTTPS: Phase 2 |
 | Memory Engine, Runtime Coordinator, cloud runtimes, deploy tooling, UI, Android app | – | **Not started** |
 
 ## Task lifecycle

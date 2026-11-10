@@ -9,6 +9,8 @@ export interface ToolAssessment {
   resources: string[];
   /** Set by the tool when args are out of its allowed scope (path escape, private network, ...). */
   violation?: string;
+  /** The request can carry data to a remote host (e.g. a URL with a query string). */
+  exfilRisk?: boolean;
 }
 
 export interface ToolContext {

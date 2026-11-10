@@ -111,6 +111,8 @@ export function parseCriterion(raw: unknown, source: CriterionSource): Verificat
         ? { kind: "file_sha256", path: o.path, sha256: o.sha256, source }
         : null;
     case "http_status":
+      // A model-chosen URL would be fetched outside the policy engine (SSRF / data exfiltration path).
+      if (source === "model") return null;
       return typeof o.url === "string" && typeof o.status === "number"
         ? { kind: "http_status", url: o.url, status: o.status, source }
         : null;

@@ -201,7 +201,8 @@ export class Agent implements TaskRunner {
     if (!tool) return finish(`ERROR: tool no longer available: ${p.tool}`, false);
 
     const assessment = tool.assess(p.args);
-    const decision = this.cfg.policy.evaluate({ tool: tool.name, assessment });
+    const tainted = steps.some((s) => s.ok && s.tool === "fs.read");
+    const decision = this.cfg.policy.evaluate({ tool: tool.name, assessment, tainted });
     await ctx.audit("tool_requested", {
       tool: tool.name,
       risk: assessment.risk,

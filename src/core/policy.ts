@@ -14,6 +14,11 @@ export interface PolicyRule {
 export interface PolicyDecisionInput {
   tool: string;
   assessment: ToolAssessment;
+  /**
+   * True once the task has read workspace content. After that, even "read-only" network requests can
+   * leak what was read (to an attacker-chosen host, e.g. after a prompt injection), so they need approval.
+   */
+  tainted?: boolean;
 }
 
 export interface PolicyDecision {
@@ -39,6 +44,10 @@ export class PolicyEngine {
     for (const r of this.rules) {
       if (!matchesTool(r.tool, input.tool)) continue;
       if (r.risks && !r.risks.includes(input.assessment.risk)) continue;
+      if (r.effect === "allow" && input.assessment.risk === "network_read") {
+        if (input.assessment.exfilRisk) return { effect: "ask", reason: "request carries data in its URL (query/fragment)" };
+        if (input.tainted) return { effect: "ask", reason: "network request after reading workspace content could leak it" };
+      }
       return { effect: r.effect, reason: r.reason ?? `rule for ${r.tool}` };
     }
     return { effect: "deny", reason: "no matching allow rule (deny-by-default)" };

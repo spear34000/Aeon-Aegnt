@@ -5,8 +5,10 @@ import { parseConfig, type AeonConfig } from "../core/config.ts";
 import { assertSecretName } from "../core/secrets.ts";
 import { loadConfig, saveConfig } from "./config-file.ts";
 import { configDir } from "./platform-paths.ts";
-import { createRuntime } from "./runtime.ts";
+import { bootRuntime } from "./bootstrap.ts";
+import type { createRuntime } from "./runtime.ts";
 import { defaultSecretStore } from "./secret-backends.ts";
+import { serveCommand } from "./serve.ts";
 
 const HELP = `aeon - continuity-first personal agent (Phase 1, local runtime)
 
@@ -21,6 +23,7 @@ Commands:
   approve <approvalId> | deny <approvalId>
   cancel <taskId> | verify <taskId> | confirm <taskId>
   usage                      model calls recorded so far
+  serve [--host H] [--port N] [--web DIR]   start the local API server for the web/Windows/Android UIs
   secrets set NAME           store a secret (value read from a hidden prompt or stdin, never from argv)
   secrets list | delete NAME names only; values are never printed
   config show                print saved settings (no secrets)
@@ -56,6 +59,9 @@ async function main(): Promise<number> {
       "yes-consent": { type: "boolean", default: false },
       check: { type: "string", multiple: true, default: [] },
       at: { type: "string" },
+      host: { type: "string", default: "127.0.0.1" },
+      port: { type: "string", default: "7421" },
+      web: { type: "string" },
       help: { type: "boolean", default: false },
     },
   });
@@ -67,33 +73,15 @@ async function main(): Promise<number> {
   const cfgDir = configDir();
   if (cmd === "secrets") return secretsCommand(arg, positionals[2], cfgDir);
   if (cmd === "config") return configCommand(arg, positionals.slice(2), cfgDir);
+  if (cmd === "serve") return serveCommand({ cfgDir, workspace: values.workspace!, host: values.host!, port: Number(values.port), web: values.web });
 
-  const saved = loadConfig(cfgDir);
   const list = (v: string) => v.split(",").map((x) => x.trim()).filter(Boolean);
-  const providers = values.providers !== undefined ? list(values.providers) : saved.providers;
-  const consent = values["yes-consent"] ? providers : values.consent !== undefined ? list(values.consent) : saved.dataConsent;
-  const fallback = values.fallback ?? saved.fallbackAllowed;
-
-  // Environment wins; otherwise fill from the platform secret store / saved settings.
-  const env: Record<string, string | undefined> = { ...process.env };
-  const store0 = await defaultSecretStore({ dir: cfgDir });
-  const need: Record<string, string> = { exaone: "EXAONE_API_KEY", "openai-compatible": "OPENAI_COMPAT_API_KEY" };
-  for (const p of providers) {
-    const name = need[p];
-    if (name && !env[name]) {
-      const v = await store0.get(name);
-      if (v) env[name] = v;
-    }
-  }
-  const fromCfg: [string, string | undefined][] = [
-    ["OLLAMA_MODEL", saved.ollamaModel],
-    ["OLLAMA_BASE_URL", saved.ollamaBaseUrl],
-    ["OPENAI_COMPAT_BASE_URL", saved.openaiCompatBaseUrl],
-    ["OPENAI_COMPAT_MODEL", saved.openaiCompatModel],
-  ];
-  for (const [k, v] of fromCfg) if (!env[k] && v) env[k] = v;
-
-  const rt = createRuntime({ workspace: values.workspace!, providers, fallbackAllowed: fallback, dataConsent: consent, env });
+  const { runtime: rt } = await bootRuntime(cfgDir, values.workspace!, {
+    ...(values.providers !== undefined ? { providers: list(values.providers) } : {}),
+    ...(values.consent !== undefined ? { dataConsent: list(values.consent) } : {}),
+    ...(values.fallback !== undefined ? { fallbackAllowed: values.fallback } : {}),
+    yesConsent: values["yes-consent"] ?? false,
+  });
   const { engine, store } = rt;
 
   switch (cmd) {
