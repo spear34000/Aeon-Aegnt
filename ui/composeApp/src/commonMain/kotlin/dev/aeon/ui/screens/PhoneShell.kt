@@ -8,6 +8,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -34,7 +35,11 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -56,6 +61,7 @@ import dev.aeon.ui.design.TaskStatusChip
 import dev.aeon.ui.platform.koreanClock
 import dev.aeon.ui.state.AppModel
 import dev.aeon.ui.state.Connection
+import dev.aeon.ui.state.SettingsPage
 import dev.aeon.ui.state.Section
 import dev.aeon.ui.state.UiState
 
@@ -96,7 +102,7 @@ fun PhoneLayout(state: UiState, model: AppModel) {
                     current == Section.Feed -> FeedScreen(state, model, Modifier.fillMaxSize())
                     current == Section.Explore -> ExploreScreen(model, Modifier.fillMaxSize())
                     current == Section.Tasks -> TaskList(state, model, Modifier.fillMaxSize())
-                    else -> SettingsScreen(state, model, Modifier.fillMaxSize(), title = "내 에이전트")
+                    else -> AgentHubScreen(state, model, Modifier.fillMaxSize())
                 }
             }
             PhoneBottomBar(current, state.pendingCount, model::go)
@@ -238,63 +244,134 @@ private val EXAMPLES = listOf(
     Example("웹 페이지 읽기", "https://example.com 페이지를 읽고 한 문단으로 요약해 줘"),
 )
 
-/** A tool the agent really has (names match the server's tool registry). */
-private data class ToolEntry(val name: String, val what: String, val risk: Int, val note: String)
+private enum class Cat(val label: String) { All("전체"), Files("파일"), Web("웹"), Run("실행"), Mail("메일·일정"), Dev("개발"), Chat("메신저") }
 
-private val TOOLS = listOf(
-    ToolEntry("fs.list", "폴더 안의 파일 목록 보기", 1, "작업 폴더 안에서만"),
-    ToolEntry("fs.read", "파일 내용 읽기", 1, "작업 폴더 안에서만, 비밀값은 가려서 모델에 전달"),
-    ToolEntry("fs.write", "파일 새로 만들기 / 덮어쓰기", 2, "작업 폴더 안에서만"),
-    ToolEntry("fs.delete", "파일 삭제", 3, "휴지통을 거치지 않음. 되돌릴 수 없음"),
-    ToolEntry("http.get", "웹 주소 읽기", 2, "내부망 주소 차단. 작업 폴더를 읽은 뒤에는 승인 요청"),
-    ToolEntry("http.post", "외부 서버로 데이터 보내기", 3, "보내는 내용을 승인 카드에 그대로 표시"),
-    ToolEntry("sandbox.exec", "격리된 컨테이너에서 명령 실행", 3, "Docker 필요. 이 기기에서는 아직 검증하지 못함"),
+/** One row of the connection list. `connected` means the agent really has it today; the rest are not built. */
+private data class Entry(val name: String, val what: String, val cat: Cat, val connected: Boolean, val mono: Boolean = false)
+
+private val ENTRIES = listOf(
+    Entry("fs.list", "폴더 안의 파일 목록 보기 · 위험 낮음", Cat.Files, true, true),
+    Entry("fs.read", "파일 내용 읽기 · 비밀값은 가려서 모델에 전달", Cat.Files, true, true),
+    Entry("fs.write", "파일 새로 만들기 / 덮어쓰기 · 위험 보통", Cat.Files, true, true),
+    Entry("fs.delete", "파일 삭제 · 휴지통 없음, 되돌릴 수 없음 · 위험 높음", Cat.Files, true, true),
+    Entry("http.get", "웹 주소 읽기 · 내부망 차단, 작업 폴더를 읽은 뒤에는 승인 요청", Cat.Web, true, true),
+    Entry("http.post", "외부 서버로 데이터 보내기 · 내용을 승인 카드에 표시 · 위험 높음", Cat.Web, true, true),
+    Entry("sandbox.exec", "격리된 컨테이너에서 명령 실행 · Docker 필요, 이 기기에서는 검증 못함", Cat.Run, true, true),
+    Entry("Gmail", "받은 메일 읽기, 답장 초안 만들기", Cat.Mail, false),
+    Entry("Google 캘린더", "일정 확인, 새 일정 추가", Cat.Mail, false),
+    Entry("네이버 메일", "받은 메시지함 관리", Cat.Mail, false),
+    Entry("Google 드라이브", "파일 찾기, 내용 요약", Cat.Files, false),
+    Entry("GitHub", "저장소, 이슈, 풀 리퀘스트 확인", Cat.Dev, false),
+    Entry("MCP 서버", "외부 도구 서버를 표준 방식으로 연결", Cat.Dev, false),
+    Entry("스킬", "반복 작업을 묶어 둔 절차 모음", Cat.Dev, false),
+    Entry("Slack", "채널 메시지 읽기, 답장 초안", Cat.Chat, false),
+    Entry("예약 실행", "정해진 시각에 작업 시작", Cat.Run, false),
 )
 
-private data class Planned(val name: String, val what: String)
+@Composable
+private fun LetterTile(text: String, connected: Boolean, size: Int = 44) {
+    val s = LocalAeonStatus.current
+    Box(
+        Modifier.size(size.dp).background(if (connected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp)),
+        contentAlignment = Alignment.Center,
+    ) { Text(text.take(1).uppercase(), color = if (connected) s.onAccentSoft else s.fg3, style = MaterialTheme.typography.titleMedium) }
+}
 
-/** Not built yet. Shown so nobody assumes they work. */
-private val PLANNED = listOf(
-    Planned("MCP 서버", "외부 도구 서버(캘린더, 메신저, 코드 저장소 등)를 연결하는 표준 방식"),
-    Planned("스킬", "반복 작업을 묶어 둔 절차 모음"),
-    Planned("메신저·메일", "받은 메시지를 읽고 답장 초안 만들기"),
-    Planned("예약 실행", "정해진 시각에 작업 시작"),
-)
-
-/** 둘러보기: what Aeon can do today (real tools), what is not built yet, and example goals to start from. */
+/**
+ * 둘러보기: the connection list. Top: what is connected now (the tools the agent really has) and category chips.
+ * Rows that are not built show "아직 없음" instead of a plus button, so nothing looks usable that is not.
+ */
 @Composable
 fun ExploreScreen(model: AppModel, modifier: Modifier = Modifier) {
     val s = LocalAeonStatus.current
-    Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        SectionLabel("바로 시켜 보기")
-        Text("눌러서 고친 뒤 보내세요. 삭제·전송·명령 실행은 먼저 물어봅니다.", style = MaterialTheme.typography.bodySmall, color = s.fg3)
+    var cat by remember { mutableStateOf(Cat.All) }
+    val connected = ENTRIES.filter { it.connected }
+    Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Column(
+            Modifier.padding(horizontal = 16.dp).fillMaxWidth().background(MaterialTheme.colorScheme.surface, RoundedCornerShape(AeonShape.CARD.dp)).padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text("키는 이 PC의 보안 저장소에만 둡니다", style = MaterialTheme.typography.titleSmall)
+            Text("패키지나 저장소에는 넣지 않습니다.", style = MaterialTheme.typography.bodySmall, color = s.fg3)
+        }
+        Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Cat.entries.forEach { c ->
+                val sel = c == cat
+                Box(
+                    Modifier.background(if (sel) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(50))
+                        .clickable { cat = c }.padding(horizontal = 16.dp, vertical = 8.dp),
+                ) { Text(c.label, color = if (sel) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.labelLarge) }
+            }
+        }
+        Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("연결됨", style = MaterialTheme.typography.titleSmall)
+            Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                connected.forEach { LetterTile(it.name, true, 32) }
+            }
+            Text("${connected.size}", color = s.fg3, style = MaterialTheme.typography.bodyMedium)
+        }
+        ENTRIES.filter { cat == Cat.All || it.cat == cat }.forEach { e ->
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                LetterTile(e.name, e.connected)
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(e.name, fontFamily = if (e.mono) FontFamily.Monospace else null, style = MaterialTheme.typography.titleSmall)
+                    Text(e.what, style = MaterialTheme.typography.bodySmall, color = s.fg3)
+                }
+                Text(if (e.connected) "연결됨" else "아직 없음", color = if (e.connected) s.ok else s.fg3, style = MaterialTheme.typography.labelMedium)
+            }
+        }
+        SectionLabel("바로 시켜 보기", Modifier.padding(horizontal = 16.dp))
         EXAMPLES.forEach { e ->
-            Card(Modifier.clickable { model.startWith(e.text) }) {
+            Card(Modifier.padding(horizontal = 16.dp).clickable { model.startWith(e.text) }) {
                 Text(e.title, style = MaterialTheme.typography.titleMedium)
                 Text(e.text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        SectionLabel("에이전트가 쓰는 도구 (연결됨)")
-        TOOLS.forEach { t ->
-            Card {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(t.name, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-                    val (label, color) = when (t.risk) { 1 -> "위험 낮음" to s.ok; 2 -> "위험 보통" to s.warn; else -> "위험 높음" to s.danger }
-                    Text(label, color = color, style = MaterialTheme.typography.labelMedium)
-                }
-                Text(t.what, style = MaterialTheme.typography.bodyMedium)
-                Text(t.note, style = MaterialTheme.typography.bodySmall, color = s.fg3)
-            }
+    }
+}
+
+/** 내 에이전트: summary cards (usage, where keys live, tools, server), then rows that open the settings pages. */
+@Composable
+fun AgentHubScreen(state: UiState, model: AppModel, modifier: Modifier = Modifier) {
+    val s = LocalAeonStatus.current
+    var inSettings by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { model.loadSettings() }
+    if (inSettings) {
+        Column(modifier.fillMaxSize()) {
+            Text("‹ 내 에이전트", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge, modifier = Modifier.clickable { inSettings = false }.padding(horizontal = 16.dp, vertical = 10.dp))
+            SettingsScreen(state, model, Modifier.weight(1f), title = "설정")
         }
-        SectionLabel("아직 연결되지 않음")
-        Text("아래는 만들지 않은 기능입니다. 지금은 쓸 수 없습니다.", style = MaterialTheme.typography.bodySmall, color = s.fg3)
-        PLANNED.forEach { p ->
-            Card {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(p.name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                    Text("아직 없음", color = s.fg3, style = MaterialTheme.typography.labelMedium)
-                }
-                Text(p.what, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        return
+    }
+    val ok = state.usage.filter { it.ok }
+    Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Card {
+            Text("모델 호출", style = MaterialTheme.typography.titleMedium)
+            Text("${ok.size}번 · 입력+출력 ${ok.sumOf { it.inputTokens + it.outputTokens }} 토큰", style = MaterialTheme.typography.bodyLarge)
+            Text("사용량 한도는 Aeon이 두지 않습니다. 모델 제공업체의 한도를 따릅니다.", style = MaterialTheme.typography.bodySmall, color = s.fg3)
+        }
+        Card {
+            Text("개인 정보 보관", style = MaterialTheme.typography.titleMedium)
+            Text("키 저장 위치: ${state.status?.secretsBackend ?: "확인 중"}", style = MaterialTheme.typography.bodyMedium)
+            Text("패키지와 저장소에는 키가 없습니다.", style = MaterialTheme.typography.bodySmall, color = s.fg3)
+        }
+        Card(Modifier.clickable { model.go(Section.Explore) }) {
+            Text("연결된 도구 7개", style = MaterialTheme.typography.titleMedium)
+            Text("에이전트가 실제로 쓰는 도구는 둘러보기에서 볼 수 있습니다.", style = MaterialTheme.typography.bodySmall, color = s.fg3)
+        }
+        Card {
+            Text("서버", style = MaterialTheme.typography.titleMedium)
+            Text(state.serverUrl, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+        }
+        SectionLabel("설정")
+        listOf("모델" to SettingsPage.Models, "API 키" to SettingsPage.Keys, "연결된 기기" to SettingsPage.Devices, "사용량" to SettingsPage.Usage, "정보 · 연결 해제" to SettingsPage.About).forEach { (label, page) ->
+            Row(
+                Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface, RoundedCornerShape(AeonShape.CARD.dp))
+                    .clickable { model.openSettings(page); inSettings = true }.padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                Text("›", color = s.fg3, style = MaterialTheme.typography.titleMedium)
             }
         }
     }
