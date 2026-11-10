@@ -12,6 +12,8 @@ The UI now follows the UX Pilot design export (two revisions, the second with a 
 
 Design items implemented: 4-4-4-4 pairing input (80-bit code), HTTP acknowledgement, web block screen off-localhost, five tool names, irreversible line on deletes, absolute expiry over one hour and countdown under, approval card rules (deny by default focus, allow after 1 s, same-size buttons), verification badges with words, agent report labelled as the agent's words, save bar for model settings, device list with revoke confirmation, Pretendard (Regular and SemiBold), light and dark tokens, Material icons instead of text glyphs (the web font lacks the symbols).
 
+Phone navigation (changed 2026-11-11 at the owner's request, modelled on the Pickle app): five icon-only bottom tabs in the order 대화, 피드, 둘러보기, 작업, 내 에이전트 (spoken labels for screen readers). A hamburger at the top left slides the chat list in from the left over 70% of the width; the rest is dimmed and tapping it closes the drawer. Approvals are reached from 피드, a badge on its icon and the "승인 N" chip in the top bar. 피드 shows pending approvals and recent task activity, built from existing data (the server has no feed concept). 둘러보기 offers four static example goals that fill the composer. 내 에이전트 holds the settings. The wide layout (Windows, web at 1100dp and up) still uses the sidebar. Checked on the Android emulator; not yet on a physical phone.
+
 Deviations (what the design asks that is not built, or was built differently):
 
 - A conversation is one task. Multi-turn chat is not implemented; the "new conversation" composer creates a task.
@@ -33,7 +35,7 @@ All UIs share one Kotlin codebase (`ui/composeApp`): API client, request signing
 |---|---|---|---|
 | **Windows** (Compose Desktop) | sidebar 220 + list 380 + conversation, window title shows how many approvals are waiting | ECDSA P-256 key encrypted with Windows DPAPI (current user) | **Built; launched and run on Windows 11.** Not yet packaged as an installer |
 | **Web** (Compose for Web, Kotlin/Wasm) | adaptive: 1100dp and up = wide layout, below = bottom tabs | non-extractable WebCrypto key in IndexedDB | **Built and exercised in a real browser against the real server** (pairing, creating a task, wide and phone layouts) |
-| **Android** (Compose) | bottom tabs 대화 · 작업 · 승인 · 설정 | Android Keystore (hardware-backed where available) | **Built and run on an API 37 emulator** (second implementation). Not signed or published |
+| **Android** (Compose) | icon-only bottom tabs 대화 · 피드 · 둘러보기 · 작업 · 내 에이전트, hamburger chat drawer | Android Keystore (hardware-backed where available) | **Built and run on an API 37 emulator** (second implementation). Not signed or published |
 | macOS | – | – | CLI only (D11) |
 
 ## Build and run
