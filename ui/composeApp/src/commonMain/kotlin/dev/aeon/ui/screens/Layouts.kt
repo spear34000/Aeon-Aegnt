@@ -82,7 +82,8 @@ fun WideLayout(state: UiState, model: AppModel) {
                     }
                 }
                 Section.Approvals -> Box(Modifier.weight(1f).fillMaxHeight()) { ApprovalsPanel(state, model) }
-                Section.Settings -> Box(Modifier.weight(1f).fillMaxHeight()) { SettingsScreen(state, model) }
+                Section.Settings, Section.Agent -> Box(Modifier.weight(1f).fillMaxHeight()) { SettingsScreen(state, model) }
+                Section.Feed, Section.Explore -> Box(Modifier.weight(1f).fillMaxHeight()) { FeedScreen(state, model) }
             }
         }
     }
@@ -136,53 +137,3 @@ private fun NavItem(label: String, selected: Boolean, rail: Boolean, onClick: ()
     }
 }
 
-/**
- * Phone layout (design 06): bottom tabs 대화 · 작업 · 승인 · 설정. Task detail covers the screen with a back button.
- */
-@Composable
-fun PhoneLayout(state: UiState, model: AppModel) {
-    Column(Modifier.fillMaxSize()) {
-        Box(Modifier.weight(1f).fillMaxWidth()) {
-            when {
-                state.showDetail && state.selectedTaskId != null -> TaskDetailPanel(state, model, onBack = { model.closeDetail() }, modifier = Modifier.fillMaxSize())
-                state.section == Section.Chat -> ConversationScreen(state, model, wide = false, modifier = Modifier.fillMaxSize())
-                state.section == Section.Tasks -> TaskList(state, model, Modifier.fillMaxSize())
-                state.section == Section.Approvals -> ApprovalsPanel(state, model, Modifier.fillMaxSize())
-                else -> SettingsScreen(state, model, Modifier.fillMaxSize())
-            }
-        }
-        BottomTabs(state, model)
-    }
-}
-
-@Composable
-private fun BottomTabs(state: UiState, model: AppModel) {
-    Row(
-        Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(vertical = 6.dp),
-        horizontalArrangement = Arrangement.SpaceAround,
-    ) {
-        Tab("대화", "Æ", state.section == Section.Chat && !state.showDetail) { model.go(Section.Chat); model.newConversation() }
-        Tab("작업", "☰", state.section == Section.Tasks) { model.go(Section.Tasks) }
-        Tab(if (state.pendingCount > 0) "승인 ${state.pendingCount}" else "승인", "✋", state.section == Section.Approvals) { model.go(Section.Approvals) }
-        Tab("설정", "⚙", state.section == Section.Settings) { model.openSettings(SettingsPage.Models) }
-    }
-}
-
-@Composable
-private fun Tab(label: String, icon: String, selected: Boolean, onClick: () -> Unit) {
-    val s = LocalAeonStatus.current
-    Column(
-        Modifier.clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 4.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(2.dp),
-    ) {
-        Box(
-            Modifier.size(width = 56.dp, height = 28.dp)
-                .background(if (selected) MaterialTheme.colorScheme.primaryContainer else androidx.compose.ui.graphics.Color.Transparent, RoundedCornerShape(14.dp)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Glyph(icon, color = if (selected) s.onAccentSoft else s.fg3, style = MaterialTheme.typography.labelLarge)
-        }
-        Text(label, style = MaterialTheme.typography.labelMedium, color = if (selected) MaterialTheme.colorScheme.onSurface else s.fg3)
-    }
-}

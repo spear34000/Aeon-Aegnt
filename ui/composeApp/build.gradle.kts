@@ -41,6 +41,7 @@ kotlin {
             implementation(compose.runtime)
             implementation(compose.foundation)
             implementation(compose.components.resources)
+            implementation(compose.animation)
             implementation("org.jetbrains.compose.material:material-icons-core:1.7.3")
             implementation(compose.material3)
             implementation(compose.ui)

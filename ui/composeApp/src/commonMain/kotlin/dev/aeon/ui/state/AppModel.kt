@@ -31,7 +31,7 @@ sealed interface Connection {
 }
 
 /** Which main area is visible. The conversation is the default place (design: chat-first). */
-enum class Section { Chat, Tasks, Approvals, Settings }
+enum class Section { Chat, Feed, Explore, Tasks, Agent, Approvals, Settings }
 
 enum class SettingsPage { Models, Keys, Devices, Usage, About }
 
@@ -61,6 +61,10 @@ data class UiState(
     val busy: Boolean = false,
     /** Monotonic time (ms) when the approval list was last seen with a new card; used for the 1 s allow delay. */
     val approvalSeenAt: Map<String, Long> = emptyMap(),
+    /** Phone: the chat list slides in from the left over the screen. */
+    val drawerOpen: Boolean = false,
+    /** Text to put in the composer when a new conversation starts from an example. */
+    val prefill: String? = null,
 ) {
     val pendingCount: Int get() = approvals.count { it.status == "pending" }
 
@@ -114,7 +118,15 @@ class AppModel(
         poller = null
     }
 
-    fun go(section: Section) = _state.update { it.copy(section = section, showDetail = false) }
+    fun go(section: Section) = _state.update { it.copy(section = section, showDetail = false, drawerOpen = false) }
+
+    fun openDrawer() = _state.update { it.copy(drawerOpen = true) }
+    fun closeDrawer() = _state.update { it.copy(drawerOpen = false) }
+
+    /** Starts a new conversation with [text] already typed, so the owner can edit it before sending. */
+    fun startWith(text: String) = _state.update { it.copy(section = Section.Chat, selectedTaskId = null, selectedTask = null, showDetail = false, drawerOpen = false, prefill = text) }
+
+    fun consumePrefill() = _state.update { it.copy(prefill = null) }
 
     fun openSettings(page: SettingsPage) {
         _state.update { it.copy(section = Section.Settings, settingsPage = page, showDetail = false) }
@@ -123,7 +135,7 @@ class AppModel(
     }
 
     /** Clears the current selection and shows the new-conversation composer. */
-    fun newConversation() = _state.update { it.copy(section = Section.Chat, selectedTaskId = null, selectedTask = null, showDetail = false) }
+    fun newConversation() = _state.update { it.copy(section = Section.Chat, selectedTaskId = null, selectedTask = null, showDetail = false, drawerOpen = false) }
 
     fun pair(serverUrl: String, code: String) {
         scope.launch {
@@ -217,7 +229,7 @@ class AppModel(
     }
 
     fun selectTask(id: String?, asDetail: Boolean = false) {
-        _state.update { it.copy(selectedTaskId = id, selectedTask = null, showDetail = asDetail, section = Section.Chat) }
+        _state.update { it.copy(selectedTaskId = id, selectedTask = null, showDetail = asDetail, section = Section.Chat, drawerOpen = false) }
         if (id != null) scope.launch { runCatching { client.task(id) }.onSuccess { d -> _state.update { it.copy(selectedTask = d) } } }
     }
 

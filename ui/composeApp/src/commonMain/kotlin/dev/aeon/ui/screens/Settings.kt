@@ -60,10 +60,10 @@ private val PROVIDERS = listOf(
 )
 
 @Composable
-fun SettingsScreen(state: UiState, model: AppModel, modifier: Modifier = Modifier) {
+fun SettingsScreen(state: UiState, model: AppModel, modifier: Modifier = Modifier, title: String = "설정") {
     LaunchedEffect(Unit) { model.loadSettings() }
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Text("설정", style = MaterialTheme.typography.titleLarge)
+        Text(title, style = MaterialTheme.typography.titleLarge)
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             SettingsPage.entries.forEach { p ->
                 val label = when (p) {

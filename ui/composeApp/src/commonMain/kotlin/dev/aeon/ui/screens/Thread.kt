@@ -144,7 +144,8 @@ fun ConversationScreen(state: UiState, model: AppModel, wide: Boolean, modifier:
 
         Composer(
             enabled = !offline,
-            onSend = { text -> model.createTask(text, emptyList()) },
+            initialText = state.prefill.orEmpty(),
+            onSend = { text -> model.createTask(text, emptyList()); model.consumePrefill() },
             hint = if (offline) "연결되면 보낼 수 있습니다." else null,
             modifier = Modifier.widthIn(max = 720.dp).fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
         )
@@ -233,8 +234,8 @@ private fun QuotaCard(d: TaskDetail, model: AppModel) {
 
 /** Composer: multi-line field, send button, Enter sends and Shift+Enter adds a line (desktop keyboards). */
 @Composable
-fun Composer(enabled: Boolean, onSend: (String) -> Unit, hint: String?, modifier: Modifier = Modifier) {
-    var text by remember { mutableStateOf("") }
+fun Composer(enabled: Boolean, onSend: (String) -> Unit, hint: String?, modifier: Modifier = Modifier, initialText: String = "") {
+    var text by remember(initialText) { mutableStateOf(initialText) }
     val s = LocalAeonStatus.current
     val canSend = enabled && text.isNotBlank()
     fun send() {
