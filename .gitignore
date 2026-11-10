@@ -4,3 +4,9 @@ node_modules/
 *.db-*
 .env
 .env.*
+ui/build/
+ui/.gradle/
+ui/.kotlin/
+ui/**/build/
+local.properties
+*.class

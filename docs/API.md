@@ -5,7 +5,7 @@ Loopback by default. Binding a LAN address is opt-in and prints a warning: reque
 
 ## Pairing (decision D6)
 
-1. The owner sees a one-time code in the server console (`pair` + Enter for a new one): 20 base32 characters, valid 5 minutes, single use. 5 wrong attempts burn all codes and lock pairing for 60 s.
+1. The owner sees a one-time code in the server console (`pair` + Enter for a new one): 19 base32 characters (95 random bits), valid 5 minutes, single use. 5 wrong attempts burn all codes and lock pairing for 60 s.
 2. The device creates an **ECDSA P-256** key pair (Android Keystore / WebCrypto non-extractable / JVM) and calls
    `POST /v1/pair` with `{ deviceName, publicKey (base64 SPKI DER), clientNonce (base64, 16+ bytes), proof }`
    where `proof = base64(HMAC-SHA256(key = code (normalised: letters/digits only, upper case), "aeon-pair-client|" + deviceName + "|" + publicKey + "|" + clientNonce))`.
