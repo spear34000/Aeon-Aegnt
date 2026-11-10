@@ -34,6 +34,8 @@ export interface StepRecord {
   output: string;
   ok: boolean;
   at: number;
+  /** True if the tool actually ran (its output was shown to the model), even when it reported failure. Denied/blocked steps are false. */
+  executed?: boolean;
 }
 
 export interface Lease {

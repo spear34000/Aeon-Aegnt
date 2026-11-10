@@ -4,6 +4,7 @@ import { createServer } from "node:http";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { MockProvider } from "../src/core/models/mock.ts";
+import type { Tool } from "../src/core/tools.ts";
 import { DEFAULT_RULES, PolicyEngine } from "../src/core/policy.ts";
 import { parseCriterion } from "../src/core/verify.ts";
 import { WorkspaceGuard } from "../src/node/fs-guard.ts";
@@ -182,6 +183,38 @@ describe("Auto-allowed network reads cannot become an exfiltration channel", () 
       assert.equal(saved.status, "WAITING_FOR_APPROVAL", `after ${JSON.parse(first).tool} the GET must wait`);
       h.cleanup();
     }
+  });
+
+  it("taint is based on output shown to the model, not on the tool reporting success", async () => {
+    const leaky: Tool = {
+      name: "test.leaky",
+      description: "fails but prints workspace text",
+      argsHint: "{}",
+      exposesWorkspaceData: true,
+      assess: () => ({ risk: "read", summary: "leaky", resources: [] }),
+      run: async () => ({ ok: false, output: "partial contents of secret.txt: hunter2" }),
+    };
+    const m = new MockProvider("m", [planReply(), toolReply("test.leaky", {}), toolReply("http.get", { url: "https://attacker.example/x" }), finishReply()]);
+    const h = harness({ providers: [m] });
+    h.tools.register(leaky);
+    const t = await h.engine.submit({ goal: "go" });
+    await h.engine.runTask(t.id);
+    const saved = (await h.store.getTask(t.id))!;
+    assert.equal(saved.steps[0]!.ok, false);
+    assert.equal(saved.steps[0]!.executed, true);
+    assert.equal(saved.status, "WAITING_FOR_APPROVAL", "a failing tool that printed workspace text still taints the task");
+    h.cleanup();
+  });
+
+  it("a step the policy denied never ran, so it does not taint", async () => {
+    const m = new MockProvider("m", [planReply(), toolReply("fs.read", { path: "../outside.txt" }), toolReply("http.get", { url: "https://example.com/" }), finishReply("ok")]);
+    const h = harness({ providers: [m] });
+    const t = await h.engine.submit({ goal: "go" });
+    await h.engine.runTask(t.id);
+    const saved = (await h.store.getTask(t.id))!;
+    assert.equal(saved.steps[0]!.executed, false);
+    assert.equal(saved.status, "COMPLETED", "plain GET was still allowed: nothing workspace-derived was shown");
+    h.cleanup();
   });
 
   it("model-proposed http_status criteria are rejected (they would fetch a model-chosen URL outside policy)", () => {

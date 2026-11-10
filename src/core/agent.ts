@@ -193,8 +193,8 @@ export class Agent implements TaskRunner {
     ctx: RunContext,
   ): Promise<{ kind: "recorded" } | { kind: "stop"; outcome: RunOutcome }> {
     const tool = this.cfg.tools.get(p.tool);
-    const finish = async (output: string, ok: boolean) => {
-      steps.push(this.record(p.index, p.tool, p.args, output, ok));
+    const finish = async (output: string, ok: boolean, executed = false) => {
+      steps.push({ ...this.record(p.index, p.tool, p.args, output, ok), executed });
       await ctx.checkpoint({ steps, pendingAction: undefined });
       return { kind: "recorded" as const };
     };
@@ -202,7 +202,9 @@ export class Agent implements TaskRunner {
 
     const assessment = tool.assess(p.args);
     // Once anything workspace-derived has been shown to the model, outgoing requests could leak it.
-    const tainted = steps.some((s) => s.ok && this.cfg.tools.get(s.tool)?.exposesWorkspaceData === true);
+    // Judged on whether the tool actually ran, not on whether it succeeded: a failed command or a partial
+    // read still shows workspace-derived text to the model.
+    const tainted = steps.some((s) => s.executed === true && this.cfg.tools.get(s.tool)?.exposesWorkspaceData === true);
     const decision = this.cfg.policy.evaluate({ tool: tool.name, assessment, tainted });
     await ctx.audit("tool_requested", {
       tool: tool.name,
@@ -270,7 +272,7 @@ export class Agent implements TaskRunner {
       await ctx.putEffect(effectKey, JSON.stringify({ ok, output }));
     }
     if (looksLikeInjection(output)) await ctx.audit("injection_suspected", { tool: tool.name, index: p.index });
-    return finish(output, ok);
+    return finish(output, ok, true);
   }
 
   private record(index: number, tool: string, args: unknown, output: string, ok: boolean): StepRecord {
