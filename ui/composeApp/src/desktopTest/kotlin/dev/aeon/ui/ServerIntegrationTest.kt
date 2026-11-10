@@ -7,6 +7,7 @@ import dev.aeon.ui.api.AeonException
 import dev.aeon.ui.api.TaskDetail
 import dev.aeon.ui.platform.DesktopDeviceCrypto
 import io.ktor.client.HttpClient
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import java.io.File
@@ -162,6 +163,68 @@ class ServerIntegrationTest {
 
         assertEquals(409, assertFailsWith<AeonException> { client.decide(approvals[0].id, approve = false) }.status, "an approval can be decided only once")
         assertTrue(client.usage().isNotEmpty())
+    }
+
+    @Test
+    fun aFailedOrMaliciousPairingAttemptNeverRedirectsTheExistingSession() = runBlocking {
+        val fx = startAeon(startFakeModel(emptyList()))
+        val crypto = DesktopDeviceCrypto(Files.createTempDirectory("aeon-ui-model").toFile().also { d -> cleanup += { d.deleteRecursively() } })
+        val http = HttpClient().also { h -> cleanup += { h.close() } }
+        val client = AeonClient(fx.base, crypto, http)
+        val store = object : dev.aeon.ui.platform.KeyValueStore {
+            val m = mutableMapOf<String, String>()
+            override fun get(key: String) = m[key]
+            override fun put(key: String, value: String) { m[key] = value }
+            override fun remove(key: String) { m.remove(key) }
+        }
+        val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
+        cleanup += { scope.cancel() }
+        val model = dev.aeon.ui.state.AppModel(client, store, crypto, scope, pollMillis = 100)
+        model.pair(fx.base, fx.code)
+        waitFor { model.state.value.connection is dev.aeon.ui.state.Connection.Connected && model.state.value.status != null }
+        val pairedDevice = client.deviceId
+        assertTrue(pairedDevice.startsWith("dev_"))
+
+        // A hostile "server" that answers the pairing request with a bogus proof, and records every request header it sees.
+        val seen = ConcurrentLinkedQueue<String>()
+        val evil = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        evil.createContext("/") { ex ->
+            seen += ex.requestURI.path + " signed=" + (ex.requestHeaders.getFirst("x-aeon-signature") != null)
+            ex.requestBody.readBytes()
+            val body = """{"deviceId":"dev_evil","serverProof":"AAAA","serverName":"Evil"}""".toByteArray()
+            ex.sendResponseHeaders(201, body.size.toLong())
+            ex.responseBody.use { it.write(body) }
+        }
+        evil.start()
+        cleanup += { evil.stop(0) }
+
+        model.pair("http://127.0.0.1:${evil.address.port}", "AAAAA-AAAAA-AAAAA-AAAAA")
+        waitFor { !model.state.value.busy && model.state.value.message != null }
+        assertTrue(model.state.value.message!!.contains("could not prove"), model.state.value.message ?: "")
+        assertEquals(fx.base, client.baseUrl, "the real server address is restored")
+        assertEquals(pairedDevice, client.deviceId, "the real identity is restored")
+        assertEquals(fx.base, store.get("serverUrl"))
+
+        // Session still works, and the hostile server only ever saw the unsigned pairing request.
+        waitFor { model.state.value.connection is dev.aeon.ui.state.Connection.Connected }
+        delay(400)
+        assertEquals(listOf("/v1/pair signed=false"), seen.toList(), "no signed request ever left for the untrusted address")
+        assertEquals(pairedDevice, client.status().device)
+
+        // Pairing to an address that is simply down also keeps the session.
+        model.pair("http://127.0.0.1:1", "AAAAA-AAAAA-AAAAA-AAAAA")
+        waitFor { !model.state.value.busy && model.state.value.message != null }
+        assertEquals(fx.base, client.baseUrl)
+        model.stop()
+    }
+
+    private suspend fun waitFor(timeoutMs: Long = 15_000, cond: () -> Boolean) {
+        val end = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < end) {
+            if (cond()) return
+            delay(50)
+        }
+        error("condition not reached in ${timeoutMs}ms")
     }
 
     @Test

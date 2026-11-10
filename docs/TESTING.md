@@ -25,6 +25,15 @@ npm run test:live   # opt-in real-service tests, skipped unless enabled (see bel
 | Linux secret backends | Fake process runner + file fallback only; real `secret-tool` and POSIX `0600` check not run on this machine |
 | Real Ollama transport | one manual call to a local 135M test model succeeded at HTTP/parse level (not part of the suite). That model cannot follow the agent's JSON protocol (EXAONE can, see above) |
 
+## Kotlin UI evidence
+
+| Item | Evidence |
+|---|---|
+| `./gradlew :composeApp:desktopTest` | 8 tests pass: byte-exact signing/pairing vectors shared with the Node side, DPAPI key persistence (real Windows DPAPI), Kotlin client against the **real** `aeon serve` (pairing, signed requests, approval flow with real file deletion and verification, settings/secrets, revocation), hostile-server pairing attempt. Only the language model is faked |
+| Windows app | launched on Windows 11; window opened. Screens not inspected by automation (they share composables with the web build, which was inspected) |
+| Web UI | exercised by hand in the built-in browser against the real server: real WebCrypto pairing, task creation, wide and narrow layouts. Not automated; no DOM accessibility tree to automate against |
+| Android | **not built, not tested** |
+
 ## Master directive §11 mapping
 
 | Required test | Status | Evidence |

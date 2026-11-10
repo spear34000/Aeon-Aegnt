@@ -10,3 +10,4 @@ ui/.kotlin/
 ui/**/build/
 local.properties
 *.class
+!kotlin-js-store/

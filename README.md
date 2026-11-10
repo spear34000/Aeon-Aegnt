@@ -67,9 +67,13 @@ If you keep the key in a `.env` file (git-ignored), run the CLI with Node's load
 
 > **EXAONE terms apply to you.** Aeon ships the EXAONE client without any key (bring your own). The EXAONE API terms grant non-commercial rights, forbid sharing keys and letting third parties call the model through your product, and do not specifically address open-source BYOK apps (owner decision D9: published anyway). Read the [terms](https://docs.exaone.ai/ko/terms/terms-of-service) before use; do not use it commercially.
 
+## User interfaces (Kotlin)
+
+Windows (Compose Desktop) and web (Compose for Web) UIs are built; Android is waiting for the Android SDK. See [docs/UI.md](docs/UI.md).
+
 ## Local API for the UIs
 
-`node src/node/cli.ts serve` starts the signed, pairing-based [local API](docs/API.md) on `127.0.0.1:7421` (the web, Windows and Android UIs will use it; those UIs are **not built yet**). The server starts even before a key is configured.
+`node src/node/cli.ts serve` starts the signed, pairing-based [local API](docs/API.md) on `127.0.0.1:7421` (the Windows, web and later Android UIs use it). The server starts even before a key is configured.
 
 ## Commands
 

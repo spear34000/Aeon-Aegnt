@@ -83,8 +83,15 @@ class AppModel(
 
     fun pair(serverUrl: String, code: String) {
         scope.launch {
+            // Never let signed requests for the current pairing go to the address being tried: stop the poller,
+            // remember the current identity, and only switch after the server has proven it knew the code.
+            val previousUrl = client.baseUrl
+            val previousDevice = client.deviceId
+            val previousConnection = _state.value.connection
+            stop()
             _state.update { it.copy(busy = true, message = null, connection = Connection.Connecting) }
             try {
+                client.deviceId = ""
                 client.baseUrl = serverUrl.trim()
                 val res = client.pair(code, defaultDeviceName())
                 store.put(KEY_URL, client.baseUrl)
@@ -92,7 +99,18 @@ class AppModel(
                 _state.update { it.copy(serverUrl = client.baseUrl, connection = Connection.Connected(res.serverName), busy = false) }
                 startPolling()
             } catch (e: Exception) {
-                _state.update { it.copy(connection = Connection.Unpaired, busy = false, message = describe(e)) }
+                client.baseUrl = previousUrl
+                client.deviceId = previousDevice
+                val stillPaired = previousDevice.isNotEmpty()
+                _state.update {
+                    it.copy(
+                        connection = if (stillPaired) previousConnection else Connection.Unpaired,
+                        serverUrl = previousUrl,
+                        busy = false,
+                        message = describe(e),
+                    )
+                }
+                if (stillPaired) startPolling()
             }
         }
     }

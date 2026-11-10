@@ -31,6 +31,31 @@ internal fun desktopConfigDir(): File {
     return File(base, "ui")
 }
 
+private val posix: Boolean = java.nio.file.FileSystems.getDefault().supportedFileAttributeViews().contains("posix")
+
+/** Creates the directory (0700 on POSIX systems when newly created). */
+internal fun createPrivateDir(dir: File) {
+    if (dir.exists()) return
+    if (posix) {
+        java.nio.file.Files.createDirectories(
+            dir.toPath(),
+            java.nio.file.attribute.PosixFilePermissions.asFileAttribute(java.nio.file.attribute.PosixFilePermissions.fromString("rwx------")),
+        )
+    } else dir.mkdirs()
+}
+
+/** Writes secret bytes to a file that is owner-only from the moment it exists (POSIX); replaces any old file. */
+internal fun writeOwnerOnly(file: File, bytes: ByteArray) {
+    java.nio.file.Files.deleteIfExists(file.toPath())
+    if (posix) {
+        java.nio.file.Files.createFile(
+            file.toPath(),
+            java.nio.file.attribute.PosixFilePermissions.asFileAttribute(java.nio.file.attribute.PosixFilePermissions.fromString("rw-------")),
+        )
+    }
+    file.writeBytes(bytes)
+}
+
 /**
  * Windows: the private key (PKCS#8) is encrypted with DPAPI (current user + app entropy) before it touches disk,
  * using the same PowerShell-over-stdin scheme as the Node secret store; nothing secret appears in argv.
@@ -43,7 +68,7 @@ class DesktopDeviceCrypto(private val dir: File = desktopConfigDir()) : DeviceCr
 
     private fun load(): KeyPair {
         cached?.let { return it }
-        dir.mkdirs()
+        createPrivateDir(dir)
         val pair = if (keyFile.exists()) readKey() else newKey()
         cached = pair
         return pair
@@ -54,11 +79,7 @@ class DesktopDeviceCrypto(private val dir: File = desktopConfigDir()) : DeviceCr
         val pair = gen.generateKeyPair()
         val pkcs8 = pair.private.encoded
         if (isWindows) keyFile.writeText(dpapi("Protect", pkcs8.toBase64()))
-        else {
-            keyFile.writeBytes(pkcs8)
-            keyFile.setReadable(false, false); keyFile.setReadable(true, true)
-            keyFile.setWritable(false, false); keyFile.setWritable(true, true)
-        }
+        else writeOwnerOnly(keyFile, pkcs8) // created 0600 BEFORE any key byte is written (no permission race)
         return pair
     }
 

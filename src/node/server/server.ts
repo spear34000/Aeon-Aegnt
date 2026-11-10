@@ -37,6 +37,10 @@ const FRESHNESS_MS = 60_000;
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8", // Kotlin/Wasm and Skiko ship ES modules; browsers refuse them with another type
+  ".map": "application/json; charset=utf-8",
+  ".ico": "image/x-icon",
+  ".txt": "text/plain; charset=utf-8",
   ".css": "text/css; charset=utf-8",
   ".json": "application/json; charset=utf-8",
   ".svg": "image/svg+xml",
@@ -375,7 +379,8 @@ export class AeonServer {
       "x-content-type-options": "nosniff",
       "x-frame-options": "DENY",
       "referrer-policy": "no-referrer",
-      "content-security-policy": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'",
+      // 'wasm-unsafe-eval' lets the browser compile WebAssembly (the Kotlin web UI) without allowing eval() of strings.
+      "content-security-policy": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'",
     };
     if (!root || (method !== "GET" && method !== "HEAD")) {
       res.writeHead(404, headers).end("not found");
