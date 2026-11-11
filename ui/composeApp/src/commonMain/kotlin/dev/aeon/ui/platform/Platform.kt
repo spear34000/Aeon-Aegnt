@@ -20,7 +20,32 @@ interface DeviceCrypto {
 
     /** Forget the key pair (used when unpairing). */
     suspend fun reset()
+
+    /** ECDH P-256 with a one-time key pair against [peerSpki] (SPKI DER). Used to seal values for the server. */
+    suspend fun ecdh(peerSpki: ByteArray): EcdhResult
+
+    /** AES-256-GCM. Returns the ciphertext followed by the 16-byte tag. */
+    suspend fun aesGcmEncrypt(key: ByteArray, iv: ByteArray, plaintext: ByteArray, aad: ByteArray): ByteArray
+
+    /** AES-256-GCM. [data] is the ciphertext followed by the tag. Throws when the data or [aad] was changed. */
+    suspend fun aesGcmDecrypt(key: ByteArray, iv: ByteArray, data: ByteArray, aad: ByteArray): ByteArray
 }
+
+/** Our one-time public key (SPKI DER) and the 32-byte shared secret. */
+class EcdhResult(val publicKey: ByteArray, val shared: ByteArray)
+
+/** A file the owner chose to attach. */
+class PickedFile(val name: String, val bytes: ByteArray)
+
+/** Largest attachment the app will read into memory and send (the server's default limit). */
+const val MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
+
+/**
+ * Returns a function that opens the platform's file chooser. [onPicked] receives the file, or an error text
+ * (too large, unreadable). Nothing is called when the owner cancels.
+ */
+@androidx.compose.runtime.Composable
+expect fun rememberFilePicker(onPicked: (PickedFile?, String?) -> Unit): () -> Unit
 
 /** Small persistent string store for non-secret client state (server URL, device id). */
 interface KeyValueStore {

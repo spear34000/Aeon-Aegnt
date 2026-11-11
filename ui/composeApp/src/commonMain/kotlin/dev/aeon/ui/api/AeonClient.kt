@@ -34,6 +34,9 @@ class AeonClient(
         }
     var deviceId: String = ""
 
+    /** The server's sealing key (SPKI, base64), pinned while pairing. Empty for a pairing made before sealing existed. */
+    var serverKey: String = ""
+
     suspend fun hello(): HelloResponse = ApiJson.decodeFromString(plain(HttpMethod.Get, "/v1/hello", null))
 
     /** Pairs this device. Verifies the server's proof that it knew the code before trusting the result. */
@@ -46,6 +49,9 @@ class AeonClient(
         val res: PairResponse = ApiJson.decodeFromString(plain(HttpMethod.Post, "/v1/pair", body))
         val expected = crypto.hmacSha256(normalized.encodeToByteArray(), Signing.serverProofMessage(res.deviceId, clientNonce, publicKey).encodeToByteArray()).toBase64()
         if (expected != res.serverProof) throw AeonException(0, "The server could not prove it knows the pairing code. Do not trust this server.")
+        // Pin the sealing key only if the same pairing code vouches for it.
+        val key = res.serverKey
+        serverKey = if (key != null && res.serverKeyProof == crypto.hmacSha256(normalized.encodeToByteArray(), Sealing.serverKeyProofMessage(key, clientNonce, res.deviceId).encodeToByteArray()).toBase64()) key else ""
         deviceId = res.deviceId
         return res
     }
@@ -88,9 +94,63 @@ class AeonClient(
 
     suspend fun secretNames(): SecretsResponse = ApiJson.decodeFromString(signed(HttpMethod.Get, "/v1/secrets"))
 
-    /** Write-only. The server accepts this only from the machine it runs on. */
+    /**
+     * Write-only. The value is sealed for the server's key, so it can be typed on any paired device even though the
+     * connection is plain HTTP. A device paired before sealing existed can only do this on the server's own machine.
+     */
     suspend fun setSecret(name: String, value: String) {
-        signed(HttpMethod.Put, "/v1/secrets/$name", buildJsonObject { put("value", JsonPrimitive(value)) }.toString())
+        val body = if (serverKey.isNotEmpty()) {
+            val box = Sealing.seal(crypto, serverKey, value.encodeToByteArray(), "secret|$deviceId|$name")
+            buildJsonObject { put("sealed", ApiJson.encodeToJsonElement(SealedBox.serializer(), box)) }
+        } else {
+            buildJsonObject { put("value", JsonPrimitive(value)) }
+        }
+        signed(HttpMethod.Put, "/v1/secrets/$name", body.toString())
+    }
+
+    suspend fun providers(): ProvidersResponse = ApiJson.decodeFromString(signed(HttpMethod.Get, "/v1/providers"))
+
+    suspend fun providerModels(id: String): List<CatalogModel> =
+        ApiJson.decodeFromString<ProviderModelsResponse>(signed(HttpMethod.Get, "/v1/providers/$id/models")).models
+
+    /** Makes [model] of [provider] the model new tasks use. [consent] is the owner's yes to sending prompts there. */
+    suspend fun selectModel(provider: String, model: String, reasoningEffort: String?, consent: Boolean, customName: String? = null, customBaseUrl: String? = null, needsKey: Boolean = true): SelectModelResponse {
+        val body = buildJsonObject {
+            put("provider", provider)
+            put("model", model)
+            if (reasoningEffort != null) put("reasoningEffort", reasoningEffort)
+            if (consent) put("consent", true)
+            if (customBaseUrl != null) put("custom", buildJsonObject {
+                put("baseUrl", customBaseUrl)
+                if (customName != null) put("name", customName)
+                if (!needsKey) put("needsKey", false)
+            })
+        }
+        return ApiJson.decodeFromString(signed(HttpMethod.Post, "/v1/model", body.toString()))
+    }
+
+    /** Stores a file under `uploads/` in the workspace and returns its path there. */
+    suspend fun upload(name: String, bytes: ByteArray): UploadResponse =
+        ApiJson.decodeFromString(signedBytes(HttpMethod.Post, "/v1/files?name=${encodeQueryValue(name)}", bytes, "application/octet-stream"))
+
+    /** Asks for a one-time pairing code for another device. Over the network it comes back sealed for this device. */
+    suspend fun newPairingCode(admin: Boolean): Pair<String, PairingCodeResponse> {
+        if (serverKey.isEmpty()) {
+            val r: PairingCodeResponse = ApiJson.decodeFromString(signed(HttpMethod.Post, "/v1/pairing-codes", buildJsonObject { put("admin", admin) }.toString()))
+            return (r.code ?: throw AeonException(0, "이 기기를 다시 연결해야 다른 기기를 추가할 수 있습니다.")) to r
+        }
+        val ex = Sealing.exchange(crypto, serverKey)
+        val r: PairingCodeResponse = ApiJson.decodeFromString(signed(HttpMethod.Post, "/v1/pairing-codes", buildJsonObject { put("admin", admin); put("epk", ex.epk) }.toString()))
+        val sealed = r.sealed ?: return (r.code ?: throw AeonException(0, "서버가 코드를 주지 않았습니다.")) to r
+        return ex.open(sealed, "pairing-code|$deviceId").decodeToString() to r
+    }
+
+    suspend fun updateDevice(id: String, name: String? = null, admin: Boolean? = null): DeviceInfo {
+        val body = buildJsonObject {
+            if (name != null) put("name", name)
+            if (admin != null) put("admin", admin)
+        }
+        return ApiJson.decodeFromString<DeviceResponse>(signed(HttpMethod.Patch, "/v1/devices/$id", body.toString())).device
     }
 
     suspend fun deleteSecret(name: String) {
@@ -122,11 +182,14 @@ class AeonClient(
     }
 
     private suspend fun plain(method: HttpMethod, pathAndQuery: String, body: String?): String =
-        send(method, pathAndQuery, body, emptyMap())
+        send(method, pathAndQuery, body?.encodeToByteArray(), emptyMap())
 
-    private suspend fun signed(method: HttpMethod, pathAndQuery: String, body: String? = null): String {
+    private suspend fun signed(method: HttpMethod, pathAndQuery: String, body: String? = null): String =
+        signedBytes(method, pathAndQuery, body?.encodeToByteArray(), "application/json")
+
+    private suspend fun signedBytes(method: HttpMethod, pathAndQuery: String, body: ByteArray?, contentType: String): String {
         check(deviceId.isNotEmpty()) { "device is not paired" }
-        val bytes = body?.encodeToByteArray() ?: ByteArray(0)
+        val bytes = body ?: ByteArray(0)
         val timestamp = clock().toString()
         val nonce = crypto.randomBytes(12).toHex()
         val bodyHash = crypto.sha256(bytes).toHex()
@@ -136,16 +199,17 @@ class AeonClient(
             pathAndQuery,
             body,
             mapOf("x-aeon-device" to deviceId, "x-aeon-timestamp" to timestamp, "x-aeon-nonce" to nonce, "x-aeon-signature" to signature),
+            contentType,
         )
     }
 
-    private suspend fun send(method: HttpMethod, pathAndQuery: String, body: String?, headers: Map<String, String>): String {
+    private suspend fun send(method: HttpMethod, pathAndQuery: String, body: ByteArray?, headers: Map<String, String>, contentType: String = "application/json"): String {
         val response = http.request(baseUrl + pathAndQuery) {
             this.method = method
             headers.forEach { (k, v) -> header(k, v) }
             if (body != null) {
-                header("content-type", "application/json")
-                setBody(body.encodeToByteArray()) // exactly the bytes that were hashed and signed
+                header("content-type", contentType)
+                setBody(body) // exactly the bytes that were hashed and signed
             }
         }
         val text = response.bodyAsText()

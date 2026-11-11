@@ -7,7 +7,12 @@ import dev.aeon.ui.api.Approval
 import dev.aeon.ui.api.CatalogCollection
 import dev.aeon.ui.api.ConnectionItem
 import dev.aeon.ui.api.IconPayload
+import dev.aeon.ui.api.CatalogModel
+import dev.aeon.ui.api.CurrentModel
 import dev.aeon.ui.api.McpServer
+import dev.aeon.ui.api.Profile
+import dev.aeon.ui.api.ProviderRow
+import dev.aeon.ui.platform.PickedFile
 import dev.aeon.ui.api.DeviceInfo
 import dev.aeon.ui.api.ServerStatus
 import dev.aeon.ui.api.TaskDetail
@@ -42,6 +47,25 @@ enum class Section { Chat, Feed, Explore, Tasks, Agent, Approvals, Settings }
 enum class SettingsPage { Models, Keys, Devices, Usage, About }
 
 enum class ThemeMode(val label: String) { System("시스템 설정"), Light("라이트"), Dark("다크") }
+
+/** A file already stored in the workspace, waiting to be mentioned in the next message. */
+data class Attachment(val name: String, val path: String, val size: Long)
+
+/** Model picker. The provider and model lists are whatever the server's catalogue reports. */
+data class ModelState(
+    val open: Boolean = false,
+    val providers: List<ProviderRow> = emptyList(),
+    val current: CurrentModel? = null,
+    val catalogError: String? = null,
+    /** Provider whose models are shown. */
+    val providerId: String? = null,
+    val models: Map<String, List<CatalogModel>> = emptyMap(),
+    val loading: Boolean = false,
+    val error: String? = null,
+)
+
+/** A pairing code shown on this device so another device can be let in. */
+data class NewDevice(val code: String, val expiresAt: Long, val admin: Boolean, val addresses: List<String>)
 
 /** 둘러보기. Everything here comes from the server: nothing is listed that the server did not report. */
 data class ExploreState(
@@ -92,7 +116,17 @@ data class UiState(
     val prefill: String? = null,
     val themeMode: ThemeMode = ThemeMode.System,
     val explore: ExploreState = ExploreState(),
+    val models: ModelState = ModelState(),
+    val attachments: List<Attachment> = emptyList(),
+    val uploading: Boolean = false,
+    val newDevice: NewDevice? = null,
+    /** False for a pairing made before the server had a sealing key: keys cannot be sent from this device until it pairs again. */
+    val canSeal: Boolean = false,
 ) {
+    /** This device may change settings, keys, connections and devices. */
+    val isAdmin: Boolean get() = status?.admin == true
+    val profile: Profile get() = config?.profile ?: Profile()
+
     val pendingCount: Int get() = approvals.count { it.status == "pending" }
 
     /** How many model settings differ from the saved ones. */
@@ -136,6 +170,8 @@ class AppModel(
         }
         if (url != null && id != null) {
             client.deviceId = id
+            client.serverKey = store.get(KEY_SERVER_KEY).orEmpty()
+            _state.update { it.copy(canSeal = client.serverKey.isNotEmpty()) }
             _state.update { it.copy(connection = Connection.Connecting) }
             startPolling()
         }
@@ -171,6 +207,7 @@ class AppModel(
             // remember the current identity, and only switch after the server has proven it knew the code.
             val previousUrl = client.baseUrl
             val previousDevice = client.deviceId
+            val previousKey = client.serverKey
             val previousConnection = _state.value.connection
             stop()
             _state.update { it.copy(busy = true, message = null, connection = Connection.Connecting) }
@@ -180,11 +217,13 @@ class AppModel(
                 val res = client.pair(code, defaultDeviceName())
                 store.put(KEY_URL, client.baseUrl)
                 store.put(KEY_DEVICE, res.deviceId)
-                _state.update { it.copy(serverUrl = client.baseUrl, connection = Connection.Connected(res.serverName), busy = false) }
+                if (client.serverKey.isNotEmpty()) store.put(KEY_SERVER_KEY, client.serverKey) else store.remove(KEY_SERVER_KEY)
+                _state.update { it.copy(serverUrl = client.baseUrl, connection = Connection.Connected(res.serverName), busy = false, canSeal = client.serverKey.isNotEmpty()) }
                 startPolling()
             } catch (e: Exception) {
                 client.baseUrl = previousUrl
                 client.deviceId = previousDevice
+                client.serverKey = previousKey
                 val stillPaired = previousDevice.isNotEmpty()
                 _state.update {
                     it.copy(
@@ -204,7 +243,9 @@ class AppModel(
         scope.launch {
             stop()
             store.remove(KEY_DEVICE)
+            store.remove(KEY_SERVER_KEY)
             client.deviceId = ""
+            client.serverKey = ""
             crypto.reset()
             _state.update { UiState(serverUrl = it.serverUrl) }
         }
@@ -264,11 +305,158 @@ class AppModel(
     fun closeDetail() = _state.update { it.copy(showDetail = false) }
 
     fun createTask(goal: String, checks: List<String>) {
-        action("Task started") {
+        action(null) {
             val criteria = checks.filter { it.isNotBlank() }.map { parseCheck(it) ?: throw IllegalArgumentException("Check format: file_exists:PATH or file_contains:PATH:TEXT") }
-            val t = client.createTask(goal.trim(), criteria)
-            _state.update { it.copy(selectedTaskId = t.id, selectedTask = null) }
+            // Attached files are already in the workspace; the message only tells the agent where they are.
+            val files = _state.value.attachments
+            val text = if (files.isEmpty()) goal.trim() else goal.trim() + "\n\n첨부 파일 (작업 폴더 기준 경로):\n" + files.joinToString("\n") { "- ${it.path}" }
+            val t = client.createTask(text, criteria)
+            _state.update { it.copy(selectedTaskId = t.id, selectedTask = null, attachments = emptyList()) }
         }
+    }
+
+    /** Sends a chosen file to the workspace (`uploads/`) and keeps it as an attachment for the next message. */
+    fun attach(file: PickedFile?, problem: String?) {
+        if (file == null) {
+            if (problem != null) _state.update { it.copy(message = problem) }
+            return
+        }
+        scope.launch {
+            _state.update { it.copy(uploading = true) }
+            try {
+                val r = client.upload(file.name, file.bytes)
+                _state.update { it.copy(uploading = false, attachments = it.attachments + Attachment(file.name, r.path, r.size)) }
+            } catch (e: Exception) {
+                _state.update { it.copy(uploading = false, message = "파일을 올리지 못했습니다: ${describe(e)}") }
+            }
+        }
+    }
+
+    fun removeAttachment(path: String) = _state.update { s -> s.copy(attachments = s.attachments.filter { it.path != path }) }
+
+    // ---------------------------------------------------------------- 모델
+
+    private fun models(change: (ModelState) -> ModelState) = _state.update { it.copy(models = change(it.models)) }
+
+    /** Reads the provider list and the model in use. Cheap enough to call when the composer appears. */
+    fun loadModels() {
+        scope.launch {
+            try {
+                val r = client.providers()
+                models { it.copy(providers = r.providers, current = r.current, catalogError = r.catalogError, error = null) }
+            } catch (e: Exception) {
+                models { it.copy(error = describe(e)) }
+            }
+        }
+    }
+
+    fun openModelSheet() {
+        models { it.copy(open = true, providerId = it.current?.provider, error = null) }
+        loadModels()
+        _state.value.models.current?.provider?.let(::showProvider)
+    }
+
+    fun closeModelSheet() = models { it.copy(open = false) }
+
+    /** Shows one provider's models (null goes back to the provider list). */
+    fun showProvider(id: String?) {
+        models { it.copy(providerId = id, error = null) }
+        if (id == null || _state.value.models.models.containsKey(id)) return
+        scope.launch {
+            models { it.copy(loading = true) }
+            try {
+                val list = client.providerModels(id)
+                models { it.copy(loading = false, models = it.models + (id to list)) }
+            } catch (e: Exception) {
+                models { it.copy(loading = false, error = describe(e)) }
+            }
+        }
+    }
+
+    /** Saves an API key for a provider (sealed for the server), then refreshes the list. */
+    fun saveProviderKey(keyName: String, value: String) {
+        scope.launch {
+            models { it.copy(loading = true, error = null) }
+            try {
+                client.setSecret(keyName, value.trim())
+                val r = client.providers()
+                models { it.copy(loading = false, providers = r.providers, current = r.current) }
+                runCatching { client.secretNames() }.onSuccess { sec -> _state.update { it.copy(secretNames = sec.names, secretsBackend = sec.backend) } }
+                refresh()
+            } catch (e: Exception) {
+                models { it.copy(loading = false, error = keyProblem(e)) }
+            }
+        }
+    }
+
+    /** Makes a model the one new tasks use. [consent] is the owner's yes to sending prompts to that provider. */
+    fun pickModel(provider: String, model: String, effort: String?, consent: Boolean, customName: String? = null, customBaseUrl: String? = null, needsKey: Boolean = true) {
+        scope.launch {
+            models { it.copy(loading = true, error = null) }
+            try {
+                val r = client.selectModel(provider, model, effort, consent, customName, customBaseUrl, needsKey)
+                _state.update { it.copy(config = r.config, draft = r.config) }
+                val list = runCatching { client.providers() }.getOrNull()
+                models { it.copy(loading = false, current = r.current ?: it.current, providers = list?.providers ?: it.providers, open = false) }
+                refresh()
+            } catch (e: Exception) {
+                models { it.copy(loading = false, error = describe(e)) }
+            }
+        }
+    }
+
+    private fun keyProblem(e: Exception): String = when {
+        !_state.value.canSeal -> "이 기기는 예전 방식으로 연결되어 키를 보낼 수 없습니다. 내 에이전트 › 정보에서 연결을 해제한 뒤 다시 연결하세요."
+        e is AeonException && e.status == 403 -> "이 기기는 설정을 바꿀 수 없게 되어 있습니다. 설정을 바꿀 수 있는 기기에서 허용해 주세요."
+        else -> describe(e)
+    }
+
+    // ---------------------------------------------------------------- 개인화
+
+    /** Saves how the agent addresses the owner. Allowed from every paired device. */
+    fun saveProfile(profile: Profile) = action("저장했습니다") {
+        val cfg = client.config()
+        val clean = profile.copy(
+            userName = profile.userName?.trim()?.ifEmpty { null },
+            agentName = profile.agentName?.trim()?.ifEmpty { null },
+            about = profile.about?.trim()?.ifEmpty { null },
+        )
+        val saved = client.saveConfig(cfg.copy(profile = clean))
+        _state.update { it.copy(config = saved, draft = saved) }
+    }
+
+    // ---------------------------------------------------------------- 기기
+
+    fun loadDevices() {
+        scope.launch { runCatching { client.devices() }.onSuccess { d -> _state.update { it.copy(devices = d) } } }
+    }
+
+    /** Shows a one-time code another device can type. [admin] decides whether that device may change settings. */
+    fun newPairingCode(admin: Boolean) {
+        scope.launch {
+            _state.update { it.copy(busy = true) }
+            try {
+                val (code, r) = client.newPairingCode(admin)
+                _state.update { it.copy(busy = false, newDevice = NewDevice(code, r.expiresAt, r.admin, r.addresses)) }
+            } catch (e: Exception) {
+                _state.update { it.copy(busy = false, message = keyProblem(e)) }
+            }
+        }
+    }
+
+    fun dismissPairingCode() {
+        _state.update { it.copy(newDevice = null) }
+        loadDevices()
+    }
+
+    fun renameDevice(id: String, name: String) = action("이름을 바꿨습니다") {
+        client.updateDevice(id, name = name.trim())
+        _state.update { it.copy(devices = client.devices()) }
+    }
+
+    fun setDeviceAdmin(id: String, admin: Boolean) = action(null) {
+        client.updateDevice(id, admin = admin)
+        _state.update { it.copy(devices = client.devices()) }
     }
 
     fun decide(approvalId: String, approve: Boolean) = action(if (approve) "Allowed once" else "Denied") { client.decide(approvalId, approve) }
@@ -434,5 +622,6 @@ class AppModel(
         const val KEY_URL = "serverUrl"
         const val KEY_DEVICE = "deviceId"
         const val KEY_THEME = "themeMode"
+        const val KEY_SERVER_KEY = "serverKey"
     }
 }

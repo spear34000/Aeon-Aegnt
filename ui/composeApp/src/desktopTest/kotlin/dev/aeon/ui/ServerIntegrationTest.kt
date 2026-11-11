@@ -228,6 +228,40 @@ class ServerIntegrationTest {
     }
 
     @Test
+    fun sealedKeysAndPairingCodesWorkAgainstTheRealServer() = runBlocking {
+        val fx = startAeon(startFakeModel(emptyList()))
+        val (client, _) = newClient(fx.base)
+        client.pair(fx.code, "kotlin test client")
+        assertTrue(client.serverKey.isNotEmpty(), "the sealing key is pinned while pairing")
+        assertTrue(client.status().sealing)
+
+        // The key is encrypted here (ECDH + AES-GCM in Kotlin) and opened by the Node server.
+        client.setSecret("AEON_EP_TEST_KEY", "sealed-value-0001")
+        assertTrue("AEON_EP_TEST_KEY" in client.secretNames().names)
+        assertFalse(File(fx.cfgDir, "config.json").readText().contains("sealed-value-0001"))
+
+        // A code for another device comes back sealed by Node and is opened here.
+        val (code, info) = client.newPairingCode(admin = false)
+        assertTrue(code.matches(Regex("[A-Z2-7]{16}")), "got: $code")
+        assertFalse(info.admin)
+        val (second, _) = newClient(fx.base)
+        second.pair(code, "second device")
+        // This test talks to the server over loopback, where every caller counts as the machine itself, so the
+        // limit is checked on the stored flag (test/models-and-devices.test.ts covers the refusals over a network).
+        val devices = client.devices()
+        assertEquals(listOf(true, false), devices.map { it.admin }, "the device was let in without the right to change settings")
+        assertEquals(listOf(true, false), devices.map { it.current })
+        val renamed = client.updateDevice(devices[1].id, name = "거실 태블릿", admin = true)
+        assertEquals("거실 태블릿", renamed.name)
+        assertTrue(renamed.admin)
+
+        // An uploaded file lands inside the workspace.
+        val up = client.upload("메모 1.txt", "hello".encodeToByteArray())
+        assertTrue(up.path.startsWith("uploads/") && up.path.endsWith("메모 1.txt"), up.path)
+        assertEquals("hello", File(fx.workspace, up.path).readText())
+    }
+
+    @Test
     fun settingsAndSecretsBehaveAsDocumented() = runBlocking {
         val fx = startAeon(startFakeModel(emptyList()))
         val (client, _) = newClient(fx.base)
