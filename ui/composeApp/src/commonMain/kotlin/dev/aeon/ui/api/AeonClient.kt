@@ -103,6 +103,24 @@ class AeonClient(
         signed(HttpMethod.Delete, "/v1/devices/$id")
     }
 
+    /** Built-in tools, added MCP servers and skills, as the server sees them right now. */
+    suspend fun connections(): ConnectionsResponse = ApiJson.decodeFromString(signed(HttpMethod.Get, "/v1/connections"))
+
+    suspend fun collections(): List<CatalogCollection> = ApiJson.decodeFromString<CollectionsResponse>(signed(HttpMethod.Get, "/v1/catalog/collections")).collections
+
+    /** Live registry search made by the PC. Pass either free text or a collection id. */
+    suspend fun catalog(query: String = "", collection: String? = null): CatalogResponse {
+        val q = if (collection != null) "collection=${encodeQueryValue(collection)}" else "q=${encodeQueryValue(query)}"
+        return ApiJson.decodeFromString(signed(HttpMethod.Get, "/v1/catalog?$q"))
+    }
+
+    /** [path] is the `icon` field of a connection. Returns null when the server found no icon. */
+    suspend fun icon(path: String): IconPayload? = try {
+        ApiJson.decodeFromString<IconResponse>(signed(HttpMethod.Get, path)).icon
+    } catch (e: AeonException) {
+        if (e.status == 404) null else throw e
+    }
+
     private suspend fun plain(method: HttpMethod, pathAndQuery: String, body: String?): String =
         send(method, pathAndQuery, body, emptyMap())
 
@@ -138,6 +156,19 @@ class AeonClient(
         }
         return text
     }
+}
+
+/** Percent-encodes everything except RFC 3986 unreserved characters, so the signed text is exactly what is sent. */
+fun encodeQueryValue(value: String): String {
+    val hex = "0123456789ABCDEF"
+    val out = StringBuilder()
+    for (b in value.encodeToByteArray()) {
+        val c = b.toInt() and 0xFF
+        val ch = c.toChar()
+        if (ch in 'A'..'Z' || ch in 'a'..'z' || ch in '0'..'9' || ch == '-' || ch == '.' || ch == '_' || ch == '~') out.append(ch)
+        else out.append('%').append(hex[c shr 4]).append(hex[c and 15])
+    }
+    return out.toString()
 }
 
 /** "file_exists:out.txt" / "file_contains:out.txt:hello" -> API criterion object, or null if malformed. */

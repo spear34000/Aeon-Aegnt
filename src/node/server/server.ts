@@ -7,6 +7,7 @@ import { assertSecretName, type SecretStore } from "../../core/secrets.ts";
 import type { AuditEvent, Task } from "../../core/types.ts";
 import { parseCriterion } from "../../core/verify.ts";
 import { loadConfig, saveConfig } from "../config-file.ts";
+import type { ConnectionService } from "../connections.ts";
 import type { createRuntime } from "../runtime.ts";
 import { canonicalRequest, DeviceRegistry, NonceCache, PairingManager, verifySignature, type PairRequest } from "./device-auth.ts";
 
@@ -19,6 +20,8 @@ export interface AeonServerOptions {
   /** Called after settings change so the caller can rebuild the runtime (providers, consent). */
   onConfigChanged?: () => Promise<void> | void;
   secrets: SecretStore;
+  /** Lists built-in tools, added MCP servers, skills and what a registry offers. Without it those routes answer 404. */
+  connections?: ConnectionService;
   configDir: string;
   registry: DeviceRegistry;
   pairing: PairingManager;
@@ -298,7 +301,8 @@ export class AeonServer {
       // Changing where prompts and keys go (providers, consent, endpoints) is as sensitive as a secret: a lost or
       // compromised phone must not be able to point the stored key at another host. Local machine only.
       const cur = loadConfig(this.o.configDir);
-      const sensitive = ["providers", "dataConsent", "fallbackAllowed", "ollamaBaseUrl", "openaiCompatBaseUrl"] as const;
+      // An added MCP server is another host the agent may talk to, so it follows the same rule.
+      const sensitive = ["providers", "dataConsent", "fallbackAllowed", "ollamaBaseUrl", "openaiCompatBaseUrl", "mcpServers"] as const;
       const changed = sensitive.filter((k) => JSON.stringify(cur[k] ?? null) !== JSON.stringify(cfg[k] ?? null));
       if (changed.length > 0 && !this.isLocal(req)) throw new HttpError(403, `changing ${changed.join(", ")} is only allowed from the machine running Aeon`);
       saveConfig(this.o.configDir, cfg);
@@ -337,6 +341,38 @@ export class AeonServer {
       if (!this.o.registry.revoke(devMatch[1]!)) throw new HttpError(404, "device not found");
       res.writeHead(204).end();
       return;
+    }
+
+    const conn = this.o.connections;
+    if (conn && method === "GET") {
+      if (path === "/v1/connections") {
+        return this.json(res, 200, { connections: conn.installed(rt.tools.list(), loadConfig(this.o.configDir)), skillsDir: conn.skillsDir, canEdit: this.isLocal(req) });
+      }
+      if (path === "/v1/catalog/collections") return this.json(res, 200, { collections: conn.collections() });
+      if (path === "/v1/catalog") {
+        const q = url.searchParams.get("q") ?? "";
+        const collection = url.searchParams.get("collection");
+        const cursor = url.searchParams.get("cursor") ?? undefined;
+        if (q.length > 60 || (cursor !== undefined && cursor.length > 300)) throw new HttpError(400, "query too long");
+        const cfg = loadConfig(this.o.configDir);
+        try {
+          if (collection) {
+            const list = await conn.collection(collection, cfg);
+            if (!list) throw new HttpError(404, "collection not found");
+            return this.json(res, 200, { connections: list, nextCursor: null });
+          }
+          return this.json(res, 200, await conn.search(q, cfg, cursor));
+        } catch (e) {
+          if (e instanceof HttpError) throw e;
+          throw new HttpError(502, "catalog unavailable");
+        }
+      }
+      const iconMatch = /^\/v1\/icons\/([a-f0-9]{24})$/.exec(path);
+      if (iconMatch) {
+        const icon = await conn.icon(iconMatch[1]!);
+        if (!icon) throw new HttpError(404, "no icon");
+        return this.json(res, 200, { icon });
+      }
     }
 
     if (path === "/v1/events" && method === "GET") return this.sse(req, res, url, store);

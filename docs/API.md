@@ -37,8 +37,19 @@ Any failure returns `401 {"error":"unauthorized"}` with no hint which check fail
 | `GET/PUT /v1/config` | non-secret settings (strictly validated; no secret fields). Changing providers, consent, fallback or endpoint URLs is accepted **only from the machine running Aeon** |
 | `GET /v1/secrets` · `PUT/DELETE /v1/secrets/{NAME}` | names only; values are write-only and accepted **only from the machine running Aeon** (loopback), never over the LAN |
 | `GET /v1/devices` · `DELETE /v1/devices/{id}` | list (no keys) · revoke |
+| `GET /v1/connections` | what exists right now: built-in tools grouped by namespace (from the running tool registry), MCP servers saved in `config.mcpServers` (state `added`), and skill folders under `<config dir>/skills/*/SKILL.md`. Also `skillsDir` and `canEdit` (true only for the machine running Aeon) |
+| `GET /v1/catalog?q=TEXT` · `?collection=ID` · `GET /v1/catalog/collections` | what can be added: a live search of the official MCP registry made by the PC (5-minute cache). Entries with a hosted endpoint are `integration`, package-only entries are `mcp`. A collection is a list of search terms from `catalog/collections.json` (or `<config dir>/collections.json`), not a list of entries. `502` when the registry cannot be reached |
+| `GET /v1/icons/{key}` | icon for a connection (`icon` field): `{kind:"image",mime,data}` (PNG/JPEG/WebP/GIF, `.ico` converted) or `{kind:"path",d,color}` (one SVG path on a 24 grid). `404` when none was found |
 
 Static files (the web UI, when `--web` is given) are served without authentication because they are public code; they carry CSP, `X-Frame-Options: DENY` and `nosniff`.
+
+## Connections
+
+Nothing in the connection list is hard-coded in a UI. `config.mcpServers` holds `{ name, title?, url (https, no credentials), websiteUrl?, requires?[] }`; changing it is accepted **only from the machine running Aeon**, like providers. **Aeon does not run MCP tools yet:** an added server is stored and listed, nothing more. Package-based (stdio) servers cannot be added because host command execution is not allowed (D7).
+
+Outbound requests made by the PC for this feature (never by a paired device): `registry.modelcontextprotocol.io` (search text), `cdn.jsdelivr.net` (Simple Icons brand index and one SVG per matched title), the publisher's website (page and icon), and `github.com/<owner>.png`. All go through the SSRF-guarded transport. Icons are cached in `<config dir>/cache/icons` for 30 days (misses for one day).
+
+Icon order: icons declared in the publisher's manifest, then a brand mark whose name equals the start of the title, then the publisher's site icon, then its GitHub avatar. A community server named after a brand therefore shows that brand's mark; the row also shows the publisher so it is not mistaken for an official one.
 
 ## Known limits
 

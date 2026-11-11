@@ -1,0 +1,6 @@
+[
+  { "id": "korea", "title": { "ko": "한국 서비스", "en": "Korean services" }, "queries": ["naver", "kakao", "toss", "danawa", "coupang", "korea"] },
+  { "id": "dev", "title": { "ko": "개발", "en": "Development" }, "queries": ["github", "context7", "playwright", "supabase", "figma", "sentry", "linear"] },
+  { "id": "work", "title": { "ko": "문서와 협업", "en": "Docs and teamwork" }, "queries": ["notion", "gmail", "google-calendar", "slack", "google-drive"] },
+  { "id": "web", "title": { "ko": "웹과 브라우저", "en": "Web and browser" }, "queries": ["browser-use", "fetch", "search"] }
+]

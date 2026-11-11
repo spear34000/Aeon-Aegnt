@@ -107,7 +107,38 @@ data class AeonConfig(
     val ollamaBaseUrl: String? = null,
     val openaiCompatBaseUrl: String? = null,
     val openaiCompatModel: String? = null,
+    /** Kept in the model so saving other settings never drops the servers the owner added. */
+    val mcpServers: List<McpServer>? = null,
 )
+
+@Serializable
+data class McpServer(val name: String, val title: String? = null, val url: String, val websiteUrl: String? = null, val requires: List<String>? = null)
+
+/** One row of 둘러보기: a built-in tool group, a remote MCP server ("integration"), a packaged MCP server ("mcp") or a skill. */
+@Serializable
+data class ConnectionItem(
+    val id: String,
+    val kind: String,
+    /** connected, added (saved, not executed yet) or available. */
+    val state: String,
+    val title: String,
+    val description: String = "",
+    val publisher: String? = null,
+    val version: String? = null,
+    val websiteUrl: String? = null,
+    val remoteUrl: String? = null,
+    val runtime: String? = null,
+    val requires: List<String> = emptyList(),
+    val tools: List<String> = emptyList(),
+    val icon: String? = null,
+)
+
+/** kind "image": base64 [data] of [mime]. kind "path": one SVG path [d] on a 24x24 grid in brand [color]. */
+@Serializable
+data class IconPayload(val kind: String, val mime: String? = null, val data: String? = null, val d: String? = null, val color: String? = null)
+
+@Serializable
+data class CatalogCollection(val id: String, val title: Map<String, String> = emptyMap(), val queries: List<String> = emptyList())
 
 @Serializable
 data class DeviceInfo(val id: String, val name: String, val createdAt: Long = 0, val lastSeenAt: Long = 0, val revoked: Boolean = false)
@@ -133,6 +164,10 @@ data class UsageRecord(
 @Serializable data class SecretsResponse(val backend: String = "", val names: List<String> = emptyList())
 @Serializable data class DevicesResponse(val devices: List<DeviceInfo>)
 @Serializable data class UsageResponse(val usage: List<UsageRecord>)
+@Serializable data class ConnectionsResponse(val connections: List<ConnectionItem> = emptyList(), val skillsDir: String = "", val canEdit: Boolean = false)
+@Serializable data class CatalogResponse(val connections: List<ConnectionItem> = emptyList(), val nextCursor: String? = null)
+@Serializable data class CollectionsResponse(val collections: List<CatalogCollection> = emptyList())
+@Serializable data class IconResponse(val icon: IconPayload)
 @Serializable data class HelloResponse(val name: String = "Aeon", val api: Int = 1, val pairingRequired: Boolean = true)
 @Serializable data class PairResponse(val deviceId: String, val serverProof: String, val serverName: String = "Aeon")
 

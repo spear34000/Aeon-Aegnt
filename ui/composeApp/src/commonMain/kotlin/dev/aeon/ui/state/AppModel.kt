@@ -4,6 +4,10 @@ import dev.aeon.ui.api.AeonClient
 import dev.aeon.ui.api.AeonConfig
 import dev.aeon.ui.api.AeonException
 import dev.aeon.ui.api.Approval
+import dev.aeon.ui.api.CatalogCollection
+import dev.aeon.ui.api.ConnectionItem
+import dev.aeon.ui.api.IconPayload
+import dev.aeon.ui.api.McpServer
 import dev.aeon.ui.api.DeviceInfo
 import dev.aeon.ui.api.ServerStatus
 import dev.aeon.ui.api.TaskDetail
@@ -21,6 +25,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 
 sealed interface Connection {
     data object Unpaired : Connection
@@ -34,6 +40,25 @@ sealed interface Connection {
 enum class Section { Chat, Feed, Explore, Tasks, Agent, Approvals, Settings }
 
 enum class SettingsPage { Models, Keys, Devices, Usage, About }
+
+enum class ThemeMode(val label: String) { System("시스템 설정"), Light("라이트"), Dark("다크") }
+
+/** 둘러보기. Everything here comes from the server: nothing is listed that the server did not report. */
+data class ExploreState(
+    val installed: List<ConnectionItem> = emptyList(),
+    /** Adding and removing servers is only accepted from the machine that runs Aeon. */
+    val canEdit: Boolean = false,
+    val skillsDir: String = "",
+    val collections: List<CatalogCollection> = emptyList(),
+    val collectionId: String? = null,
+    val query: String = "",
+    val catalog: List<ConnectionItem> = emptyList(),
+    val loading: Boolean = false,
+    val error: String? = null,
+    /** Icon path -> payload. A key with a null value means "asked, and there is none". */
+    val icons: Map<String, IconPayload?> = emptyMap(),
+    val detail: ConnectionItem? = null,
+)
 
 data class UiState(
     val connection: Connection = Connection.Unpaired,
@@ -65,6 +90,8 @@ data class UiState(
     val drawerOpen: Boolean = false,
     /** Text to put in the composer when a new conversation starts from an example. */
     val prefill: String? = null,
+    val themeMode: ThemeMode = ThemeMode.System,
+    val explore: ExploreState = ExploreState(),
 ) {
     val pendingCount: Int get() = approvals.count { it.status == "pending" }
 
@@ -100,6 +127,7 @@ class AppModel(
 
     /** Restores a previous pairing, if any, and starts polling. */
     fun start() {
+        store.get(KEY_THEME)?.let { saved -> ThemeMode.entries.firstOrNull { it.name == saved }?.let { m -> _state.update { it.copy(themeMode = m) } } }
         val url = store.get(KEY_URL)
         val id = store.get(KEY_DEVICE)
         if (url != null) {
@@ -287,6 +315,103 @@ class AppModel(
 
     fun dismissMessage() = _state.update { it.copy(message = null) }
 
+    /** System -> Light -> Dark -> System. Remembered on this device only. */
+    fun cycleTheme() {
+        val next = ThemeMode.entries[(_state.value.themeMode.ordinal + 1) % ThemeMode.entries.size]
+        store.put(KEY_THEME, next.name)
+        _state.update { it.copy(themeMode = next) }
+    }
+
+    fun loadUsage() {
+        scope.launch { runCatching { client.usage() }.onSuccess { u -> _state.update { it.copy(usage = u) } } }
+    }
+
+    // ---------------------------------------------------------------- 둘러보기
+
+    private var catalogJob: Job? = null
+    private val iconRequests = mutableSetOf<String>()
+    private val iconGate = Semaphore(4)
+
+    private fun explore(change: (ExploreState) -> ExploreState) = _state.update { it.copy(explore = change(it.explore)) }
+
+    /** Reads what is installed and which collections exist, then fills the "can be added" list. */
+    fun loadExplore() {
+        scope.launch {
+            try {
+                val installed = client.connections()
+                val collections = runCatching { client.collections() }.getOrDefault(emptyList())
+                explore { it.copy(installed = installed.connections, canEdit = installed.canEdit, skillsDir = installed.skillsDir, collections = collections, error = null) }
+                val e = _state.value.explore
+                when {
+                    e.query.isNotBlank() -> loadCatalog(query = e.query)
+                    else -> (e.collectionId ?: collections.firstOrNull()?.id)?.let { loadCatalog(collection = it) }
+                }
+            } catch (e: Exception) {
+                explore { it.copy(loading = false, error = describe(e)) }
+            }
+        }
+    }
+
+    /** Typing searches the registry after a short pause; clearing the field returns to the collections. */
+    fun searchCatalog(query: String) {
+        explore { it.copy(query = query) }
+        catalogJob?.cancel()
+        catalogJob = scope.launch {
+            delay(400)
+            val e = _state.value.explore
+            if (query.isBlank()) (e.collectionId ?: e.collections.firstOrNull()?.id)?.let { loadCatalog(collection = it) } else loadCatalog(query = query)
+        }
+    }
+
+    fun openCollection(id: String) {
+        explore { it.copy(query = "", collectionId = id) }
+        catalogJob?.cancel()
+        catalogJob = scope.launch { loadCatalog(collection = id) }
+    }
+
+    private suspend fun loadCatalog(query: String = "", collection: String? = null) {
+        explore { it.copy(loading = true, error = null, collectionId = collection ?: it.collectionId) }
+        try {
+            val r = client.catalog(query.trim(), collection)
+            explore { it.copy(catalog = r.connections, loading = false) }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            val text = if (e is AeonException && e.status == 502) "목록을 가져오지 못했습니다. Aeon이 실행 중인 PC의 인터넷 연결을 확인하세요." else describe(e)
+            explore { it.copy(catalog = emptyList(), loading = false, error = text) }
+        }
+    }
+
+    /** Asks the server for an icon once per path. The server looks it up and caches it; the device never contacts other hosts. */
+    fun requestIcon(path: String) {
+        if (!iconRequests.add(path)) return
+        scope.launch {
+            val payload = iconGate.withPermit { runCatching { client.icon(path) }.getOrNull() }
+            explore { it.copy(icons = it.icons + (path to payload)) }
+        }
+    }
+
+    fun showConnection(c: ConnectionItem?) = explore { it.copy(detail = c) }
+
+    /** Saves a remote server into the settings. The server refuses this unless the request comes from the PC itself. */
+    fun addConnection(c: ConnectionItem) = action("추가했습니다") {
+        val url = c.remoteUrl ?: throw IllegalStateException("원격 주소가 없는 항목은 아직 추가할 수 없습니다.")
+        val name = c.id.removePrefix("mcp:")
+        val cfg = client.config()
+        val server = McpServer(name = name, title = c.title, url = url, websiteUrl = c.websiteUrl?.takeIf { it.startsWith("https://") }, requires = c.requires.ifEmpty { null })
+        client.saveConfig(cfg.copy(mcpServers = (cfg.mcpServers ?: emptyList()).filter { it.name != name } + server))
+        explore { it.copy(detail = null) }
+        loadExplore()
+    }
+
+    fun removeConnection(c: ConnectionItem) = action("연결을 해제했습니다") {
+        val name = c.id.removePrefix("mcp:")
+        val cfg = client.config()
+        client.saveConfig(cfg.copy(mcpServers = (cfg.mcpServers ?: emptyList()).filter { it.name != name }))
+        explore { it.copy(detail = null) }
+        loadExplore()
+    }
+
     private fun action(success: String?, block: suspend () -> Unit) {
         scope.launch {
             _state.update { it.copy(busy = true) }
@@ -308,5 +433,6 @@ class AppModel(
     private companion object {
         const val KEY_URL = "serverUrl"
         const val KEY_DEVICE = "deviceId"
+        const val KEY_THEME = "themeMode"
     }
 }

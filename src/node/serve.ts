@@ -1,6 +1,7 @@
 import { createInterface } from "node:readline";
 import { join } from "node:path";
 import { bootRuntime } from "./bootstrap.ts";
+import { ConnectionService } from "./connections.ts";
 import { DeviceRegistry, PairingManager } from "./server/device-auth.ts";
 import { AeonServer } from "./server/server.ts";
 
@@ -24,6 +25,7 @@ export async function serveCommand(o: ServeOptions): Promise<number> {
   const server = new AeonServer({
     getRuntime: () => runtime,
     secrets,
+    connections: new ConnectionService({ configDir: o.cfgDir }),
     getProblem: () => problem,
     configDir: o.cfgDir,
     registry,

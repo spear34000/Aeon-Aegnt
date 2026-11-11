@@ -14,6 +14,12 @@ Design items implemented: 4-4-4-4 pairing input (80-bit code), HTTP acknowledgem
 
 Phone navigation (changed 2026-11-11 at the owner's request, modelled on the Pickle app): five icon-only bottom tabs in the order 대화, 피드, 둘러보기, 작업, 내 에이전트 (spoken labels for screen readers). A hamburger at the top left slides the chat list in from the left over 70% of the width; the rest is dimmed and tapping it closes the drawer. Approvals are reached from 피드, a badge on its icon and the "승인 N" chip in the top bar. 피드 shows pending approvals and recent task activity, built from existing data (the server has no feed concept). 둘러보기 offers four static example goals that fill the composer. 내 에이전트 holds the settings. The wide layout (Windows, web at 1100dp and up) still uses the sidebar. Checked on the Android emulator; not yet on a physical phone.
 
+Visual system (changed 2026-11-11, mockup "Aeon 모바일" with light and dark boards): neutral surfaces with one blue accent. Page `#F4F4F6` / `#0B0B0D`, cards `#FFFFFF` / `#17171A`, soft fills `#E9E9ED` / `#242428`, accent `#2F5BEA` / `#86A2FF`. Amber means waiting for the owner, red means it cannot be undone, green means checked. Cards have a 20dp radius and no border, sheets 28dp, buttons are pills (48dp). Tokens live in `design/Theme.kt`, outline icons in `design/Icons.kt`. The theme follows the system and can be forced from 내 에이전트 › 화면 테마 (stored on the device).
+
+둘러보기 lists connections from the server (`/v1/connections`, `/v1/catalog`, see [API.md](API.md)): kind filters (전체, 연동, MCP 서버, 스킬, 기본 도구), "연결됨", and "추가할 수 있음" with collection chips and a name search. Logos come from `/v1/icons`; a row without one shows its first letter. A bottom sheet shows the address, required key names and what adding does.
+
+Built from the mockup so far: theme tokens, buttons, cards, the phone top bars, bottom bar, drawer, 피드, 둘러보기 and 내 에이전트. Not yet rebuilt to the mockup (they only pick up the new colours and shapes): the conversation (progress card, inline approval), the approval sheet, 작업 and task detail, pairing, and the wide layout.
+
 Deviations (what the design asks that is not built, or was built differently):
 
 - A conversation is one task. Multi-turn chat is not implemented; the "new conversation" composer creates a task.

@@ -28,6 +28,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -38,9 +39,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-enum class ButtonKind { Primary, Secondary, Destructive, Ghost }
+/** Primary = accent fill, Strong = ink fill (the safe, decisive answer), Secondary = soft fill, Destructive = red outline. */
+enum class ButtonKind { Primary, Strong, Secondary, Destructive, Ghost }
 
-/** Buttons follow the design: 44dp tall on phones, 40dp on wide screens; one primary per screen. */
+/** Pill buttons, 48dp tall on phones and 40dp on wide screens; one primary per screen. */
 @Composable
 fun AeonButton(
     text: String,
@@ -55,18 +57,21 @@ fun AeonButton(
     val scheme = MaterialTheme.colorScheme
     val (bg, fg, border) = when (kind) {
         ButtonKind.Primary -> Triple(scheme.primary, scheme.onPrimary, null)
-        ButtonKind.Secondary -> Triple(Color.Transparent, scheme.onSurface, scheme.outline)
+        ButtonKind.Strong -> Triple(scheme.onSurface, scheme.background, null)
+        ButtonKind.Secondary -> Triple(scheme.surfaceVariant, scheme.onSurface, null)
         ButtonKind.Destructive -> Triple(Color.Transparent, s.danger, s.danger)
         ButtonKind.Ghost -> Triple(Color.Transparent, scheme.onSurfaceVariant, null)
     }
     val alpha = if (enabled) 1f else 0.4f
+    val shape = RoundedCornerShape(50)
     Row(
         modifier
-            .defaultMinSize(minHeight = if (wide) 40.dp else 44.dp)
-            .background(bg.copy(alpha = if (kind == ButtonKind.Primary) alpha else bg.alpha))
-            .then(if (border != null) Modifier.border(if (kind == ButtonKind.Destructive) 1.5.dp else 1.dp, border.copy(alpha = alpha), RoundedCornerShape(AeonShape.CONTROL.dp)) else Modifier)
+            .defaultMinSize(minHeight = if (wide) 40.dp else 48.dp)
+            .clip(shape)
+            .background(bg.copy(alpha = bg.alpha * alpha))
+            .then(if (border != null) Modifier.border(1.5.dp, border.copy(alpha = alpha), shape) else Modifier)
             .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+            .padding(horizontal = 20.dp, vertical = 10.dp),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -271,14 +276,14 @@ fun AeonSwitch(on: Boolean, onChange: (Boolean) -> Unit, label: String, modifier
     }
 }
 
-/** Card surface used across screens: 1px hairline, 12dp radius, no shadows (design rule). */
+/** Card surface used across screens: 20dp radius, no border and no shadow; the page behind it is slightly darker. */
 @Composable
 fun Card(modifier: Modifier = Modifier, tint: Color? = null, content: @Composable () -> Unit) {
     Column(
         modifier
             .fillMaxWidth()
-            .background(tint ?: MaterialTheme.colorScheme.surface, RoundedCornerShape(AeonShape.CARD.dp))
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(AeonShape.CARD.dp))
+            .clip(RoundedCornerShape(AeonShape.CARD.dp))
+            .background(tint ?: MaterialTheme.colorScheme.surface)
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
         content = { content() },

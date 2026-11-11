@@ -120,7 +120,14 @@ interface Raw {
   status: number;
   headers: IncomingHttpHeaders | Headers;
   text: string;
+  /** Raw body (capped at maxBytes), for callers that fetch binary data such as icons. */
+  bytes: Uint8Array;
   truncated: boolean;
+}
+
+function contentType(h: IncomingHttpHeaders | Headers): string {
+  const v = h instanceof Headers ? h.get("content-type") : h["content-type"];
+  return typeof v === "string" ? v.split(";")[0]!.trim().toLowerCase() : "";
 }
 
 /**
@@ -166,7 +173,10 @@ function pinnedRequest(url: URL, o: Required<Pick<SafeFetchOptions, "timeoutMs" 
         let size = 0;
         let truncated = false;
         const done = () =>
-          finish(() => resolve({ status: res.statusCode ?? 0, headers: res.headers, text: Buffer.concat(chunks).toString("utf8"), truncated }));
+          finish(() => {
+            const bytes = Buffer.concat(chunks);
+            resolve({ status: res.statusCode ?? 0, headers: res.headers, text: bytes.toString("utf8"), bytes, truncated });
+          });
         res.on("data", (c: Buffer) => {
           const room = o.maxBytes - size;
           chunks.push(c.length > room ? c.subarray(0, room) : c);
@@ -198,7 +208,10 @@ function location(h: IncomingHttpHeaders | Headers): string | null {
  * Redirects are followed for GET only. A redirected POST is NOT replayed (its body would reach a host
  * the owner never approved); the 3xx response is returned instead.
  */
-export async function safeFetch(rawUrl: string, opts: SafeFetchOptions = {}): Promise<{ status: number; text: string; truncated: boolean }> {
+export async function safeFetch(
+  rawUrl: string,
+  opts: SafeFetchOptions = {},
+): Promise<{ status: number; text: string; truncated: boolean; bytes: Uint8Array; contentType: string }> {
   const timeoutMs = opts.timeoutMs ?? 20_000;
   const maxBytes = opts.maxBytes ?? 1_000_000;
   const method = opts.method ?? "GET";
@@ -217,17 +230,18 @@ export async function safeFetch(rawUrl: string, opts: SafeFetchOptions = {}): Pr
       });
       const buf = new Uint8Array(await res.arrayBuffer());
       const truncated = buf.length > maxBytes;
-      raw = { status: res.status, headers: res.headers, text: new TextDecoder().decode(truncated ? buf.slice(0, maxBytes) : buf), truncated };
+      const bytes = truncated ? buf.slice(0, maxBytes) : buf;
+      raw = { status: res.status, headers: res.headers, text: new TextDecoder().decode(bytes), bytes, truncated };
     } else {
       raw = await pinnedRequest(chk.url, { ...opts, timeoutMs, maxBytes });
     }
     const loc = location(raw.headers);
     if (raw.status >= 300 && raw.status < 400 && loc) {
-      if (method !== "GET") return { status: raw.status, text: `redirect to ${loc} not followed for ${method}`, truncated: false };
+      if (method !== "GET") return { status: raw.status, text: `redirect to ${loc} not followed for ${method}`, truncated: false, bytes: new Uint8Array(), contentType: "" };
       current = new URL(loc, chk.url).toString();
       continue;
     }
-    return { status: raw.status, text: raw.text, truncated: raw.truncated };
+    return { status: raw.status, text: raw.text, truncated: raw.truncated, bytes: raw.bytes, contentType: contentType(raw.headers) };
   }
   throw new Error("too many redirects");
 }

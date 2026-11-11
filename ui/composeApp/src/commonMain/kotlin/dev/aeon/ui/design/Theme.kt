@@ -18,56 +18,65 @@ data class AeonStatus(
 
 val LocalAeonStatus = compositionLocalOf<AeonStatus> { error("AeonTheme missing") }
 
+/**
+ * Neutral surfaces with one accent (mockup "Aeon 모바일", light and dark).
+ * background = page, surface = cards and sheets, surfaceVariant = soft fills (icon buttons, chips, bubbles).
+ * Amber means "waiting for you", red means "cannot be undone", green means "checked".
+ */
 private val Light = lightColorScheme(
-    primary = Color(0xFF6750D9), onPrimary = Color(0xFFFFFFFF),
-    primaryContainer = Color(0xFFEFECFD), onPrimaryContainer = Color(0xFF4733B8),
-    secondary = Color(0xFF5C5C68), onSecondary = Color(0xFFFFFFFF),
-    background = Color(0xFFF7F7F8), onBackground = Color(0xFF17171C),
-    surface = Color(0xFFFFFFFF), onSurface = Color(0xFF17171C),
-    surfaceVariant = Color(0xFFF1F1F3), onSurfaceVariant = Color(0xFF5C5C68),
-    surfaceContainer = Color(0xFFF1F1F3), surfaceContainerHigh = Color(0xFFE7E7EB),
-    outline = Color(0xFFCACAD2), outlineVariant = Color(0xFFE3E3E8),
-    error = Color(0xFFC42B2B), onError = Color(0xFFFFFFFF),
-    errorContainer = Color(0xFFFCE8E7), onErrorContainer = Color(0xFFC42B2B),
+    primary = Color(0xFF2F5BEA), onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFFE6ECFF), onPrimaryContainer = Color(0xFF1C3FB8),
+    secondary = Color(0xFF5A5A66), onSecondary = Color(0xFFFFFFFF),
+    background = Color(0xFFF4F4F6), onBackground = Color(0xFF0B0B0F),
+    surface = Color(0xFFFFFFFF), onSurface = Color(0xFF0B0B0F),
+    surfaceVariant = Color(0xFFE9E9ED), onSurfaceVariant = Color(0xFF5A5A66),
+    surfaceContainer = Color(0xFFE9E9ED), surfaceContainerHigh = Color(0xFFE1E1E7),
+    outline = Color(0xFFC9C9D2), outlineVariant = Color(0xFFE1E1E7),
+    error = Color(0xFFC5221F), onError = Color(0xFFFFFFFF),
+    errorContainer = Color(0xFFFDE8E7), onErrorContainer = Color(0xFF9E1B18),
+    scrim = Color(0xFF0B0B0F),
 )
 
 private val Dark = darkColorScheme(
-    primary = Color(0xFF9F8FFF), onPrimary = Color(0xFF140F33),
-    primaryContainer = Color(0xFF221D3F), onPrimaryContainer = Color(0xFFCBC2FF),
-    secondary = Color(0xFFA1A1AD), onSecondary = Color(0xFF0E0E10),
-    background = Color(0xFF0E0E10), onBackground = Color(0xFFECECF1),
-    surface = Color(0xFF161618), onSurface = Color(0xFFECECF1),
-    surfaceVariant = Color(0xFF1C1C1F), onSurfaceVariant = Color(0xFFA1A1AD),
-    surfaceContainer = Color(0xFF1C1C1F), surfaceContainerHigh = Color(0xFF26262B),
-    outline = Color(0xFF3A3A42), outlineVariant = Color(0xFF2A2A30),
-    error = Color(0xFFFF7B73), onError = Color(0xFF2B0B09),
-    errorContainer = Color(0xFF341716), onErrorContainer = Color(0xFFFF7B73),
+    primary = Color(0xFF86A2FF), onPrimary = Color(0xFF081033),
+    primaryContainer = Color(0xFF1A2450), onPrimaryContainer = Color(0xFFC9D5FF),
+    secondary = Color(0xFFA6A6B2), onSecondary = Color(0xFF0B0B0D),
+    background = Color(0xFF0B0B0D), onBackground = Color(0xFFF4F4F6),
+    surface = Color(0xFF17171A), onSurface = Color(0xFFF4F4F6),
+    surfaceVariant = Color(0xFF242428), onSurfaceVariant = Color(0xFFA6A6B2),
+    surfaceContainer = Color(0xFF242428), surfaceContainerHigh = Color(0xFF2C2C31),
+    outline = Color(0xFF3A3A42), outlineVariant = Color(0xFF2C2C31),
+    error = Color(0xFFFF6B66), onError = Color(0xFF2B0B09),
+    errorContainer = Color(0xFF3A1412), onErrorContainer = Color(0xFFFFB8B4),
+    scrim = Color(0xFF000000),
 )
 
 private val LightStatus = AeonStatus(
-    ok = Color(0xFF1A7F4B), okSoft = Color(0xFFE5F4EB), warn = Color(0xFF95580A), warnSoft = Color(0xFFFCF0DB),
-    danger = Color(0xFFC42B2B), dangerSoft = Color(0xFFFCE8E7), fg3 = Color(0xFF8A8A96),
-    accentSoft = Color(0xFFEFECFD), onAccentSoft = Color(0xFF4733B8),
+    ok = Color(0xFF0B7A53), okSoft = Color(0xFFDDF5EA), warn = Color(0xFF8A5200), warnSoft = Color(0xFFFFF0D2),
+    danger = Color(0xFFC5221F), dangerSoft = Color(0xFFFDE8E7), fg3 = Color(0xFF6B6B77),
+    accentSoft = Color(0xFFE6ECFF), onAccentSoft = Color(0xFF1C3FB8),
 )
 
 private val DarkStatus = AeonStatus(
-    ok = Color(0xFF4ACB8A), okSoft = Color(0xFF10281C), warn = Color(0xFFF2B65A), warnSoft = Color(0xFF2B2111),
-    danger = Color(0xFFFF7B73), dangerSoft = Color(0xFF341716), fg3 = Color(0xFF6F6F7A),
-    accentSoft = Color(0xFF221D3F), onAccentSoft = Color(0xFFCBC2FF),
+    ok = Color(0xFF4FD6A0), okSoft = Color(0xFF0E2C21), warn = Color(0xFFFFB84D), warnSoft = Color(0xFF33250B),
+    danger = Color(0xFFFF6B66), dangerSoft = Color(0xFF3A1412), fg3 = Color(0xFF8E8E9A),
+    accentSoft = Color(0xFF1A2450), onAccentSoft = Color(0xFFC9D5FF),
 )
 
+/** [dark] = null follows the system setting. */
 @Composable
-fun AeonTheme(content: @Composable () -> Unit) {
-    val dark = isSystemInDarkTheme()
-    val scheme: ColorScheme = if (dark) Dark else Light
-    CompositionLocalProvider(LocalAeonStatus provides if (dark) DarkStatus else LightStatus) {
+fun AeonTheme(dark: Boolean? = null, content: @Composable () -> Unit) {
+    val isDark = dark ?: isSystemInDarkTheme()
+    val scheme: ColorScheme = if (isDark) Dark else Light
+    CompositionLocalProvider(LocalAeonStatus provides if (isDark) DarkStatus else LightStatus) {
         MaterialTheme(colorScheme = scheme, typography = aeonTypography(), content = content)
     }
 }
 
-/** Shape scale from the design: 10 for controls, 12 for cards, 16 for bubbles. */
+/** Shape scale from the mockup: 16 for fields and small rows, 20 for cards and bubbles, 28 for sheets; buttons are pills. */
 object AeonShape {
-    const val CONTROL = 10
-    const val CARD = 12
-    const val BUBBLE = 16
+    const val CONTROL = 16
+    const val CARD = 20
+    const val BUBBLE = 20
+    const val SHEET = 28
 }

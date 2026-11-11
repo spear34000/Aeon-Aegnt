@@ -43,7 +43,11 @@ import dev.aeon.ui.state.UiState
 @Composable
 fun AppRoot(model: AppModel, shell: @Composable (UiState, AppModel) -> Unit) {
     val state by model.state.collectAsState()
-    AeonTheme {
+    AeonTheme(dark = when (state.themeMode) {
+        dev.aeon.ui.state.ThemeMode.System -> null
+        dev.aeon.ui.state.ThemeMode.Light -> false
+        dev.aeon.ui.state.ThemeMode.Dark -> true
+    }) {
         Surface(Modifier.fillMaxSize().safeDrawingPadding(), color = MaterialTheme.colorScheme.background) {
             if (state.connection is Connection.Unpaired) ConnectScreen(state, model) else shell(state, model)
         }

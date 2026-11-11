@@ -29,5 +29,10 @@ Verified fact (not a decision): Oracle Always Free Ampere A1 is 2 OCPU / 12 GB. 
 |---|---|---|
 | D10 | Secret redaction on tool output is generic (token/password patterns). A config file containing `password: ...` is returned to the model as `[REDACTED]`; if the model writes that file back it is corrupted. Disabling redaction instead sends such secrets to the (possibly external) model. Which do you prefer: (A) keep redaction and block rewriting files that contained redactions, (B) keep redaction as-is and document it, (C) per-path allow/deny lists for redaction? | **Open.** Current behaviour is B. Recommendation: A. |
 
+| D14 | How Aeon runs MCP tools. (A) remote HTTPS servers only, own minimal client (keeps zero runtime dependencies), every call goes through approval; (B) add the official MCP SDK as a dependency; (C) also run package servers (npx/uvx) on the host, which conflicts with D7. | **Open.** Today servers are stored and listed, not executed. Recommendation: A. |
+| D15 | Who may add or remove a connection. (A) only the machine running Aeon (current, same rule as providers); (B) any paired device. | **Open.** Current behaviour is A. Recommendation: A. |
+| D16 | Outbound requests for the catalogue and logos (registry search, Simple Icons via jsDelivr, publisher sites, GitHub avatars), and showing a brand's mark on community servers named after it. (A) on by default (current); (B) on, with a switch to turn it off; (C) only icons the publisher declared. | **Open.** Current behaviour is A. Recommendation: B. |
+| D17 | Where installable skills come from. Today a skill is a folder the owner copies into `<config dir>/skills`. | **Open.** No remote source is used. |
+
 ## Deferred (asked again before the relevant phase)
 Cloudflare deploy auth method; Oracle use; UI stack (PWA vs native, Kotlin app scope); secret storage beyond environment variables; memory retention/deletion policy; notification channel; messaging integrations; backup format; competitor install/benchmark downloads.
