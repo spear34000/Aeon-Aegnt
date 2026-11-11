@@ -390,11 +390,13 @@ fun AgentHubScreen(state: UiState, model: AppModel, modifier: Modifier = Modifie
         }
         GroupHeader("설정")
         ListSurface {
+            SettingRow(AeonIcons.Agent, "개인화", state.profile.userName ?: "") { open(SettingsPage.Personal) }
+            RowDivider(64.dp)
             SettingRow(AeonIcons.Cpu, "모델", state.config?.providers?.firstOrNull() ?: "") { open(SettingsPage.Models) }
             RowDivider(64.dp)
             SettingRow(AeonIcons.Key, "API 키", if (state.secretNames.isEmpty()) "없음" else "${state.secretNames.size}개 보관") { open(SettingsPage.Keys) }
             RowDivider(64.dp)
-            SettingRow(AeonIcons.Phone, "연결된 기기", "") { open(SettingsPage.Devices) }
+            SettingRow(AeonIcons.Phone, "연결된 기기", if (state.devices.isEmpty()) "" else "${state.devices.count { !it.revoked }}대") { open(SettingsPage.Devices) }
             RowDivider(64.dp)
             SettingRow(AeonIcons.Plug, "연결과 도구", if (state.explore.installed.isEmpty()) "" else "${state.explore.installed.size}개") { model.go(Section.Explore) }
             RowDivider(64.dp)

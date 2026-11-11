@@ -1,6 +1,7 @@
 package dev.aeon.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -64,19 +65,21 @@ fun SettingsScreen(state: UiState, model: AppModel, modifier: Modifier = Modifie
     LaunchedEffect(Unit) { model.loadSettings() }
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Text(title, style = MaterialTheme.typography.titleLarge)
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             SettingsPage.entries.forEach { p ->
                 val label = when (p) {
+                    SettingsPage.Personal -> "개인화"
                     SettingsPage.Models -> "모델"
                     SettingsPage.Keys -> "API 키"
                     SettingsPage.Devices -> "기기"
                     SettingsPage.Usage -> "사용량"
                     SettingsPage.About -> "정보"
                 }
-                AeonButton(label, { model.openSettings(p) }, kind = if (p == state.settingsPage) ButtonKind.Primary else ButtonKind.Ghost, wide = true)
+                AeonButton(label, { model.openSettings(p) }, Modifier.widthIn(min = 64.dp), kind = if (p == state.settingsPage) ButtonKind.Primary else ButtonKind.Ghost, wide = true)
             }
         }
         when (state.settingsPage) {
+            SettingsPage.Personal -> PersonalPage(state, model)
             SettingsPage.Models -> ModelsPage(state, model)
             SettingsPage.Keys -> KeysPage(state, model)
             SettingsPage.Devices -> DevicesPage(state, model)
@@ -88,108 +91,25 @@ fun SettingsScreen(state: UiState, model: AppModel, modifier: Modifier = Modifie
 
 @Composable
 private fun ModelsPage(state: UiState, model: AppModel) {
-    val draft = state.draft ?: state.config ?: AeonConfig()
-    var consentDialog by remember { mutableStateOf(false) }
     val s = LocalAeonStatus.current
-    val keyNames = state.secretNames.toSet()
-
-    SectionLabel("제공업체 순서")
-    Text("위에서부터 씁니다. 화살표로 순서를 바꾸세요.", style = MaterialTheme.typography.bodySmall, color = s.fg3)
-    val order = draft.providers
-    PROVIDERS.filter { it.id in order }.sortedBy { order.indexOf(it.id) }.forEach { p ->
-        val idx = order.indexOf(p.id)
-        val status = when {
-            !p.external -> "이 PC 안에서 처리 · 외부 전송 없음"
-            p.keyName != null && p.keyName in keyNames -> "키 저장됨 · 외부 전송"
-            else -> "키 없음 · 건너뜀"
-        }
-        Card {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text("${idx + 1}. ${p.title}", style = MaterialTheme.typography.bodyLarge)
-                    Text(status, style = MaterialTheme.typography.bodySmall, color = s.fg3)
-                }
-                AeonButton("↑", { model.editDraft { c -> c.copy(providers = swap(c.providers, idx, idx - 1)) } }, kind = ButtonKind.Ghost, enabled = idx > 0, wide = true)
-                AeonButton("↓", { model.editDraft { c -> c.copy(providers = swap(c.providers, idx, idx + 1)) } }, kind = ButtonKind.Ghost, enabled = idx < order.size - 1, wide = true)
-                AeonButton("빼기", { model.editDraft { c -> c.copy(providers = c.providers - p.id, dataConsent = c.dataConsent - p.id) } }, kind = ButtonKind.Ghost, wide = true)
-            }
-        }
+    LaunchedEffect(Unit) { model.loadModels() }
+    val cur = state.models.current
+    Card {
+        Text("지금 쓰는 모델", style = MaterialTheme.typography.titleMedium)
+        Text(if (cur == null) "아직 고르지 않았습니다." else "${cur.providerName} · ${cur.model.ifBlank { "모델 이름 없음" }}${cur.reasoningEffort?.let { " · 추론 $it" } ?: ""}", style = MaterialTheme.typography.bodyLarge)
+        AeonButton("제공자와 모델 바꾸기", { model.openModelSheet() }, Modifier.fillMaxWidth(), kind = ButtonKind.Primary)
     }
-    val missing = PROVIDERS.filter { it.id !in order }
-    if (missing.isNotEmpty()) {
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            missing.forEach { p -> AeonButton("+ ${p.title}", { model.editDraft { c -> c.copy(providers = c.providers + p.id) } }, kind = ButtonKind.Secondary, wide = true) }
-        }
-    }
-
-    SectionLabel("외부 전송 · 대체")
-    val exConsent = draft.dataConsent.isNotEmpty()
-    AeonSwitch(
-        on = exConsent,
-        onChange = { on ->
-            if (on) consentDialog = true
-            else model.editDraft { c -> c.copy(dataConsent = emptyList()) }
-        },
-        label = "외부 전송 동의",
-    )
-    Text("대화와 파일 내용을 클라우드 모델로 보낼 수 있습니다. 끄면 로컬 모델만 씁니다.", style = MaterialTheme.typography.bodySmall, color = s.fg3)
-    AeonSwitch(
-        on = draft.fallbackAllowed,
-        onChange = { on -> model.editDraft { c -> c.copy(fallbackAllowed = on) } },
-        label = "대체 모델 허용",
-    )
-    Text("1순위가 한도에 걸리면 다음 순서로 바로 넘어갑니다. 끄면 기다립니다.", style = MaterialTheme.typography.bodySmall, color = s.fg3)
-
-    AeonTextField(
-        value = draft.ollamaModel.orEmpty(),
-        onValueChange = { v -> model.editDraft { c -> c.copy(ollamaModel = v.ifBlank { null }) } },
-        label = "Ollama 모델 이름",
-        placeholder = "예: exaone3.5:7.8b",
-        help = "로컬 모델을 쓸 때만 필요합니다.",
-        mono = true,
-    )
-
-    if (consentDialog) {
-        AlertDialog(
-            onDismissRequest = { consentDialog = false },
-            title = { Text("외부 전송에 동의할까요?") },
-            text = { Text("대화와 파일 내용이 클라우드 모델 서비스로 전송됩니다. 언제든 끌 수 있습니다.", style = MaterialTheme.typography.bodyMedium) },
-            confirmButton = {
-                TextButton(onClick = {
-                    consentDialog = false
-                    model.editDraft { c -> c.copy(dataConsent = c.providers.filter { id -> PROVIDERS.firstOrNull { it.id == id }?.external == true }) }
-                }) { Text("동의함", color = MaterialTheme.colorScheme.primary) }
-            },
-            dismissButton = { TextButton(onClick = { consentDialog = false }) { Text("취소") } },
-        )
-    }
-
-    if (state.dirtyCount > 0) {
-        Row(
-            Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(AeonShape.CARD.dp)).padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text("저장하지 않은 변경 ${state.dirtyCount}개", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-            AeonButton("되돌리기", { model.revertDraft() }, kind = ButtonKind.Ghost, wide = true)
-            AeonButton("저장", { model.saveDraft() }, kind = ButtonKind.Primary, wide = true, enabled = !state.busy)
-        }
-    }
-}
-
-private fun <T> swap(list: List<T>, a: Int, b: Int): List<T> {
-    if (b < 0 || b >= list.size) return list
-    val m = list.toMutableList()
-    val t = m[a]; m[a] = m[b]; m[b] = t
-    return m
+    Text("제공자 목록은 models.dev에서 가져오며, 대화 입력창의 모델 버튼에서도 바꿀 수 있습니다. 새 작업부터 적용됩니다.", style = MaterialTheme.typography.bodySmall, color = s.fg3)
 }
 
 @Composable
 private fun KeysPage(state: UiState, model: AppModel) {
     val s = LocalAeonStatus.current
-    Text("키는 저장 후 다시 보이지 않습니다. 저장 위치: ${state.secretsBackend.ifBlank { "이 PC" }}", style = MaterialTheme.typography.bodySmall, color = s.fg3)
-    PROVIDERS.filter { it.keyName != null }.forEach { p -> KeyRow(p.title, p.keyName!!, state.secretNames.contains(p.keyName), model) }
-    Text("Anthropic과 Google 연동은 아직 없습니다.", style = MaterialTheme.typography.bodySmall, color = s.fg3)
+    LaunchedEffect(Unit) { model.loadModels() }
+    Text("키는 저장 후 다시 보이지 않습니다. 저장 위치: ${state.secretsBackend.ifBlank { "Aeon이 실행 중인 기기" }}. 전송 중에는 암호화됩니다.", style = MaterialTheme.typography.bodySmall, color = s.fg3)
+    val rows = state.models.providers.filter { it.keyName != null && (it.hasKey || it.inUse) }
+    if (rows.isEmpty()) Text("키가 필요한 제공자를 고르면 여기에 나타납니다.", style = MaterialTheme.typography.bodyMedium, color = s.fg3)
+    rows.forEach { p -> KeyRow(p.name, p.keyName!!, p.hasKey || state.secretNames.contains(p.keyName), model) }
 }
 
 @Composable
@@ -232,37 +152,6 @@ private fun KeyRow(title: String, name: String, stored: Boolean, model: AppModel
             Spacer(Modifier.weight(1f))
             AeonButton(if (stored) "교체" else "저장", { model.setSecret(name, value); value = "" }, kind = ButtonKind.Primary, enabled = value.isNotBlank(), wide = true)
         }
-    }
-}
-
-@Composable
-private fun DevicesPage(state: UiState, model: AppModel) {
-    val s = LocalAeonStatus.current
-    LaunchedEffect(Unit) { model.openSettings(SettingsPage.Devices) }
-    val now = nowMillis()
-    Text("연결된 기기 ${state.devices.count { !it.revoked }}", style = MaterialTheme.typography.bodyMedium)
-    var confirm by remember { mutableStateOf<dev.aeon.ui.api.DeviceInfo?>(null) }
-    state.devices.filter { !it.revoked }.forEach { d ->
-        val ago = (now - d.lastSeenAt) / 60_000
-        Card {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(d.name, style = MaterialTheme.typography.bodyLarge)
-                    Text(if (ago < 2) "지금 접속 중" else "${ago}분 전 접속 · ${formatDateTime(d.createdAt).take(10)} 연결", style = MaterialTheme.typography.bodySmall, color = s.fg3)
-                }
-                AeonButton("폐기", { confirm = d }, kind = ButtonKind.Destructive, wide = true)
-            }
-        }
-    }
-    Text("폐기하면 이 기기는 다시 연결할 수 없습니다. 다시 쓰려면 새 코드로 연결해야 합니다.", style = MaterialTheme.typography.bodySmall, color = s.fg3)
-    confirm?.let { d ->
-        AlertDialog(
-            onDismissRequest = { confirm = null },
-            title = { Text("\"${d.name}\" 을 폐기할까요?") },
-            text = { Text("이 기기에서 더는 요청할 수 없습니다.", style = MaterialTheme.typography.bodyMedium) },
-            confirmButton = { TextButton(onClick = { model.revokeDevice(d.id); confirm = null }) { Text("폐기", color = s.danger) } },
-            dismissButton = { TextButton(onClick = { confirm = null }) { Text("취소") } },
-        )
     }
 }
 

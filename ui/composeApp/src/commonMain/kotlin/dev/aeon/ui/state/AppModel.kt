@@ -44,7 +44,7 @@ sealed interface Connection {
 /** Which main area is visible. The conversation is the default place (design: chat-first). */
 enum class Section { Chat, Feed, Explore, Tasks, Agent, Approvals, Settings }
 
-enum class SettingsPage { Models, Keys, Devices, Usage, About }
+enum class SettingsPage { Personal, Models, Keys, Devices, Usage, About }
 
 enum class ThemeMode(val label: String) { System("시스템 설정"), Light("라이트"), Dark("다크") }
 

@@ -79,7 +79,8 @@ describe("Provider catalogue (pure)", () => {
   it("picking a model puts it first, stores no key, and needs consent once for a provider outside this machine", () => {
     assert.throws(() => selectModel(DEFAULT_CONFIG, { provider: "openai", model: "gpt-think" }, catalog), /consent required/);
     const a = parseConfig(selectModel(DEFAULT_CONFIG, { provider: "openai", model: "gpt-think", reasoningEffort: "high", consent: true }, catalog));
-    assert.deepEqual(a.providers, ["openai", "exaone"]);
+    assert.deepEqual(a.providers, ["openai"], "fallback is off: the others would never be used");
+    assert.deepEqual(selectModel({ ...DEFAULT_CONFIG, fallbackAllowed: true }, { provider: "ollama", model: "m" }, catalog).providers, ["ollama", "exaone"]);
     assert.deepEqual(a.dataConsent, ["openai"]);
     assert.deepEqual(a.endpoints, [{ id: "openai", baseUrl: "https://api.openai.com/v1", model: "gpt-think", name: "OpenAI", keyName: "AEON_EP_OPENAI_KEY", reasoningEffort: "high" }]);
     assert.deepEqual(currentModel(a, catalog), { provider: "openai", providerName: "OpenAI", model: "gpt-think", reasoningEffort: "high" });
@@ -89,7 +90,7 @@ describe("Provider catalogue (pure)", () => {
     assert.equal(b.endpoints![0]!.reasoningEffort, undefined);
 
     const local = parseConfig(selectModel(b, { provider: "lmstudio", model: "qwen" }, catalog));
-    assert.deepEqual(local.providers, ["lmstudio", "openai", "exaone"]);
+    assert.deepEqual(local.providers, ["lmstudio"]);
     assert.deepEqual(local.dataConsent, ["openai"], "a model server on this machine needs no consent");
 
     const exa = parseConfig(selectModel(local, { provider: "exaone", model: "k-exaone_v2.5", reasoningEffort: "max", consent: true }, catalog));
@@ -377,7 +378,7 @@ describe("Setting things up from any paired device", () => {
     const ok = await t.owner.call(t.base, t.clock, "POST", "/v1/model", { provider: "upstage", model: "solar-pro3", reasoningEffort: "medium", consent: true });
     assert.equal(ok.status, 200);
     assert.deepEqual(ok.body.current, { provider: "upstage", providerName: "Upstage", model: "solar-pro3", reasoningEffort: "medium" });
-    assert.deepEqual(loadConfig(t.cfgDir).providers, ["upstage", "exaone"]);
+    assert.deepEqual(loadConfig(t.cfgDir).providers, ["upstage"]);
     assert.equal(t.changed(), 1, "the runtime is rebuilt for the next task");
     assert.equal((await t.owner.call(t.base, t.clock, "POST", "/v1/model", { provider: "upstage", model: "solar-pro3", reasoningEffort: "ultra" })).status, 400);
     await t.close();

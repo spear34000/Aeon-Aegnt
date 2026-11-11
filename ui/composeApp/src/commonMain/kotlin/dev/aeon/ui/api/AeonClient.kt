@@ -51,7 +51,10 @@ class AeonClient(
         if (expected != res.serverProof) throw AeonException(0, "The server could not prove it knows the pairing code. Do not trust this server.")
         // Pin the sealing key only if the same pairing code vouches for it.
         val key = res.serverKey
-        serverKey = if (key != null && res.serverKeyProof == crypto.hmacSha256(normalized.encodeToByteArray(), Sealing.serverKeyProofMessage(key, clientNonce, res.deviceId).encodeToByteArray()).toBase64()) key else ""
+        val keyOk = key != null && res.serverKeyProof == crypto.hmacSha256(normalized.encodeToByteArray(), Sealing.serverKeyProofMessage(key, clientNonce, res.deviceId).encodeToByteArray()).toBase64()
+        // Fail closed: away from this machine the sealing key is required, and it must be vouched for by the code.
+        if (!keyOk && !isLoopback(baseUrl)) throw AeonException(0, "서버가 암호화 키를 증명하지 못했습니다. 이 서버를 믿지 마세요.")
+        serverKey = if (keyOk) key!! else ""
         deviceId = res.deviceId
         return res
     }
@@ -99,6 +102,7 @@ class AeonClient(
      * connection is plain HTTP. A device paired before sealing existed can only do this on the server's own machine.
      */
     suspend fun setSecret(name: String, value: String) {
+        if (serverKey.isEmpty() && !isLoopback(baseUrl)) throw AeonException(0, "이 기기는 암호화 키 없이 연결되어 있습니다. 연결을 해제한 뒤 다시 연결하세요.")
         val body = if (serverKey.isNotEmpty()) {
             val box = Sealing.seal(crypto, serverKey, value.encodeToByteArray(), "secret|$deviceId|$name")
             buildJsonObject { put("sealed", ApiJson.encodeToJsonElement(SealedBox.serializer(), box)) }
@@ -136,12 +140,13 @@ class AeonClient(
     /** Asks for a one-time pairing code for another device. Over the network it comes back sealed for this device. */
     suspend fun newPairingCode(admin: Boolean): Pair<String, PairingCodeResponse> {
         if (serverKey.isEmpty()) {
+            if (!isLoopback(baseUrl)) throw AeonException(0, "이 기기는 암호화 키 없이 연결되어 있습니다. 연결을 해제한 뒤 다시 연결하세요.")
             val r: PairingCodeResponse = ApiJson.decodeFromString(signed(HttpMethod.Post, "/v1/pairing-codes", buildJsonObject { put("admin", admin) }.toString()))
             return (r.code ?: throw AeonException(0, "이 기기를 다시 연결해야 다른 기기를 추가할 수 있습니다.")) to r
         }
         val ex = Sealing.exchange(crypto, serverKey)
         val r: PairingCodeResponse = ApiJson.decodeFromString(signed(HttpMethod.Post, "/v1/pairing-codes", buildJsonObject { put("admin", admin); put("epk", ex.epk) }.toString()))
-        val sealed = r.sealed ?: return (r.code ?: throw AeonException(0, "서버가 코드를 주지 않았습니다.")) to r
+        val sealed = r.sealed ?: throw AeonException(0, "서버가 코드를 암호화하지 않았습니다. 사용하지 않습니다.")
         return ex.open(sealed, "pairing-code|$deviceId").decodeToString() to r
     }
 
@@ -220,6 +225,13 @@ class AeonClient(
         }
         return text
     }
+}
+
+/** True when [url] points at the machine this app runs on. */
+fun isLoopback(url: String): Boolean {
+    val authority = url.substringAfter("://").substringBefore('/')
+    val host = (if (authority.startsWith("[")) authority.substringBefore(']') + "]" else authority.substringBefore(':')).lowercase()
+    return host == "localhost" || host == "127.0.0.1" || host == "[::1]"
 }
 
 /** Percent-encodes everything except RFC 3986 unreserved characters, so the signed text is exactly what is sent. */

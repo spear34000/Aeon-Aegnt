@@ -20,6 +20,10 @@ Visual system (changed 2026-11-11, mockup "Aeon 모바일" with light and dark b
 
 Built from the mockup so far: theme tokens, buttons, cards, the phone top bars, bottom bar, drawer, 피드, 둘러보기 and 내 에이전트. Not yet rebuilt to the mockup (they only pick up the new colours and shapes): the conversation (progress card, inline approval), the approval sheet, 작업 and task detail, pairing, and the wide layout.
 
+Composer: `+` uploads a file (stored under `uploads/` in the workspace, the message names its path), a model button shows provider, model and reasoning effort and opens a sheet (providers from the server catalogue, key entry, effort, consent, model list), and the blue arrow sends. 내 에이전트 › 개인화 sets what the agent calls the owner, tone, length and language; 기기 lists every paired device, makes a pairing code for another one and sets who may change settings. Clients: Android (phone), Windows x64 and ARM64 and Linux (Compose Desktop, jpackage builds only for the machine it runs on), web. iOS is out of scope.
+
+Still the old layout, with only the new colours: the conversation body (progress card, inline approval), the approval card, 작업 and task detail, pairing, and the wide layout.
+
 Deviations (what the design asks that is not built, or was built differently):
 
 - A conversation is one task. Multi-turn chat is not implemented; the "new conversation" composer creates a task.

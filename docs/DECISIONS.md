@@ -34,5 +34,7 @@ Verified fact (not a decision): Oracle Always Free Ampere A1 is 2 OCPU / 12 GB. 
 | D16 | Outbound requests for the catalogue and logos (registry search, Simple Icons via jsDelivr, publisher sites, GitHub avatars), and showing a brand's mark on community servers named after it. (A) on by default (current); (B) on, with a switch to turn it off; (C) only icons the publisher declared. | **Open.** Current behaviour is A. Recommendation: B. |
 | D17 | Where installable skills come from. Today a skill is a folder the owner copies into `<config dir>/skills`. | **Open.** No remote source is used. |
 
+| D18 | Provider catalogue and per-device rights. (1) Providers and models are read from models.dev at run time (same source as opencode); base URLs for providers it lists with a dedicated SDK are in code and were only probed, not used with real keys. (2) Keys from other devices are sealed to a server key; (3) devices can be limited to chat and approvals. Replaces "settings only from the PC" for devices the owner trusts. | **Applied, awaiting your confirmation.** Real-model calls through catalogue providers are unverified. |
+
 ## Deferred (asked again before the relevant phase)
 Cloudflare deploy auth method; Oracle use; UI stack (PWA vs native, Kotlin app scope); secret storage beyond environment variables; memory retention/deletion policy; notification channel; messaging integrations; backup format; competitor install/benchmark downloads.

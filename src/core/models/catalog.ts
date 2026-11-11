@@ -218,7 +218,9 @@ export function selectModel(cfg: AeonConfig, pick: ModelPick, catalog: CatalogPr
     if (pick.consent !== true) throw new Error("consent required: prompts will be sent to this provider");
     next.dataConsent = [...cfg.dataConsent, pick.provider];
   }
-  next.providers = [pick.provider, ...cfg.providers.filter((p) => p !== pick.provider)];
+  // Other providers stay only as fallbacks. Without owner-approved fallback they would never be used, and one
+  // without a key would stop the runtime from starting.
+  next.providers = cfg.fallbackAllowed ? [pick.provider, ...cfg.providers.filter((p) => p !== pick.provider)] : [pick.provider];
   if (next.endpoints!.length === 0) delete next.endpoints;
   return next;
 }

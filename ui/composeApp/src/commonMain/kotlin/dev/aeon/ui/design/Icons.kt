@@ -28,6 +28,7 @@ object AeonIcons {
     val Explore by lazy { stroke("explore", "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM15.5 8.5l-2 5-5 2 2-5z") }
     val Tasks by lazy { stroke("tasks", "M4 7l2 2 3-3M12 7.5h8M4 16l2 2 3-3M12 16.5h8") }
     val Agent by lazy { stroke("agent", "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4.5 20c1-4 4-6 7.5-6s6.5 2 7.5 6") }
+    val Send by lazy { stroke("send", "M12 19V5M6 11l6-6 6 6", 2.2f) }
     val Plus by lazy { stroke("plus", "M12 5v14M5 12h14", 2f) }
     val Check by lazy { stroke("check", "M5 12.5l4.5 4.5L19 7.5", 2.2f) }
     val Chevron by lazy { stroke("chevron", "M9 6l6 6-6 6") }

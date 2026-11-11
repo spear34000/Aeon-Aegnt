@@ -43,6 +43,23 @@ Any failure returns `401 {"error":"unauthorized"}` with no hint which check fail
 
 Static files (the web UI, when `--web` is given) are served without authentication because they are public code; they carry CSP, `X-Frame-Options: DENY` and `nosniff`.
 
+## Models, devices and files
+
+| Method & path | Purpose |
+|---|---|
+| `GET /v1/providers` | providers from the catalogue (built-ins plus models.dev, cached a day) with address, `hasKey`, `local`, reasoning levels, and the model in use. `GET /v1/providers/{id}/models` lists one provider's models |
+| `POST /v1/model` `{provider, model, reasoningEffort?, consent?, custom?}` | puts the model first in line. A provider outside this machine needs `consent: true` once, and again if its address changed. Needs the right to change settings |
+| `PUT /v1/secrets/{NAME}` `{sealed}` | keys arrive sealed (see below); a plain `{value}` is accepted from the machine itself only |
+| `POST /v1/pairing-codes` `{admin?, epk}` | a paired device lets another in. The code comes back sealed for `epk` |
+| `PATCH /v1/devices/{id}` `{name?, admin?}` | rename, or allow/forbid changing settings. A device can always remove itself |
+| `POST /v1/files?name=` (raw body, 20 MB) | stores the file as `<workspace>/uploads/<time>-<name>`; the app then names the path in the message |
+
+Sealing ("AEON-SEAL-V1", `src/node/server/seal.ts`): the server has an ECDH P-256 key; a device pins its public half while pairing (vouched for by the pairing code, `serverKeyProof`) and fails closed away from loopback if it is missing. A box is a one-time ECDH key, AES-256-GCM, and key = SHA-256(label, direction, shared secret, one-time key, server key), with associated data `secret|<device>|<NAME>` or `pairing-code|<device>`.
+
+Devices have an `admin` flag (default true): without it a device keeps chat and approvals but cannot change settings, keys, connections or devices. API keys for catalogue providers are stored under `AEON_EP_<ID>_KEY`, a name Aeon derives from the provider id and nothing else uses.
+
+`config.profile` (`userName`, `agentName`, `tone`, `detail`, `language`, `about`) is added to the system prompt as wording preferences only.
+
 ## Connections
 
 Nothing in the connection list is hard-coded in a UI. `config.mcpServers` holds `{ name, title?, url (https, no credentials), websiteUrl?, requires?[] }`; changing it is accepted **only from the machine running Aeon**, like providers. **Aeon does not run MCP tools yet:** an added server is stored and listed, nothing more. Package-based (stdio) servers cannot be added because host command execution is not allowed (D7).

@@ -72,7 +72,7 @@ fun ConversationScreen(state: UiState, model: AppModel, wide: Boolean, modifier:
             Banner("서버 연결이 끊겼습니다. PC가 켜져 있고 Aeon 서버가 실행 중인지 확인하세요.", Tone.Danger, "⚠", null)
         }
         state.status?.setupProblem?.let {
-            Banner("모델 키가 필요합니다. API 키를 넣거나 로컬 모델을 켜세요.", Tone.Warn, "•")
+            Banner("모델을 쓸 수 없습니다: $it. 입력창의 모델 버튼에서 키를 넣거나 다른 모델을 고르세요.", Tone.Warn, "•")
         }
         state.message?.let { Banner(it, Tone.Neutral, "·", model::dismissMessage) }
 
@@ -143,6 +143,7 @@ fun ConversationScreen(state: UiState, model: AppModel, wide: Boolean, modifier:
         }
 
         Composer(
+            state, model,
             enabled = !offline,
             initialText = state.prefill.orEmpty(),
             onSend = { text -> model.createTask(text, emptyList()); model.consumePrefill() },
@@ -229,55 +230,5 @@ private fun QuotaCard(d: TaskDetail, model: AppModel) {
             AeonButton("작업 정지", { model.cancel(d.id) }, kind = ButtonKind.Secondary)
             AeonButton("설정 바꾸기", { model.openSettings(dev.aeon.ui.state.SettingsPage.Models) }, kind = ButtonKind.Ghost)
         }
-    }
-}
-
-/** Composer: multi-line field, send button, Enter sends and Shift+Enter adds a line (desktop keyboards). */
-@Composable
-fun Composer(enabled: Boolean, onSend: (String) -> Unit, hint: String?, modifier: Modifier = Modifier, initialText: String = "") {
-    var text by remember(initialText) { mutableStateOf(initialText) }
-    val s = LocalAeonStatus.current
-    val canSend = enabled && text.isNotBlank()
-    fun send() {
-        if (!canSend) return
-        onSend(text)
-        text = ""
-    }
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(
-            Modifier.fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(26.dp))
-                .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.Bottom,
-        ) {
-            Box(Modifier.weight(1f).heightIn(min = 36.dp, max = 160.dp), contentAlignment = Alignment.CenterStart) {
-                if (text.isEmpty()) Text("목표를 말해 주세요", color = s.fg3, style = MaterialTheme.typography.bodyLarge)
-                BasicTextField(
-                    value = text,
-                    onValueChange = { text = it },
-                    enabled = enabled,
-                    textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, fontSize = 15.sp),
-                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                    modifier = Modifier.fillMaxWidth().onPreviewKeyEvent { ev ->
-                        if (ev.type == KeyEventType.KeyDown && ev.key == Key.Enter && !ev.isShiftPressed) {
-                            send()
-                            true
-                        } else {
-                            false
-                        }
-                    },
-                )
-            }
-            Spacer(Modifier.size(8.dp))
-            Box(
-                Modifier.size(36.dp).background(if (canSend) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant, CircleShape)
-                    .clickable(enabled = canSend) { send() },
-                contentAlignment = Alignment.Center,
-            ) {
-                Glyph("↑", color = if (canSend) MaterialTheme.colorScheme.onPrimary else s.fg3, style = MaterialTheme.typography.titleMedium)
-            }
-        }
-        if (hint != null) Text(hint, style = MaterialTheme.typography.bodySmall, color = s.fg3, modifier = Modifier.padding(start = 16.dp))
-        else Text("삭제·명령 실행·외부 전송은 항상 먼저 묻습니다. Shift+Enter 줄바꿈", style = MaterialTheme.typography.bodySmall, color = s.fg3, modifier = Modifier.padding(start = 16.dp))
     }
 }

@@ -49,7 +49,10 @@ fun AppRoot(model: AppModel, shell: @Composable (UiState, AppModel) -> Unit) {
         dev.aeon.ui.state.ThemeMode.Dark -> true
     }) {
         Surface(Modifier.fillMaxSize().safeDrawingPadding(), color = MaterialTheme.colorScheme.background) {
-            if (state.connection is Connection.Unpaired) ConnectScreen(state, model) else shell(state, model)
+            if (state.connection is Connection.Unpaired) ConnectScreen(state, model) else {
+                shell(state, model)
+                ModelSheetHost(state, model)
+            }
         }
     }
 }
