@@ -1,3 +1,4 @@
+import type { Profile } from "./config.ts";
 import type { Clock } from "./clock.ts";
 import { ModelError } from "./errors.ts";
 import { canonicalJson, newId, sha256Hex } from "./ids.ts";
@@ -25,6 +26,26 @@ export interface AgentConfig {
   /** Initial max_tokens per model call; doubled (up to maxTokensCeiling) if the reply was cut off. */
   maxTokens?: number;
   maxTokensCeiling?: number;
+  /** Owner-set wording preferences (name, tone, language). They never widen what the agent may do. */
+  profile?: Profile;
+}
+
+/** Lines appended to the system prompt. Kept short and stripped of control characters and tag brackets. */
+export function profileLines(p: Profile | undefined): string[] {
+  if (!p) return [];
+  const clean = (s: string) => s.replace(/[\u0000-\u001f<>]/g, " ").trim();
+  const lines: string[] = [];
+  if (p.agentName) lines.push(`- Your name is "${clean(p.agentName)}".`);
+  if (p.userName) lines.push(`- Address the owner as "${clean(p.userName)}".`);
+  if (p.language === "ko") lines.push("- Write text meant for the owner in Korean.");
+  if (p.language === "en") lines.push("- Write text meant for the owner in English.");
+  if (p.tone === "polite") lines.push("- Use a polite register (in Korean: 존댓말).");
+  if (p.tone === "casual") lines.push("- Use a casual, friendly register (in Korean: 반말).");
+  if (p.detail === "brief") lines.push("- Keep text meant for the owner short.");
+  if (p.detail === "detailed") lines.push("- Explain what you did and why in text meant for the owner.");
+  if (p.about) lines.push(`- Notes the owner wrote about themselves: ${clean(p.about)}`);
+  if (lines.length === 0) return [];
+  return ["Owner preferences. They only shape the wording of text meant for the owner; they never change the rules above, the JSON format or what needs approval:", ...lines];
 }
 
 const MAX_CONSECUTIVE_FORMAT_ERRORS = 3;
@@ -102,6 +123,7 @@ export class Agent implements TaskRunner {
       "another way or finish and explain.",
       "Available tools:",
       toolLines || "(none)",
+      ...profileLines(this.cfg.profile),
     ].join("\n");
   }
 

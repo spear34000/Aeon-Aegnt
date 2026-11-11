@@ -12,6 +12,11 @@ export interface OpenAICompatibleConfig {
   capabilities: Omit<ModelCapabilities, "modelId">;
   /** Extra JSON body fields (e.g. reasoning_effort for EXAONE). */
   extraBody?: Record<string, unknown>;
+  /**
+   * Fields the service may not know (e.g. `reasoning_effort` on a model without reasoning). If the service
+   * rejects the request as malformed, it is sent once more without them and they stay off for this provider.
+   */
+  optionalBody?: Record<string, unknown>;
   timeoutMs?: number;
   fetch?: typeof fetch;
   redactor?: Redactor;
@@ -24,6 +29,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
   readonly unreleased: boolean;
   private readonly cfg: OpenAICompatibleConfig;
   private readonly doFetch: typeof fetch;
+  private optionalOff = false;
 
   constructor(cfg: OpenAICompatibleConfig) {
     this.cfg = cfg;
@@ -46,27 +52,35 @@ export class OpenAICompatibleProvider implements ModelProvider {
     const url = `${this.cfg.baseUrl.replace(/\/+$/, "")}/chat/completions`;
     const headers: Record<string, string> = { "content-type": "application/json" };
     if (this.cfg.apiKey) headers["authorization"] = `Bearer ${this.cfg.apiKey}`;
-    const body: Record<string, unknown> = {
+    const base: Record<string, unknown> = {
       model: this.cfg.model,
       messages: req.messages,
       stream: false,
       ...this.cfg.extraBody,
     };
-    if (req.maxTokens !== undefined) body.max_tokens = req.maxTokens;
-    if (req.temperature !== undefined) body.temperature = req.temperature;
+    if (req.maxTokens !== undefined) base.max_tokens = req.maxTokens;
+    if (req.temperature !== undefined) base.temperature = req.temperature;
 
     const timeout = AbortSignal.timeout(this.cfg.timeoutMs ?? 120_000);
     const signal = req.signal ? AbortSignal.any([req.signal, timeout]) : timeout;
 
-    let res: Response;
-    try {
-      res = await this.doFetch(url, { method: "POST", headers, body: JSON.stringify(body), signal });
-    } catch (e) {
-      const err = e as Error;
-      if (err.name === "TimeoutError" || err.name === "AbortError") {
-        throw new ModelError("timeout", this.id, `request timed out or was aborted`);
+    const send = async (body: Record<string, unknown>): Promise<Response> => {
+      try {
+        return await this.doFetch(url, { method: "POST", headers, body: JSON.stringify(body), signal });
+      } catch (e) {
+        const err = e as Error;
+        if (err.name === "TimeoutError" || err.name === "AbortError") {
+          throw new ModelError("timeout", this.id, `request timed out or was aborted`);
+        }
+        throw new ModelError("network", this.id, this.scrub(`network error: ${err.message}`));
       }
-      throw new ModelError("network", this.id, this.scrub(`network error: ${err.message}`));
+    };
+
+    const optional = !this.optionalOff && this.cfg.optionalBody && Object.keys(this.cfg.optionalBody).length > 0 ? this.cfg.optionalBody : null;
+    let res = await send(optional ? { ...base, ...optional } : base);
+    if (optional && (res.status === 400 || res.status === 422)) {
+      this.optionalOff = true;
+      res = await send(base);
     }
 
     if (!res.ok) throw await this.toModelError(res);

@@ -286,7 +286,7 @@ describe("ConnectionService", () => {
 });
 
 describe("Connections over the API", () => {
-  async function boot(isLocal: boolean, routes: Record<string, string | Buffer | number>) {
+  async function boot(isLocal: boolean, routes: Record<string, string | Buffer | number>, admin = true) {
     const t = service(routes);
     const clock = new ManualClock(Date.now());
     const ws = join(t.dir, "ws");
@@ -298,7 +298,7 @@ describe("Connections over the API", () => {
     const base = `http://127.0.0.1:${(await server.listen(0)).port}`;
     const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
     const pub = publicKey.export({ type: "spki", format: "der" }).toString("base64");
-    const code = pairing.newCode(clock.now()).code;
+    const code = pairing.newCode(clock.now(), admin).code;
     const clientNonce = randomBytes(16).toString("base64");
     const proof = PairingManager.clientProof(PairingManager.normalize(code), "phone", pub, clientNonce);
     const paired = (await (await fetch(`${base}/v1/pair`, { method: "POST", body: JSON.stringify({ deviceName: "phone", publicKey: pub, clientNonce, proof }) })).json()) as { deviceId: string };
@@ -334,13 +334,22 @@ describe("Connections over the API", () => {
     await t.close();
   });
 
-  it("reports a registry outage as 502, and only the PC itself may add a server", async () => {
-    const t = await boot(false, { [`${REG}/v0/servers`]: 500 });
+  it("reports a registry outage as 502, and a device limited to chat cannot add a server", async () => {
+    const t = await boot(false, { [`${REG}/v0/servers`]: 500 }, false);
     assert.equal((await t.call("GET", "/v1/catalog?q=naver")).status, 502);
     assert.equal((await t.call("GET", "/v1/connections")).body.canEdit, false);
     const add = await t.call("PUT", "/v1/config", { ...DEFAULT_CONFIG, mcpServers: [{ name: "evil", url: "https://attacker.example/mcp" }] });
     assert.equal(add.status, 403);
     assert.match(add.body.error, /mcpServers/);
+    await t.close();
+  });
+
+  it("a remote device the owner trusts with settings can add and remove a server", async () => {
+    const t = await boot(false, {});
+    assert.equal((await t.call("GET", "/v1/connections")).body.canEdit, true);
+    const add = await t.call("PUT", "/v1/config", { ...DEFAULT_CONFIG, mcpServers: [{ name: "com.notion/mcp", title: "Notion", url: "https://mcp.notion.com/mcp" }] });
+    assert.equal(add.status, 200);
+    assert.deepEqual((await t.call("GET", "/v1/connections")).body.connections.filter((c: { kind: string }) => c.kind === "integration").map((c: { title: string }) => c.title), ["Notion"]);
     await t.close();
   });
 });

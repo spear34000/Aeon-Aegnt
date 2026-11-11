@@ -1,15 +1,18 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { extname, join, normalize, resolve, sep } from "node:path";
+import { dirname, extname, join, normalize, resolve, sep } from "node:path";
 import { systemClock, type Clock } from "../../core/clock.ts";
 import { parseConfig } from "../../core/config.ts";
+import { builtinProviders, currentModel, selectModel, type CatalogProvider, type ModelPick } from "../../core/models/catalog.ts";
 import { assertSecretName, type SecretStore } from "../../core/secrets.ts";
 import type { AuditEvent, Task } from "../../core/types.ts";
 import { parseCriterion } from "../../core/verify.ts";
 import { loadConfig, saveConfig } from "../config-file.ts";
 import type { ConnectionService } from "../connections.ts";
+import type { ProviderCatalog } from "../provider-catalog.ts";
+import { isSealedBox, type ServerIdentity } from "./seal.ts";
 import type { createRuntime } from "../runtime.ts";
-import { canonicalRequest, DeviceRegistry, NonceCache, PairingManager, verifySignature, type PairRequest } from "./device-auth.ts";
+import { canonicalRequest, DeviceRegistry, isAdmin, NonceCache, PairingManager, verifySignature, type PairRequest } from "./device-auth.ts";
 
 type Runtime = ReturnType<typeof createRuntime>;
 
@@ -22,6 +25,13 @@ export interface AeonServerOptions {
   secrets: SecretStore;
   /** Lists built-in tools, added MCP servers, skills and what a registry offers. Without it those routes answer 404. */
   connections?: ConnectionService;
+  /** Provider and model catalogue. Without it only the built-in providers are listed. */
+  providers?: ProviderCatalog;
+  /** Sealing key. With it, paired devices can send keys and receive pairing codes encrypted. */
+  identity?: ServerIdentity;
+  /** Addresses other devices can use to reach this server (shown when pairing a new device). */
+  addresses?: () => string[];
+  maxUploadBytes?: number;
   configDir: string;
   registry: DeviceRegistry;
   pairing: PairingManager;
@@ -92,6 +102,16 @@ export class AeonServer {
   constructor(o: AeonServerOptions) {
     this.o = o;
     this.clock = o.clock ?? systemClock;
+    if (o.identity) o.pairing.serverKey = o.identity.publicKey;
+  }
+
+  private async catalog(): Promise<CatalogProvider[]> {
+    return this.o.providers ? this.o.providers.providers() : builtinProviders();
+  }
+
+  /** Settings, keys, connections and devices can be changed by the machine itself or by a device the owner trusts with it. */
+  private canAdmin(req: IncomingMessage, deviceId: string): boolean {
+    return this.isLocal(req) || isAdmin(this.o.registry.get(deviceId));
   }
 
   async listen(port: number, host = "127.0.0.1"): Promise<{ port: number; host: string }> {
@@ -150,8 +170,7 @@ export class AeonServer {
     res.end(data);
   }
 
-  private async readBody(req: IncomingMessage): Promise<Buffer> {
-    const limit = this.o.maxBodyBytes ?? 256 * 1024;
+  private async readBody(req: IncomingMessage, limit = this.o.maxBodyBytes ?? 256 * 1024): Promise<Buffer> {
     const chunks: Buffer[] = [];
     let size = 0;
     for await (const c of req) {
@@ -218,10 +237,23 @@ export class AeonServer {
       const body = this.parseJson(await this.readBody(req));
       const r = this.o.pairing.complete(body as unknown as PairRequest, this.clock.now());
       if (!r.ok) return this.json(res, r.reason === "locked" ? 429 : r.reason === "bad_request" ? 400 : 403, { error: r.reason === "invalid" ? "pairing failed" : r.reason });
-      return this.json(res, 201, { deviceId: r.device.id, serverProof: r.serverProof, serverName: this.o.serverName ?? "Aeon" });
+      return this.json(res, 201, {
+        deviceId: r.device.id,
+        serverProof: r.serverProof,
+        serverName: this.o.serverName ?? "Aeon",
+        admin: r.device.admin !== false,
+        ...(r.serverKey ? { serverKey: r.serverKey, serverKeyProof: r.serverKeyProof } : {}),
+      });
     }
 
-    const raw = await this.readBody(req);
+    // Uploads are large, so the cheap checks (known device, fresh timestamp) run before the body is read.
+    const upload = method === "POST" && path === "/v1/files";
+    if (upload) {
+      const dev = this.o.registry.get(typeof req.headers["x-aeon-device"] === "string" ? req.headers["x-aeon-device"] : "");
+      const ts = Number(req.headers["x-aeon-timestamp"]);
+      if (!dev || dev.revoked || !Number.isFinite(ts) || Math.abs(this.clock.now() - ts) > FRESHNESS_MS) throw new HttpError(401, "unauthorized");
+    }
+    const raw = await this.readBody(req, upload ? (this.o.maxUploadBytes ?? 20 * 1024 * 1024) : undefined);
     const { deviceId } = this.authenticate(req, raw);
     const rt = this.o.getRuntime();
     const { store, engine } = rt;
@@ -230,7 +262,85 @@ export class AeonServer {
       const tasks = await store.listTasks();
       const counts: Record<string, number> = {};
       for (const t of tasks) counts[t.status] = (counts[t.status] ?? 0) + 1;
-      return this.json(res, 200, { name: this.o.serverName ?? "Aeon", device: deviceId, tasks: counts, secretsBackend: this.o.secrets.kind, providers: rt.router.health(), setupProblem: this.o.getProblem?.() ?? null });
+      const me = this.o.registry.get(deviceId);
+      return this.json(res, 200, {
+        name: this.o.serverName ?? "Aeon",
+        device: deviceId,
+        deviceName: me?.name ?? "",
+        admin: this.canAdmin(req, deviceId),
+        tasks: counts,
+        secretsBackend: this.o.secrets.kind,
+        providers: rt.router.health(),
+        setupProblem: this.o.getProblem?.() ?? null,
+        host: { platform: process.platform, arch: process.arch },
+        addresses: this.o.addresses?.() ?? [],
+        sealing: this.o.identity !== undefined,
+      });
+    }
+
+    if (upload) {
+      const name = (url.searchParams.get("name") ?? "")
+        .normalize("NFC")
+        .replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_")
+        .replace(/^\.+/, "")
+        .trim()
+        .slice(0, 120);
+      if (!name) throw new HttpError(400, "name is required");
+      if (raw.length === 0) throw new HttpError(400, "the file is empty");
+      const stamp = new Date(this.clock.now()).toISOString().replace(/[-:T.]/g, "").slice(0, 14);
+      const rel = `uploads/${stamp}-${name}`;
+      const target = rt.guard.resolve(rel);
+      if (!target.ok) throw new HttpError(400, target.violation);
+      mkdirSync(dirname(target.abs), { recursive: true });
+      try {
+        writeFileSync(target.abs, raw, { flag: "wx" });
+      } catch {
+        throw new HttpError(409, "a file with that name was uploaded in the same second");
+      }
+      return this.json(res, 201, { path: rel, size: raw.length });
+    }
+
+    if (path === "/v1/providers" && method === "GET") {
+      const catalog = await this.catalog();
+      const cfg = loadConfig(this.o.configDir);
+      const names = new Set(await this.o.secrets.list());
+      const used = new Set(cfg.providers);
+      return this.json(res, 200, {
+        providers: catalog.map((p) => ({ id: p.id, name: p.name, keyName: p.keyName, hasKey: p.keyName ? names.has(p.keyName) : true, local: p.local, doc: p.doc, efforts: p.efforts, modelCount: p.models.length, inUse: used.has(p.id), consented: p.local || cfg.dataConsent.includes(p.id) })),
+        current: currentModel(cfg, catalog),
+        catalogError: this.o.providers?.error ?? null,
+      });
+    }
+    const modelsMatch = /^\/v1\/providers\/([a-z0-9][a-z0-9._-]{0,63})\/models$/.exec(path);
+    if (modelsMatch && method === "GET") {
+      const p = (await this.catalog()).find((x) => x.id === modelsMatch[1]);
+      if (!p) throw new HttpError(404, "provider not found");
+      return this.json(res, 200, { provider: p.id, models: p.models });
+    }
+    if (path === "/v1/model" && method === "POST") {
+      if (!this.canAdmin(req, deviceId)) throw new HttpError(403, "this device is not allowed to change settings");
+      const b = this.parseJson(raw);
+      const catalog = await this.catalog();
+      let next;
+      try {
+        if (typeof b.provider !== "string" || typeof b.model !== "string") throw new Error("provider and model are required");
+        const custom = b.custom !== undefined && b.custom !== null && typeof b.custom === "object" ? (b.custom as Record<string, unknown>) : null;
+        const pick: ModelPick = {
+          provider: b.provider,
+          model: b.model,
+          ...(typeof b.reasoningEffort === "string" ? { reasoningEffort: b.reasoningEffort } : {}),
+          ...(b.consent === true ? { consent: true } : {}),
+          ...(custom && typeof custom.baseUrl === "string"
+            ? { custom: { baseUrl: custom.baseUrl, ...(typeof custom.name === "string" ? { name: custom.name } : {}), ...(typeof custom.keyName === "string" ? { keyName: custom.keyName } : {}) } }
+            : {}),
+        };
+        next = parseConfig(selectModel(loadConfig(this.o.configDir), pick, catalog));
+      } catch (e) {
+        throw new HttpError(400, (e as Error).message);
+      }
+      saveConfig(this.o.configDir, next);
+      await this.o.onConfigChanged?.();
+      return this.json(res, 200, { config: next, current: currentModel(next, catalog), setupProblem: this.o.getProblem?.() ?? null });
     }
 
     if (path === "/v1/tasks" && method === "GET") {
@@ -298,29 +408,41 @@ export class AeonServer {
       } catch (e) {
         throw new HttpError(400, (e as Error).message);
       }
-      // Changing where prompts and keys go (providers, consent, endpoints) is as sensitive as a secret: a lost or
-      // compromised phone must not be able to point the stored key at another host. Local machine only.
+      // Changing where prompts and keys go (providers, consent, endpoints, MCP servers) is as sensitive as a secret.
+      // It is accepted from the machine itself and from devices the owner lets change settings; a device limited
+      // to chat and approvals cannot point a stored key at another host.
       const cur = loadConfig(this.o.configDir);
-      // An added MCP server is another host the agent may talk to, so it follows the same rule.
-      const sensitive = ["providers", "dataConsent", "fallbackAllowed", "ollamaBaseUrl", "openaiCompatBaseUrl", "mcpServers"] as const;
+      const sensitive = ["providers", "dataConsent", "fallbackAllowed", "ollamaBaseUrl", "openaiCompatBaseUrl", "mcpServers", "endpoints"] as const;
       const changed = sensitive.filter((k) => JSON.stringify(cur[k] ?? null) !== JSON.stringify(cfg[k] ?? null));
-      if (changed.length > 0 && !this.isLocal(req)) throw new HttpError(403, `changing ${changed.join(", ")} is only allowed from the machine running Aeon`);
+      if (changed.length > 0 && !this.canAdmin(req, deviceId)) throw new HttpError(403, `this device is not allowed to change ${changed.join(", ")}`);
       saveConfig(this.o.configDir, cfg);
       await this.o.onConfigChanged?.();
       return this.json(res, 200, { config: cfg });
     }
 
-    // Secrets are write-only over the API, and only from the PC itself: the transport is plain HTTP on a LAN.
+    // Secrets are write-only over the API. The transport may be plain HTTP on a LAN, so a value from another device
+    // must arrive sealed for this server's key (seal.ts); a plain value is accepted from the machine itself only.
     if (path === "/v1/secrets" && method === "GET") return this.json(res, 200, { backend: this.o.secrets.kind, names: await this.o.secrets.list() });
     const secMatch = /^\/v1\/secrets\/([A-Z][A-Z0-9_]{1,63})$/.exec(path);
     if (secMatch) {
-      if (!this.isLocal(req)) throw new HttpError(403, "secrets can only be changed from the machine running Aeon");
+      if (!this.canAdmin(req, deviceId)) throw new HttpError(403, "this device is not allowed to change keys");
       const name = secMatch[1]!;
       assertSecretName(name);
       if (method === "PUT") {
         const b = this.parseJson(raw);
-        if (typeof b.value !== "string" || b.value.length === 0 || b.value.length > 4096) throw new HttpError(400, "value must be a non-empty string");
-        await this.o.secrets.set(name, b.value);
+        let value: unknown = b.value;
+        if (b.sealed !== undefined) {
+          if (!this.o.identity || !isSealedBox(b.sealed)) throw new HttpError(400, "sealed value not accepted");
+          try {
+            value = this.o.identity.open(b.sealed, `secret|${deviceId}|${name}`).toString("utf8");
+          } catch {
+            throw new HttpError(400, "sealed value could not be opened");
+          }
+        } else if (!this.isLocal(req)) {
+          throw new HttpError(400, "send the value sealed: this connection is not encrypted");
+        }
+        if (typeof value !== "string" || value.length === 0 || value.length > 4096) throw new HttpError(400, "value must be a non-empty string");
+        await this.o.secrets.set(name, value);
         await this.o.onConfigChanged?.();
         res.writeHead(204).end();
         return;
@@ -334,19 +456,60 @@ export class AeonServer {
     }
 
     if (path === "/v1/devices" && method === "GET") {
-      return this.json(res, 200, { devices: this.o.registry.list().map(({ id, name, createdAt, lastSeenAt, revoked }) => ({ id, name, createdAt, lastSeenAt, revoked })) });
+      return this.json(res, 200, {
+        devices: this.o.registry.list().map(({ id, name, createdAt, lastSeenAt, revoked, admin }) => ({ id, name, createdAt, lastSeenAt, revoked, admin: admin !== false, current: id === deviceId })),
+      });
     }
     const devMatch = /^\/v1\/devices\/(dev_[a-f0-9]+)$/.exec(path);
-    if (devMatch && method === "DELETE") {
-      if (!this.o.registry.revoke(devMatch[1]!)) throw new HttpError(404, "device not found");
-      res.writeHead(204).end();
-      return;
+    if (devMatch && (method === "DELETE" || method === "PATCH")) {
+      const id = devMatch[1]!;
+      // A device may always remove itself (signing out); anything else needs the right to manage devices.
+      if (!(method === "DELETE" && id === deviceId) && !this.canAdmin(req, deviceId)) throw new HttpError(403, "this device is not allowed to manage devices");
+      if (method === "DELETE") {
+        if (!this.o.registry.revoke(id)) throw new HttpError(404, "device not found");
+        res.writeHead(204).end();
+        return;
+      }
+      const b = this.parseJson(raw);
+      const change: { name?: string; admin?: boolean } = {};
+      if (b.name !== undefined) {
+        if (typeof b.name !== "string" || !b.name.trim() || b.name.length > 64) throw new HttpError(400, "name must be 1-64 characters");
+        change.name = b.name.trim();
+      }
+      if (b.admin !== undefined) {
+        if (typeof b.admin !== "boolean") throw new HttpError(400, "admin must be true or false");
+        if (id === deviceId && b.admin === false) throw new HttpError(409, "a device cannot remove its own right to change settings");
+        change.admin = b.admin;
+      }
+      const d = this.o.registry.update(id, change);
+      if (!d) throw new HttpError(404, "device not found");
+      return this.json(res, 200, { device: { id: d.id, name: d.name, createdAt: d.createdAt, lastSeenAt: d.lastSeenAt, revoked: d.revoked, admin: d.admin !== false, current: d.id === deviceId } });
+    }
+
+    // A paired device can let another device in. The code is returned sealed for the asking device, because anyone
+    // who reads a pairing code on the wire could pair a device of their own.
+    if (path === "/v1/pairing-codes" && method === "POST") {
+      if (!this.canAdmin(req, deviceId)) throw new HttpError(403, "this device is not allowed to pair devices");
+      const b = this.parseJson(raw);
+      const c = this.o.pairing.newCode(this.clock.now(), b.admin !== false);
+      const body = { expiresAt: c.expiresAt, admin: c.admin, addresses: this.o.addresses?.() ?? [] };
+      if (typeof b.epk === "string" && this.o.identity) {
+        let sealed;
+        try {
+          sealed = this.o.identity.sealFor(b.epk, Buffer.from(c.code, "utf8"), `pairing-code|${deviceId}`);
+        } catch {
+          throw new HttpError(400, "epk is not a P-256 public key");
+        }
+        return this.json(res, 201, { ...body, sealed });
+      }
+      if (!this.isLocal(req)) throw new HttpError(400, "send a one-time key (epk): this connection is not encrypted");
+      return this.json(res, 201, { ...body, code: c.code });
     }
 
     const conn = this.o.connections;
     if (conn && method === "GET") {
       if (path === "/v1/connections") {
-        return this.json(res, 200, { connections: conn.installed(rt.tools.list(), loadConfig(this.o.configDir)), skillsDir: conn.skillsDir, canEdit: this.isLocal(req) });
+        return this.json(res, 200, { connections: conn.installed(rt.tools.list(), loadConfig(this.o.configDir)), skillsDir: conn.skillsDir, canEdit: this.canAdmin(req, deviceId) });
       }
       if (path === "/v1/catalog/collections") return this.json(res, 200, { collections: conn.collections() });
       if (path === "/v1/catalog") {

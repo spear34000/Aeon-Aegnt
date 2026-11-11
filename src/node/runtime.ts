@@ -2,6 +2,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { Agent } from "../core/agent.ts";
 import { systemClock, type Clock } from "../core/clock.ts";
+import { isLoopbackUrl, type EndpointConfig, type Profile } from "../core/config.ts";
 import { ModelRouter } from "../core/models/router.ts";
 import type { ModelProvider } from "../core/models/types.ts";
 import { exaoneProvider, llamaCppProvider, ollamaProvider, openAiCompatible } from "../core/models/providers.ts";
@@ -37,6 +38,9 @@ export interface RuntimeOptions {
   fetchImpl?: typeof fetch;
   /** Release builds set this: refuse to wire providers marked `unreleased` . */
   releaseMode?: boolean;
+  /** OpenAI-compatible services from the settings; `providers` may name them by id. */
+  endpoints?: EndpointConfig[];
+  profile?: Profile;
 }
 
 /**
@@ -86,8 +90,25 @@ export function buildProviders(opts: RuntimeOptions, redactor: Redactor): ModelP
         );
         break;
       }
-      default:
-        throw new Error(`Unknown provider: ${id}`);
+      default: {
+        const ep = (opts.endpoints ?? []).find((e) => e.id === id);
+        if (!ep) throw new Error(`Unknown provider: ${id}`);
+        const local = isLoopbackUrl(ep.baseUrl);
+        const key = ep.keyName ? env[ep.keyName] : undefined;
+        if (ep.keyName && !key && !local) throw new Error(`Provider '${ep.name ?? id}' needs ${ep.keyName}.`);
+        out.push(
+          openAiCompatible({
+            id,
+            baseUrl: ep.baseUrl,
+            model: ep.model,
+            redactor,
+            external: !local,
+            ...(key ? { apiKey: key } : {}),
+            ...(ep.reasoningEffort ? { reasoningEffort: ep.reasoningEffort } : {}),
+            ...(opts.fetchImpl ? { fetch: opts.fetchImpl } : {}),
+          }),
+        );
+      }
     }
   }
   return out;
@@ -119,7 +140,7 @@ export function createRuntime(opts: RuntimeOptions) {
   tools.register(sandboxTool(guard, ...(opts.sandboxRunner ? [opts.sandboxRunner] : [])));
 
   const policy = new PolicyEngine(opts.policyRules ?? DEFAULT_RULES);
-  const agent = new Agent({ router, tools, policy, store, clock, redactor });
+  const agent = new Agent({ router, tools, policy, store, clock, redactor, ...(opts.profile ? { profile: opts.profile } : {}) });
   const engine = new WorkflowEngine({
     store,
     clock,
