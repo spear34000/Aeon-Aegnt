@@ -50,8 +50,18 @@ const KNOWN_ENDPOINTS: Record<string, string> = {
 };
 
 const EFFORTS = ["low", "medium", "high"];
-const SECRET_NAME = /^[A-Z][A-Z0-9_]{1,63}$/;
-const PROVIDER_ID = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+/** Letters, digits and hyphens only, so the key name derived below is unique per id. */
+const PROVIDER_ID = /^[a-z0-9][a-z0-9-]{0,47}$/;
+
+/**
+ * The secret that holds a provider's key is named by Aeon from the provider id, never by the catalogue.
+ * The catalogue is data from the network: if it could name the secret, an entry could ask for another
+ * provider's key and have it sent to its own address.
+ */
+export function keyNameFor(id: string): string {
+  const base = id.toUpperCase().replace(/-/g, "_");
+  return `${/^[A-Z]/.test(base) ? "" : "P_"}${base}_API_KEY`;
+}
 
 /** Providers Aeon has its own code path for. They are listed even when the catalogue cannot be fetched. */
 export function builtinProviders(): CatalogProvider[] {
@@ -100,9 +110,7 @@ export function catalogFromModelsDev(raw: unknown): CatalogProvider[] {
     if (!p || !PROVIDER_ID.test(id) || builtin.has(id) || id === "openai-compatible") continue;
     const baseUrl = KNOWN_ENDPOINTS[id] ?? (p.npm === "@ai-sdk/openai-compatible" || p.npm === "@openrouter/ai-sdk-provider" ? usableUrl(p.api) : null);
     if (!baseUrl) continue;
-    const env = Array.isArray(p.env) ? p.env.find((e): e is string => typeof e === "string" && SECRET_NAME.test(e)) : undefined;
     const local = isLoopbackUrl(baseUrl);
-    if (!env && !local) continue;
     const models: CatalogModel[] = [];
     for (const [mid, mv] of Object.entries(obj(p.models) ?? {})) {
       const m = obj(mv);
@@ -121,9 +129,17 @@ export function catalogFromModelsDev(raw: unknown): CatalogProvider[] {
       });
     }
     models.sort((a, b) => (b.released ?? "").localeCompare(a.released ?? "") || a.name.localeCompare(b.name));
-    out.push({ id, name: str(p.name, 80) ?? id, baseUrl, keyName: env ?? null, doc: usableUrl(p.doc), local, efforts: EFFORTS, models: models.slice(0, 120) });
+    out.push({ id, name: str(p.name, 80) ?? id, baseUrl, keyName: local ? null : keyNameFor(id), doc: usableUrl(p.doc), local, efforts: EFFORTS, models: models.slice(0, 120) });
   }
   return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
 }
 
 export interface CurrentModel {
@@ -153,8 +169,8 @@ export interface ModelPick {
   reasoningEffort?: string;
   /** The owner agreed that prompts go to this provider. Required the first time for a provider that is not local. */
   consent?: boolean;
-  /** Only for a provider that is not in the catalogue. */
-  custom?: { name?: string; baseUrl: string; keyName?: string };
+  /** Only for a provider that is not in the catalogue. `needsKey: false` is for services that take no key. */
+  custom?: { name?: string; baseUrl: string; needsKey?: boolean };
 }
 
 /**
@@ -164,6 +180,7 @@ export interface ModelPick {
 export function selectModel(cfg: AeonConfig, pick: ModelPick, catalog: CatalogProvider[]): AeonConfig {
   const known = catalog.find((p) => p.id === pick.provider);
   if (!known && !pick.custom) throw new Error(`unknown provider: ${pick.provider}`);
+  if (!known && !PROVIDER_ID.test(pick.provider)) throw new Error("a provider id uses lower-case letters, digits and hyphens");
   if (typeof pick.model !== "string" || !pick.model.trim()) throw new Error("model is required");
   const model = pick.model.trim();
   const next: AeonConfig = { ...cfg, endpoints: [...(cfg.endpoints ?? [])] };
@@ -181,10 +198,16 @@ export function selectModel(cfg: AeonConfig, pick: ModelPick, catalog: CatalogPr
   } else if (pick.provider === "llamacpp") {
     local = true;
   } else {
-    const baseUrl = known?.baseUrl ?? pick.custom!.baseUrl;
-    const keyName = known ? known.keyName : pick.custom!.keyName;
-    const name = known?.name ?? pick.custom!.name;
+    const baseUrl = (known?.baseUrl ?? pick.custom!.baseUrl).replace(/\/+$/, "");
     local = isLoopbackUrl(baseUrl);
+    const keyName = known ? known.keyName : local || pick.custom!.needsKey === false ? null : keyNameFor(pick.provider);
+    const name = known?.name ?? pick.custom!.name;
+    // The stored key follows the provider id, so a new address for the same id must be agreed to again:
+    // otherwise a changed catalogue entry could move an existing key to another host without anyone noticing.
+    const before = (cfg.endpoints ?? []).find((e) => e.id === pick.provider);
+    if (before && before.baseUrl !== baseUrl && !local && pick.consent !== true) {
+      throw new Error(`consent required: the address of this provider changed from ${hostOf(before.baseUrl)} to ${hostOf(baseUrl)}`);
+    }
     const ep: EndpointConfig = { id: pick.provider, baseUrl, model, ...(name ? { name } : {}), ...(keyName ? { keyName } : {}), ...(effort ? { reasoningEffort: effort as "low" | "medium" | "high" } : {}) };
     next.endpoints = [...next.endpoints!.filter((e) => e.id !== pick.provider), ep];
   }

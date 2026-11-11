@@ -306,7 +306,7 @@ export class AeonServer {
       const names = new Set(await this.o.secrets.list());
       const used = new Set(cfg.providers);
       return this.json(res, 200, {
-        providers: catalog.map((p) => ({ id: p.id, name: p.name, keyName: p.keyName, hasKey: p.keyName ? names.has(p.keyName) : true, local: p.local, doc: p.doc, efforts: p.efforts, modelCount: p.models.length, inUse: used.has(p.id), consented: p.local || cfg.dataConsent.includes(p.id) })),
+        providers: catalog.map((p) => ({ id: p.id, name: p.name, baseUrl: p.baseUrl, keyName: p.keyName, hasKey: p.keyName ? names.has(p.keyName) : true, local: p.local, doc: p.doc, efforts: p.efforts, modelCount: p.models.length, inUse: used.has(p.id), consented: p.local || cfg.dataConsent.includes(p.id) })),
         current: currentModel(cfg, catalog),
         catalogError: this.o.providers?.error ?? null,
       });
@@ -331,7 +331,7 @@ export class AeonServer {
           ...(typeof b.reasoningEffort === "string" ? { reasoningEffort: b.reasoningEffort } : {}),
           ...(b.consent === true ? { consent: true } : {}),
           ...(custom && typeof custom.baseUrl === "string"
-            ? { custom: { baseUrl: custom.baseUrl, ...(typeof custom.name === "string" ? { name: custom.name } : {}), ...(typeof custom.keyName === "string" ? { keyName: custom.keyName } : {}) } }
+            ? { custom: { baseUrl: custom.baseUrl, ...(typeof custom.name === "string" ? { name: custom.name } : {}), ...(custom.needsKey === false ? { needsKey: false } : {}) } }
             : {}),
         };
         next = parseConfig(selectModel(loadConfig(this.o.configDir), pick, catalog));
