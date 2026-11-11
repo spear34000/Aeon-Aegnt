@@ -50,7 +50,7 @@ describe("Provider catalogue (pure)", () => {
     assert.deepEqual(catalog.map((p) => p.id), ["exaone", "ollama", "llamacpp", "lmstudio", "openai", "openai-fast", "upstage"]);
     const openai = catalog.find((p) => p.id === "openai")!;
     assert.equal(openai.baseUrl, "https://api.openai.com/v1");
-    assert.equal(openai.keyName, "OPENAI_API_KEY");
+    assert.equal(openai.keyName, "AEON_EP_OPENAI_KEY");
     assert.deepEqual(openai.models.map((m) => m.id), ["gpt-think", "gpt-fast"], "newest first; deprecated and non-text models dropped");
     assert.deepEqual([openai.models[0]!.reasoning, openai.models[0]!.context], [true, 400000]);
     assert.equal(catalog.find((p) => p.id === "lmstudio")!.local, true);
@@ -60,8 +60,10 @@ describe("Provider catalogue (pure)", () => {
   });
 
   it("the catalogue cannot name the secret: a key is stored under the provider's own id, so no entry can ask for another provider's key", () => {
-    assert.equal(catalog.find((p) => p.id === "openai-fast")!.keyName, "OPENAI_FAST_API_KEY", "not the OPENAI_API_KEY it asked for");
-    assert.deepEqual([keyNameFor("openai"), keyNameFor("ollama-cloud"), keyNameFor("302ai")], ["OPENAI_API_KEY", "OLLAMA_CLOUD_API_KEY", "P_302AI_API_KEY"]);
+    assert.equal(catalog.find((p) => p.id === "openai-fast")!.keyName, "AEON_EP_OPENAI_FAST_KEY", "not the OPENAI_API_KEY it asked for");
+    assert.deepEqual([keyNameFor("openai"), keyNameFor("ollama-cloud"), keyNameFor("302ai")], ["AEON_EP_OPENAI_KEY", "AEON_EP_OLLAMA_CLOUD_KEY", "AEON_EP_302AI_KEY"]);
+    assert.notEqual(keyNameFor("302ai"), keyNameFor("p-302ai"), "no two ids share a secret");
+    for (const id of ["openai-compat", "exaone", "openai"]) assert.ok(!["OPENAI_COMPAT_API_KEY", "EXAONE_API_KEY", "OPENAI_API_KEY"].includes(keyNameFor(id)), "never a name used for something else");
     const names = catalog.map((p) => p.keyName).filter((k) => k !== null);
     assert.equal(new Set(names).size, names.length, "one secret per provider");
   });
@@ -79,7 +81,7 @@ describe("Provider catalogue (pure)", () => {
     const a = parseConfig(selectModel(DEFAULT_CONFIG, { provider: "openai", model: "gpt-think", reasoningEffort: "high", consent: true }, catalog));
     assert.deepEqual(a.providers, ["openai", "exaone"]);
     assert.deepEqual(a.dataConsent, ["openai"]);
-    assert.deepEqual(a.endpoints, [{ id: "openai", baseUrl: "https://api.openai.com/v1", model: "gpt-think", name: "OpenAI", keyName: "OPENAI_API_KEY", reasoningEffort: "high" }]);
+    assert.deepEqual(a.endpoints, [{ id: "openai", baseUrl: "https://api.openai.com/v1", model: "gpt-think", name: "OpenAI", keyName: "AEON_EP_OPENAI_KEY", reasoningEffort: "high" }]);
     assert.deepEqual(currentModel(a, catalog), { provider: "openai", providerName: "OpenAI", model: "gpt-think", reasoningEffort: "high" });
 
     const b = parseConfig(selectModel(a, { provider: "openai", model: "gpt-fast" }, catalog));
@@ -99,7 +101,7 @@ describe("Provider catalogue (pure)", () => {
 
   it("accepts a hand-typed endpoint, but only https (or localhost) and never a key in the settings", () => {
     const c = parseConfig(selectModel(DEFAULT_CONFIG, { provider: "my-vllm", model: "qwen3", consent: true, custom: { name: "사내 vLLM", baseUrl: "https://llm.example.com/v1/" } }, catalog));
-    assert.deepEqual(c.endpoints, [{ id: "my-vllm", baseUrl: "https://llm.example.com/v1", model: "qwen3", name: "사내 vLLM", keyName: "MY_VLLM_API_KEY" }]);
+    assert.deepEqual(c.endpoints, [{ id: "my-vllm", baseUrl: "https://llm.example.com/v1", model: "qwen3", name: "사내 vLLM", keyName: "AEON_EP_MY_VLLM_KEY" }]);
     assert.equal(parseConfig(selectModel(DEFAULT_CONFIG, { provider: "open-box", model: "m", consent: true, custom: { baseUrl: "https://open.example/v1", needsKey: false } }, catalog)).endpoints![0]!.keyName, undefined);
     assert.throws(() => selectModel(DEFAULT_CONFIG, { provider: "Bad.Id", model: "m", consent: true, custom: { baseUrl: "https://a.example/v1" } }, catalog), /provider id/);
     const bad = (e: unknown) => assert.throws(() => parseConfig({ ...DEFAULT_CONFIG, endpoints: [e] }));
@@ -113,8 +115,8 @@ describe("Provider catalogue (pure)", () => {
 
   it("the runtime wires a chosen endpoint with its key and marks only non-local ones external", () => {
     const cfg = parseConfig(selectModel(DEFAULT_CONFIG, { provider: "upstage", model: "solar-pro3", consent: true }, catalog));
-    assert.throws(() => buildProviders({ workspace: ".", providers: ["upstage"], fallbackAllowed: false, dataConsent: [], endpoints: cfg.endpoints!, env: {} }, new Redactor()), /needs UPSTAGE_API_KEY/);
-    const [p] = buildProviders({ workspace: ".", providers: ["upstage"], fallbackAllowed: false, dataConsent: [], endpoints: cfg.endpoints!, env: { UPSTAGE_API_KEY: "up_key_123456" } }, new Redactor());
+    assert.throws(() => buildProviders({ workspace: ".", providers: ["upstage"], fallbackAllowed: false, dataConsent: [], endpoints: cfg.endpoints!, env: {} }, new Redactor()), /needs AEON_EP_UPSTAGE_KEY/);
+    const [p] = buildProviders({ workspace: ".", providers: ["upstage"], fallbackAllowed: false, dataConsent: [], endpoints: cfg.endpoints!, env: { AEON_EP_UPSTAGE_KEY: "up_key_123456" } }, new Redactor());
     assert.deepEqual([p!.id, p!.external, p!.capabilities().modelId], ["upstage", true, "solar-pro3"]);
     const lm = parseConfig(selectModel(DEFAULT_CONFIG, { provider: "lmstudio", model: "qwen" }, catalog));
     assert.equal(buildProviders({ workspace: ".", providers: ["lmstudio"], fallbackAllowed: false, dataConsent: [], endpoints: lm.endpoints!, env: {} }, new Redactor())[0]!.external, false);
@@ -360,7 +362,7 @@ describe("Setting things up from any paired device", () => {
 
   it("lists providers from the catalogue and switches the model, asking for consent the first time", async () => {
     const t = await boot();
-    await t.secrets.set("UPSTAGE_API_KEY", "up_key_abcdef");
+    await t.secrets.set("AEON_EP_UPSTAGE_KEY", "up_key_abcdef");
     const list = await t.owner.call(t.base, t.clock, "GET", "/v1/providers");
     const row = (id: string) => (list.body.providers as Record<string, any>[]).find((p) => p.id === id)!;
     assert.deepEqual([row("upstage").hasKey, row("openai").hasKey, row("ollama").hasKey, row("ollama").local], [true, false, true, true]);

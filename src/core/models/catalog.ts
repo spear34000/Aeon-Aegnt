@@ -57,10 +57,13 @@ const PROVIDER_ID = /^[a-z0-9][a-z0-9-]{0,47}$/;
  * The secret that holds a provider's key is named by Aeon from the provider id, never by the catalogue.
  * The catalogue is data from the network: if it could name the secret, an entry could ask for another
  * provider's key and have it sent to its own address.
+ *
+ * Names live in their own namespace (`AEON_EP_<ID>_KEY`), so they can never equal a secret used for anything
+ * else (EXAONE_API_KEY, OPENAI_COMPAT_API_KEY, or a key the owner keeps in the environment for other tools).
+ * Ids contain only [a-z0-9-], and "-" becomes "_", so two ids never share a name.
  */
 export function keyNameFor(id: string): string {
-  const base = id.toUpperCase().replace(/-/g, "_");
-  return `${/^[A-Z]/.test(base) ? "" : "P_"}${base}_API_KEY`;
+  return `AEON_EP_${id.toUpperCase().replace(/-/g, "_")}_KEY`;
 }
 
 /** Providers Aeon has its own code path for. They are listed even when the catalogue cannot be fetched. */
