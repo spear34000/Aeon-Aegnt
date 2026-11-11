@@ -1,3 +1,4 @@
+import { keyNameFor } from "../core/config.ts";
 import { loadConfig } from "./config-file.ts";
 import { createRuntime } from "./runtime.ts";
 import { defaultSecretStore } from "./secret-backends.ts";
@@ -40,7 +41,7 @@ export async function bootRuntime(cfgDir: string, workspace: string, ov: BootOve
   if (!env.EXAONE_REASONING_EFFORT && saved.exaoneReasoning) env.EXAONE_REASONING_EFFORT = saved.exaoneReasoning;
   const endpoints = saved.endpoints ?? [];
   for (const e of endpoints) {
-    if (e.keyName && providers.includes(e.id) && !env[e.keyName]) {
+    if (e.keyName && e.keyName === keyNameFor(e.id) && providers.includes(e.id) && !env[e.keyName]) {
       const v = await store.get(e.keyName);
       if (v) env[e.keyName] = v;
     }

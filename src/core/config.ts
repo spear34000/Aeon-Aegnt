@@ -49,7 +49,19 @@ export interface Profile {
 
 const KNOWN_PROVIDERS = new Set<string>(["exaone", "ollama", "llamacpp", "openai-compatible"]);
 const ENDPOINT_ID = /^[a-z0-9][a-z0-9._-]{0,63}$/;
-const SECRET_NAME = /^[A-Z][A-Z0-9_]{1,63}$/;
+/**
+ * The secret that holds a provider's key is named by Aeon from the provider id, never by the catalogue.
+ * The catalogue is data from the network: if it could name the secret, an entry could ask for another
+ * provider's key and have it sent to its own address.
+ *
+ * Names live in their own namespace (`AEON_EP_<ID>_KEY`), so they can never equal a secret used for anything
+ * else (EXAONE_API_KEY, OPENAI_COMPAT_API_KEY, or a key the owner keeps in the environment for other tools).
+ * Ids contain only [a-z0-9-], and "-" becomes "_", so two ids never share a name.
+ */
+export function keyNameFor(id: string): string {
+  return `AEON_EP_${id.toUpperCase().replace(/-/g, "_")}_KEY`;
+}
+
 
 /** True for a URL that points at this machine. Such model servers are not "external". */
 export function isLoopbackUrl(url: string): boolean {
@@ -92,7 +104,8 @@ export function parseEndpoints(v: unknown): EndpointConfig[] {
       out.name = o.name;
     }
     if (o.keyName !== undefined) {
-      if (typeof o.keyName !== "string" || !SECRET_NAME.test(o.keyName)) throw new Error("endpoint keyName must be UPPER_SNAKE_CASE");
+      // A client cannot choose which stored secret an address receives: the name must be the one derived from the id.
+      if (o.keyName !== keyNameFor(o.id)) throw new Error(`endpoint keyName must be ${keyNameFor(o.id)}`);
       out.keyName = o.keyName;
     }
     if (o.reasoningEffort !== undefined) {

@@ -228,11 +228,10 @@ class AeonClient(
 }
 
 /** True when [url] points at the machine this app runs on. */
-fun isLoopback(url: String): Boolean {
-    val authority = url.substringAfter("://").substringBefore('/')
-    val host = (if (authority.startsWith("[")) authority.substringBefore(']') + "]" else authority.substringBefore(':')).lowercase()
-    return host == "localhost" || host == "127.0.0.1" || host == "[::1]"
-}
+fun isLoopback(url: String): Boolean = LOOPBACK.matches(url.trim())
+
+/** Exactly scheme, one of three fixed hosts, an optional port, then a path or nothing: no userinfo, `\`, `?` or `#` can follow the host. */
+private val LOOPBACK = Regex("""(?i)https?://(localhost|127\.0\.0\.1|\[::1\])(:[0-9]{1,5})?(/.*)?""")
 
 /** Percent-encodes everything except RFC 3986 unreserved characters, so the signed text is exactly what is sent. */
 fun encodeQueryValue(value: String): String {

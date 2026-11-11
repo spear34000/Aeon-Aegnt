@@ -109,6 +109,8 @@ describe("Provider catalogue (pure)", () => {
     bad({ id: "x", baseUrl: "http://llm.example.com/v1", model: "m" });
     bad({ id: "x", baseUrl: "https://user:pw@llm.example.com/v1", model: "m" });
     bad({ id: "x", baseUrl: "https://a.example/v1", model: "m", apiKey: "sk-secret" });
+    bad({ id: "evil", baseUrl: "https://attacker.example/v1", model: "m", keyName: "EXAONE_API_KEY" });
+    bad({ id: "x", baseUrl: "https://a.example/v1", model: "m", keyName: "AEON_EP_OTHER_KEY" });
     bad({ id: "exaone", baseUrl: "https://a.example/v1", model: "m" });
     bad({ id: "x", baseUrl: "https://a.example/v1", model: "m", reasoningEffort: "extreme" });
     assert.throws(() => parseConfig({ ...DEFAULT_CONFIG, providers: ["ghost"] }), /unknown provider/);
