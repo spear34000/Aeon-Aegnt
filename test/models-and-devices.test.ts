@@ -153,6 +153,30 @@ describe("Provider catalogue (pure)", () => {
   });
 });
 
+describe("Owner profile reaches the model", () => {
+  it("every model call of a task carries the saved name, tone and interests in its system prompt", async () => {
+    const { dir, cleanup } = tempDir();
+    mkdirSync(join(dir, "ws"));
+    const model = new MockProvider("m", [JSON.stringify({ plan: ["answer"], criteria: [] }), JSON.stringify({ action: "finish", summary: "지우님, 끝났어요." })]);
+    const profile = parseConfig({ ...DEFAULT_CONFIG, profile: { userName: "지우", tone: "polite", language: "ko", interests: ["개발", " 여행 ", "개발"] } }).profile!;
+    assert.deepEqual(profile.interests, ["개발", "여행"], "trimmed and de-duplicated");
+    const rt = createRuntime({ workspace: join(dir, "ws"), providers: ["m"], providerOverrides: [model], fallbackAllowed: false, dataConsent: [], store: new MemoryStore(), clock: new ManualClock(Date.now()), profile });
+    const task = await rt.engine.submit({ goal: "인사해 줘", criteria: [] });
+    for (let i = 0; i < 6 && (await rt.store.getTask(task.id))?.status !== "COMPLETED"; i++) await rt.engine.tick();
+    assert.equal((await rt.store.getTask(task.id))?.status, "COMPLETED");
+    assert.ok(model.calls.length >= 2);
+    for (const call of model.calls) {
+      const system = call.messages[0]!.content;
+      assert.match(system, /Address the owner as "지우"/);
+      assert.match(system, /존댓말/);
+      assert.match(system, /The owner's interests: 개발, 여행\./);
+      assert.match(system, /Write text meant for the owner in Korean/);
+    }
+    assert.throws(() => parseConfig({ ...DEFAULT_CONFIG, profile: { interests: Array.from({ length: 13 }, (_, i) => `t${i}`) } }));
+    cleanup();
+  });
+});
+
 describe("ProviderCatalog (cache)", () => {
   it("fetches once a day, falls back to the last copy, and backs off after a failure", async () => {
     const { dir, cleanup } = tempDir();
@@ -383,6 +407,26 @@ describe("Setting things up from any paired device", () => {
     assert.deepEqual(loadConfig(t.cfgDir).providers, ["upstage"]);
     assert.equal(t.changed(), 1, "the runtime is rebuilt for the next task");
     assert.equal((await t.owner.call(t.base, t.clock, "POST", "/v1/model", { provider: "upstage", model: "solar-pro3", reasoningEffort: "ultra" })).status, 400);
+    await t.close();
+  });
+
+  it("declining internet lookups stops catalogue and logo requests; only an allowed device can change it", async () => {
+    const t = await boot();
+    const before = await t.owner.call(t.base, t.clock, "GET", "/v1/providers");
+    assert.equal(before.body.online, true);
+    assert.ok(before.body.providers.length > 3);
+    const off = await t.owner.call(t.base, t.clock, "PUT", "/v1/config", { ...DEFAULT_CONFIG, onlineLookups: false });
+    assert.equal(off.status, 200);
+    assert.equal(loadConfig(t.cfgDir).onlineLookups, false);
+    assert.equal((await t.owner.call(t.base, t.clock, "GET", "/v1/providers")).body.online, false);
+    const ex = clientExchange(t.owner.serverKey);
+    const code = ex.open((await t.owner.call(t.base, t.clock, "POST", "/v1/pairing-codes", { epk: ex.epk, admin: false })).body.sealed, `pairing-code|${t.owner.id}`);
+    const limited = new Client("tablet");
+    await limited.pair(t.base, code);
+    const on = await limited.call(t.base, t.clock, "PUT", "/v1/config", { ...DEFAULT_CONFIG });
+    assert.equal(on.status, 403);
+    assert.match(on.body.error, /onlineLookups/);
+    assert.equal(parseConfig({ ...DEFAULT_CONFIG, onlineLookups: true }).onlineLookups, undefined, "yes is the default and is not stored");
     await t.close();
   });
 

@@ -64,11 +64,11 @@ export class ProviderCatalog {
     }
   }
 
-  /** Built-in providers first, then the catalogue in name order. */
-  async providers(): Promise<CatalogProvider[]> {
+  /** Built-in providers first, then the catalogue in name order. With [online] false nothing is fetched: only the last copy is used. */
+  async providers(online = true): Promise<CatalogProvider[]> {
     let c = this.memory ?? this.readDisk();
     // After a failed fetch, wait ten minutes before asking again so a dead network does not slow every request.
-    if ((!c || this.now() - c.at >= TTL_MS) && (this.loading || this.now() - this.lastTry >= 600_000)) {
+    if (online && (!c || this.now() - c.at >= TTL_MS) && (this.loading || this.now() - this.lastTry >= 600_000)) {
       this.lastTry = this.now();
       this.loading ??= this.refresh(c).finally(() => (this.loading = null));
       c = await this.loading;

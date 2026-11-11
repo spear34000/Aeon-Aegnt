@@ -21,6 +21,12 @@ export interface AeonConfig {
   exaoneReasoning?: "low" | "high" | "max";
   /** How the agent addresses the owner. Wording only; it never changes what the agent may do. */
   profile?: Profile;
+  /**
+   * Whether this machine may look things up on the internet for lists and logos (models.dev, the MCP registry,
+   * jsDelivr, publisher sites, GitHub). Missing means yes. `false` is the owner declining that optional consent:
+   * only built-in providers and what is already cached are shown.
+   */
+  onlineLookups?: boolean;
 }
 
 export interface EndpointConfig {
@@ -45,6 +51,8 @@ export interface Profile {
   language?: "auto" | "ko" | "en";
   /** Free notes about the owner that the agent may use when wording answers. */
   about?: string;
+  /** Topics the owner cares about, as short labels. */
+  interests?: string[];
 }
 
 const KNOWN_PROVIDERS = new Set<string>(["exaone", "ollama", "llamacpp", "openai-compatible"]);
@@ -124,7 +132,7 @@ function oneLine(field: string, v: unknown, max: number): string {
 export function parseProfile(v: unknown): Profile {
   if (v === null || typeof v !== "object" || Array.isArray(v)) throw new Error("profile must be an object");
   const o = v as Record<string, unknown>;
-  for (const k of Object.keys(o)) if (!["userName", "agentName", "tone", "detail", "language", "about"].includes(k)) throw new Error(`unknown profile field: ${k}`);
+  for (const k of Object.keys(o)) if (!["userName", "agentName", "tone", "detail", "language", "about", "interests"].includes(k)) throw new Error(`unknown profile field: ${k}`);
   const out: Profile = {};
   if (o.userName !== undefined) out.userName = oneLine("userName", o.userName, 40);
   if (o.agentName !== undefined) out.agentName = oneLine("agentName", o.agentName, 40);
@@ -143,6 +151,11 @@ export function parseProfile(v: unknown): Profile {
   if (o.about !== undefined) {
     if (typeof o.about !== "string" || o.about.length > 1000) throw new Error("profile about must be at most 1000 characters");
     out.about = o.about.trim();
+  }
+  if (o.interests !== undefined) {
+    if (!Array.isArray(o.interests) || o.interests.length > 12) throw new Error("profile interests must be a list of at most 12 labels");
+    const labels = [...new Set(o.interests.map((x) => oneLine("interests", x, 30)).filter((x) => x !== ""))];
+    if (labels.length > 0) out.interests = labels;
   }
   for (const k of ["userName", "agentName", "about"] as const) if (out[k] === "") delete out[k];
   return out;
@@ -207,7 +220,7 @@ const STRING_FIELDS = ["ollamaModel", "ollamaBaseUrl", "openaiCompatBaseUrl", "o
 export function parseConfig(raw: unknown): AeonConfig {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) throw new Error("config must be a JSON object");
   const o = raw as Record<string, unknown>;
-  const allowed = new Set(["providers", "dataConsent", "fallbackAllowed", "mcpServers", "endpoints", "exaoneReasoning", "profile", ...STRING_FIELDS]);
+  const allowed = new Set(["providers", "dataConsent", "fallbackAllowed", "mcpServers", "endpoints", "exaoneReasoning", "profile", "onlineLookups", ...STRING_FIELDS]);
   for (const k of Object.keys(o)) if (!allowed.has(k)) throw new Error(`unknown config field: ${k}`);
 
   const list = (k: string, v: unknown): string[] => {
@@ -241,6 +254,10 @@ export function parseConfig(raw: unknown): AeonConfig {
   if (o.profile !== undefined) {
     const profile = parseProfile(o.profile);
     if (Object.keys(profile).length > 0) cfg.profile = profile;
+  }
+  if (o.onlineLookups !== undefined) {
+    if (typeof o.onlineLookups !== "boolean") throw new Error("onlineLookups must be true or false");
+    if (o.onlineLookups === false) cfg.onlineLookups = false;
   }
   return cfg;
 }

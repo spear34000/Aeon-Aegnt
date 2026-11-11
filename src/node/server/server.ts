@@ -105,8 +105,13 @@ export class AeonServer {
     if (o.identity) o.pairing.serverKey = o.identity.publicKey;
   }
 
+  /** False when the owner declined internet lookups for lists and logos (config.onlineLookups). */
+  private online(): boolean {
+    return loadConfig(this.o.configDir).onlineLookups !== false;
+  }
+
   private async catalog(): Promise<CatalogProvider[]> {
-    return this.o.providers ? this.o.providers.providers() : builtinProviders();
+    return this.o.providers ? this.o.providers.providers(this.online()) : builtinProviders();
   }
 
   /** Settings, keys, connections and devices can be changed by the machine itself or by a device the owner trusts with it. */
@@ -308,7 +313,8 @@ export class AeonServer {
       return this.json(res, 200, {
         providers: catalog.map((p) => ({ id: p.id, name: p.name, baseUrl: p.baseUrl, keyName: p.keyName, hasKey: p.keyName ? names.has(p.keyName) : true, local: p.local, doc: p.doc, efforts: p.efforts, modelCount: p.models.length, inUse: used.has(p.id), consented: p.local || cfg.dataConsent.includes(p.id) })),
         current: currentModel(cfg, catalog),
-        catalogError: this.o.providers?.error ?? null,
+        catalogError: this.online() ? (this.o.providers?.error ?? null) : null,
+        online: this.online(),
       });
     }
     const modelsMatch = /^\/v1\/providers\/([a-z0-9][a-z0-9._-]{0,63})\/models$/.exec(path);
@@ -412,7 +418,7 @@ export class AeonServer {
       // It is accepted from the machine itself and from devices the owner lets change settings; a device limited
       // to chat and approvals cannot point a stored key at another host.
       const cur = loadConfig(this.o.configDir);
-      const sensitive = ["providers", "dataConsent", "fallbackAllowed", "ollamaBaseUrl", "openaiCompatBaseUrl", "mcpServers", "endpoints"] as const;
+      const sensitive = ["providers", "dataConsent", "fallbackAllowed", "ollamaBaseUrl", "openaiCompatBaseUrl", "mcpServers", "endpoints", "onlineLookups"] as const;
       const changed = sensitive.filter((k) => JSON.stringify(cur[k] ?? null) !== JSON.stringify(cfg[k] ?? null));
       if (changed.length > 0 && !this.canAdmin(req, deviceId)) throw new HttpError(403, `this device is not allowed to change ${changed.join(", ")}`);
       saveConfig(this.o.configDir, cfg);
@@ -518,6 +524,7 @@ export class AeonServer {
         const cursor = url.searchParams.get("cursor") ?? undefined;
         if (q.length > 60 || (cursor !== undefined && cursor.length > 300)) throw new HttpError(400, "query too long");
         const cfg = loadConfig(this.o.configDir);
+        if (cfg.onlineLookups === false) return this.json(res, 200, { connections: [], nextCursor: null, disabled: true });
         try {
           if (collection) {
             const list = await conn.collection(collection, cfg);
@@ -532,6 +539,7 @@ export class AeonServer {
       }
       const iconMatch = /^\/v1\/icons\/([a-f0-9]{24})$/.exec(path);
       if (iconMatch) {
+        if (!this.online()) throw new HttpError(404, "no icon");
         const icon = await conn.icon(iconMatch[1]!);
         if (!icon) throw new HttpError(404, "no icon");
         return this.json(res, 200, { icon });

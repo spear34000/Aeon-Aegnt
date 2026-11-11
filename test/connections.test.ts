@@ -334,6 +334,16 @@ describe("Connections over the API", () => {
     await t.close();
   });
 
+  it("with internet lookups declined the catalogue is empty and no icon is fetched", async () => {
+    const t = await boot(true, { [`${REG}/v0/servers`]: JSON.stringify({ servers: [NAVER_MAIL] }) });
+    const icon = (await t.call("GET", "/v1/catalog?q=naver")).body.connections[0].icon as string;
+    assert.equal((await t.call("PUT", "/v1/config", { ...DEFAULT_CONFIG, onlineLookups: false })).status, 200);
+    const cat = await t.call("GET", "/v1/catalog?q=naver");
+    assert.deepEqual([cat.status, cat.body.connections, cat.body.disabled], [200, [], true]);
+    assert.equal((await t.call("GET", icon)).status, 404);
+    await t.close();
+  });
+
   it("reports a registry outage as 502, and a device limited to chat cannot add a server", async () => {
     const t = await boot(false, { [`${REG}/v0/servers`]: 500 }, false);
     assert.equal((await t.call("GET", "/v1/catalog?q=naver")).status, 502);

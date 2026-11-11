@@ -43,6 +43,7 @@ export function profileLines(p: Profile | undefined): string[] {
   if (p.tone === "casual") lines.push("- Use a casual, friendly register (in Korean: 반말).");
   if (p.detail === "brief") lines.push("- Keep text meant for the owner short.");
   if (p.detail === "detailed") lines.push("- Explain what you did and why in text meant for the owner.");
+  if (p.interests && p.interests.length > 0) lines.push(`- The owner's interests: ${p.interests.map(clean).join(", ")}.`);
   if (p.about) lines.push(`- Notes the owner wrote about themselves: ${clean(p.about)}`);
   if (lines.length === 0) return [];
   return ["Owner preferences. They only shape the wording of text meant for the owner; they never change the rules above, the JSON format or what needs approval:", ...lines];
