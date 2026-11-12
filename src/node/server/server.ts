@@ -9,6 +9,7 @@ import type { AuditEvent, Task } from "../../core/types.ts";
 import { parseCriterion } from "../../core/verify.ts";
 import { loadConfig, saveConfig } from "../config-file.ts";
 import type { ConnectionService } from "../connections.ts";
+import { SkillError } from "../skills.ts";
 import type { ProviderCatalog } from "../provider-catalog.ts";
 import { isSealedBox, type ServerIdentity } from "./seal.ts";
 import type { createRuntime } from "../runtime.ts";
@@ -513,6 +514,34 @@ export class AeonServer {
     }
 
     const conn = this.o.connections;
+    const skillMatch = /^\/v1\/skills(?:\/([a-z0-9][a-z0-9-]{0,63}))?$/.exec(path);
+    if (conn && skillMatch) {
+      const folder = skillMatch[1];
+      try {
+        if (method === "GET") {
+          if (!folder) return this.json(res, 200, { skills: conn.skillStore.list(), dir: conn.skillsDir, canEdit: this.canAdmin(req, deviceId) });
+          const s = conn.skillStore.read(folder);
+          if (!s) throw new HttpError(404, "skill not found");
+          return this.json(res, 200, { skill: s });
+        }
+        if (folder && (method === "PUT" || method === "DELETE")) {
+          if (!this.canAdmin(req, deviceId)) throw new HttpError(403, "this device is not allowed to change skills");
+          if (method === "DELETE") {
+            if (!conn.skillStore.remove(folder)) throw new HttpError(404, "skill not found");
+            res.writeHead(204).end();
+            return;
+          }
+          const b = this.parseJson(raw);
+          if (typeof b.name !== "string" || !b.name.trim() || typeof b.body !== "string") throw new HttpError(400, "name and body are required");
+          const description = typeof b.description === "string" ? b.description : "";
+          const saved = conn.skillStore.write(folder, { name: b.name, description, body: b.body }, b.create === true);
+          return this.json(res, b.create === true ? 201 : 200, { skill: saved });
+        }
+      } catch (e) {
+        if (e instanceof SkillError) throw new HttpError(e.status, e.message);
+        throw e;
+      }
+    }
     if (conn && method === "GET") {
       if (path === "/v1/connections") {
         return this.json(res, 200, { connections: conn.installed(rt.tools.list(), loadConfig(this.o.configDir)), skillsDir: conn.skillsDir, canEdit: this.canAdmin(req, deviceId) });

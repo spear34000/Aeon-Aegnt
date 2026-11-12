@@ -1,5 +1,7 @@
 import { networkInterfaces } from "node:os";
 import { createInterface } from "node:readline";
+import { buildPairLink } from "../core/pair-link.ts";
+import { encodeQr, qrToAnsi } from "../core/qr.ts";
 import { join } from "node:path";
 import { bootRuntime } from "./bootstrap.ts";
 import { ConnectionService } from "./connections.ts";
@@ -33,7 +35,7 @@ export async function serveCommand(o: ServeOptions): Promise<number> {
     const any = o.host === "0.0.0.0" || o.host === "::";
     const out: string[] = [];
     for (const list of Object.values(networkInterfaces())) {
-      for (const a of list ?? []) if (a.family === "IPv4" && !a.internal && (any || a.address === o.host)) out.push(`http://${a.address}:${boundPort}`);
+      for (const a of list ?? []) if (a.family === "IPv4" && !a.internal && !a.address.startsWith("169.254.") && (any || a.address === o.host)) out.push(`http://${a.address}:${boundPort}`);
     }
     return out.length > 0 || any ? out : [`http://${o.host}:${boundPort}`];
   };
@@ -59,6 +61,13 @@ export async function serveCommand(o: ServeOptions): Promise<number> {
   const showCode = () => {
     const c = pairing.newCode(Date.now());
     console.log(`\nPairing code (valid 5 minutes, single use):\n  ${PairingManager.format(c.code)}\n`);
+    // A QR code is only useful when another device can reach this machine. The phone's camera opens it in the Aeon app.
+    const reachable = addresses();
+    if (reachable.length > 0 && process.stdout.isTTY) {
+      console.log("Scan with the phone's camera to fill in the address and code:\n");
+      console.log(qrToAnsi(encodeQr(buildPairLink(reachable, c.code)), 2));
+      console.log();
+    }
   };
   console.log(`Aeon server listening on http://${o.host}:${port}  (workspace: ${runtime.guard.root})`);
   if (problem) console.log(`Setup needed: ${problem}`);

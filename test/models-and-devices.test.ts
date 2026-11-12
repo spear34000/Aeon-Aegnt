@@ -12,7 +12,7 @@ import { MockProvider } from "../src/core/models/mock.ts";
 import { openAiCompatible } from "../src/core/models/providers.ts";
 import { MemorySecretStore } from "../src/core/secrets.ts";
 import { loadConfig } from "../src/node/config-file.ts";
-import type { Fetched } from "../src/node/connections.ts";
+import { ConnectionService, type Fetched } from "../src/node/connections.ts";
 import { ProviderCatalog } from "../src/node/provider-catalog.ts";
 import { buildProviders, createRuntime } from "../src/node/runtime.ts";
 import { canonicalRequest, DeviceRegistry, PairingManager } from "../src/node/server/device-auth.ts";
@@ -321,6 +321,7 @@ async function boot(opts: { local?: boolean; maxUploadBytes?: number } = {}) {
   const server = new AeonServer({
     getRuntime: () => rt, secrets, configDir: join(dir, "cfg"), registry, pairing, clock, tickIntervalMs: 0, identity,
     providers: new ProviderCatalog({ configDir: join(dir, "cfg"), fetcher, url: "https://models.test/api.json" }),
+    connections: new ConnectionService({ configDir: join(dir, "cfg"), fetcher }),
     addresses: () => ["http://192.168.0.12:7421"],
     isLocalRequest: () => opts.local === true,
     onConfigChanged: () => void changed++,
@@ -427,6 +428,39 @@ describe("Setting things up from any paired device", () => {
     assert.equal(on.status, 403);
     assert.match(on.body.error, /onlineLookups/);
     assert.equal(parseConfig({ ...DEFAULT_CONFIG, onlineLookups: true }).onlineLookups, undefined, "yes is the default and is not stored");
+    await t.close();
+  });
+
+  it("skills can be created, edited and deleted from a device that may change settings, and only inside the skills folder", async () => {
+    const t = await boot();
+    const put = (folder: string, body: Record<string, unknown>) => t.owner.call(t.base, t.clock, "PUT", `/v1/skills/${folder}`, body);
+    assert.deepEqual((await t.owner.call(t.base, t.clock, "GET", "/v1/skills")).body.skills, []);
+
+    const made = await put("meeting-notes", { name: "회의록 정리", description: "결정과 할 일: 정리", body: "# 순서\n1. 읽기", create: true });
+    assert.equal(made.status, 201);
+    assert.deepEqual([made.body.skill.name, made.body.skill.description, made.body.skill.body], ["회의록 정리", "결정과 할 일: 정리", "# 순서\n1. 읽기\n"]);
+    assert.match(readFileSync(join(t.cfgDir, "skills", "meeting-notes", "SKILL.md"), "utf8"), /^---\nname: 회의록 정리\ndescription: "결정과 할 일: 정리"\n---\n\n# 순서/, "a colon in a value is quoted");
+    assert.equal((await put("meeting-notes", { name: "again", body: "x", create: true })).status, 409);
+    assert.equal((await put("meeting-notes", { name: "회의록 정리", description: "", body: "수정" })).status, 200);
+    assert.equal((await t.owner.call(t.base, t.clock, "GET", "/v1/skills/meeting-notes")).body.skill.body, "수정\n");
+    assert.deepEqual((await t.owner.call(t.base, t.clock, "GET", "/v1/connections")).body.connections.filter((c: { kind: string }) => c.kind === "skill").map((c: { title: string }) => c.title), ["회의록 정리"], "the connection list shows it");
+
+    for (const bad of ["a%20b", "A", "-x", "x".repeat(65)]) assert.notEqual((await put(bad, { name: "n", body: "b", create: true })).status, 201, bad);
+    assert.equal((await put("big", { name: "n", body: "x".repeat(100_001), create: true })).status, 413);
+    assert.equal((await put("nobody", { name: "n", body: "b" })).status, 404, "editing a skill that does not exist");
+    assert.equal((await put("empty", { name: " ", body: "b", create: true })).status, 400);
+    assert.ok(!existsSync(join(t.cfgDir, "skills", "big")) && !existsSync(join(t.cfgDir, "skills", "empty")), "nothing is left behind by refused requests");
+
+    assert.equal((await t.owner.call(t.base, t.clock, "DELETE", "/v1/skills/meeting-notes")).status, 204);
+    assert.equal((await t.owner.call(t.base, t.clock, "DELETE", "/v1/skills/meeting-notes")).status, 404);
+    assert.ok(!existsSync(join(t.cfgDir, "skills", "meeting-notes")));
+
+    const ex = clientExchange(t.owner.serverKey);
+    const code = ex.open((await t.owner.call(t.base, t.clock, "POST", "/v1/pairing-codes", { epk: ex.epk, admin: false })).body.sealed, `pairing-code|${t.owner.id}`);
+    const limited = new Client("tablet");
+    await limited.pair(t.base, code);
+    assert.equal((await limited.call(t.base, t.clock, "PUT", "/v1/skills/x", { name: "n", body: "b", create: true })).status, 403);
+    assert.equal((await limited.call(t.base, t.clock, "GET", "/v1/skills")).status, 200, "reading is allowed");
     await t.close();
   });
 

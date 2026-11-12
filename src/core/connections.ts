@@ -220,14 +220,37 @@ export function relevance(c: Connection, q: string): number {
   return score;
 }
 
+export interface SkillDoc {
+  name: string;
+  description: string;
+  /** Everything after the front matter. */
+  body: string;
+}
+
+const oneLine = (s: string, max: number): string => s.replace(/[\u0000-\u001f]+/g, " ").trim().slice(0, max);
+
+/** Splits a SKILL.md into its front matter fields and the instructions after it. Without front matter the whole text is the body. */
+export function parseSkill(text: string, fallbackName: string): SkillDoc {
+  const m = /^---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)([\s\S]*)$/.exec(text);
+  const fm = m?.[1] ?? "";
+  const get = (k: string) => {
+    const f = new RegExp(`^${k}:[ \\t]*(.+)$`, "m").exec(fm);
+    return f ? f[1]!.trim().replace(/^["']|["']$/g, "") : null;
+  };
+  return { name: oneLine(get("name") ?? fallbackName, 80), description: oneLine(get("description") ?? "", 300), body: (m ? m[2]! : text).replace(/^\r?\n/, "") };
+}
+
+/** The inverse of parseSkill. Name and description are single lines; the body is kept as written. */
+export function composeSkill(d: SkillDoc): string {
+  const q = (v: string) => (/[:#"'\[\]{}&*!|>%@`]/.test(v) || /^\s|\s$/.test(v) ? JSON.stringify(v) : v);
+  const body = d.body.replace(/\r\n/g, "\n");
+  return `---\nname: ${q(oneLine(d.name, 80))}\ndescription: ${q(oneLine(d.description, 300))}\n---\n\n${body}${body.endsWith("\n") ? "" : "\n"}`;
+}
+
 /** Reads `name` and `description` from the front matter of a SKILL.md. */
 export function skillConnection(folder: string, text: string): Connection {
-  const fm = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)?.[1] ?? "";
-  const get = (k: string) => {
-    const m = new RegExp(`^${k}:[ \\t]*(.+)$`, "m").exec(fm);
-    return m ? m[1]!.trim().replace(/^["']|["']$/g, "") : null;
-  };
-  return { ...blank(), id: `skill:${folder}`, kind: "skill", state: "connected", title: (get("name") ?? folder).slice(0, 80), description: (get("description") ?? "").slice(0, 300) };
+  const d = parseSkill(text, folder);
+  return { ...blank(), id: `skill:${folder}`, kind: "skill", state: "connected", title: d.name || folder, description: d.description };
 }
 
 /** Same normalisation Simple Icons uses for its slugs. */

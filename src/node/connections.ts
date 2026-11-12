@@ -20,6 +20,7 @@ import {
 } from "../core/connections.ts";
 import type { Tool } from "../core/tools.ts";
 import { safeFetch } from "./net-guard.ts";
+import { SkillStore } from "./skills.ts";
 
 export interface Fetched {
   status: number;
@@ -163,6 +164,8 @@ interface CachedIcon {
  */
 export class ConnectionService {
   readonly skillsDir: string;
+  /** Create, edit and delete skill folders. */
+  readonly skillStore: SkillStore;
   private readonly fetcher: Fetcher;
   private readonly registry: string;
   private readonly brands: string;
@@ -178,6 +181,7 @@ export class ConnectionService {
   constructor(o: ConnectionServiceOptions) {
     this.o = o;
     this.skillsDir = join(o.configDir, "skills");
+    this.skillStore = new SkillStore(this.skillsDir);
     this.iconDir = join(o.configDir, "cache", "icons");
     this.fetcher = o.fetcher ?? defaultFetcher;
     this.registry = o.registryUrl ?? REGISTRY;
