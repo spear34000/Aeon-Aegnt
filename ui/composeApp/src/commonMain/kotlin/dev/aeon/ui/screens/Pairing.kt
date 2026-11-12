@@ -72,8 +72,9 @@ fun ConnectScreen(state: UiState, model: AppModel, modifier: Modifier = Modifier
         WebBlocked(modifier)
         return
     }
-    var url by remember(state.serverUrl) { mutableStateOf(state.serverUrl) }
-    var code by remember { mutableStateOf("") }
+    val prefill = state.pairPrefill
+    var url by remember(state.serverUrl, prefill?.address, prefill?.code) { mutableStateOf(prefill?.address ?: prefill?.addresses?.firstOrNull() ?: state.serverUrl) }
+    var code by remember(prefill?.code) { mutableStateOf(prefill?.code.orEmpty()) }
     var acceptHttp by remember { mutableStateOf(false) }
     val s = LocalAeonStatus.current
     val plainHttp = isPlainRemoteHttp(url)
@@ -88,21 +89,30 @@ fun ConnectScreen(state: UiState, model: AppModel, modifier: Modifier = Modifier
             if (onBack != null) CircleButton(dev.aeon.ui.design.AeonIcons.Back, "이전", onBack)
             Text("Aeon 서버에 연결", style = MaterialTheme.typography.headlineMedium)
             Text(
-                "Aeon을 실행할 컴퓨터(Windows, Linux)에서 서버를 켜세요: node src/node/cli.ts serve --host 0.0.0.0. 서버 창에 보이는 주소와 코드를 입력하세요. 이미 연결한 기기가 있으면 내 에이전트 › 기기에서 코드를 만들 수 있습니다.",
+                "서버를 켠 컴퓨터의 화면에 나온 QR 코드를 폰 카메라로 스캔하거나, 주소와 코드를 입력하세요.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (prefill != null) {
+                val text = when {
+                    prefill.probing -> "서버를 찾는 중이에요…"
+                    prefill.address != null -> "${prefill.serverName ?: "서버"}를 찾았어요. 연결을 누르세요."
+                    prefill.addresses.isNotEmpty() -> "서버에 닿지 않아요. 같은 네트워크인지 확인하세요."
+                    else -> "QR 코드에서 코드를 받았어요. 주소를 입력하세요."
+                }
+                Banner(text, if (prefill.probing || prefill.address != null) Tone.Ok else Tone.Warn, if (prefill.address != null) "✓" else "·")
+            }
             AeonTextField(
                 value = url,
                 onValueChange = { url = it },
                 label = "서버 주소",
                 placeholder = "http://192.168.0.12:7421",
-                help = "서버 창에 표시됩니다. 예: http://192.168.0.12:7421",
+                help = null,
                 error = if (url.isNotBlank() && !url.startsWith("http")) "주소 앞에 http:// 를 붙여 주세요." else null,
                 enabled = state.connection !is Connection.Connecting,
             )
             if (plainHttp) {
-                Banner("암호화되지 않은 연결입니다. 집처럼 믿을 수 있는 와이파이에서만 쓰세요.", Tone.Warn, "⚠")
+                Banner("암호화되지 않은 연결이에요. 믿을 수 있는 네트워크에서만 쓰세요.", Tone.Warn, "⚠")
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { acceptHttp = !acceptHttp }) {
                     Box(
                         Modifier.size(20.dp).border(1.5.dp, if (acceptHttp) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline, RoundedCornerShape(4.dp))
@@ -112,7 +122,7 @@ fun ConnectScreen(state: UiState, model: AppModel, modifier: Modifier = Modifier
                         if (acceptHttp) Text("✓", color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.labelMedium)
                     }
                     Spacer(Modifier.size(10.dp))
-                    Text("위험을 알고 계속합니다", style = MaterialTheme.typography.bodyMedium)
+                    Text("알고 계속해요", style = MaterialTheme.typography.bodyMedium)
                 }
             }
             AeonTextField(
@@ -120,7 +130,7 @@ fun ConnectScreen(state: UiState, model: AppModel, modifier: Modifier = Modifier
                 onValueChange = { code = Signing.normalizeCode(it).take(PAIR_CODE_LEN) },
                 label = "일회용 코드",
                 placeholder = "XXXX-XXXX-XXXX-XXXX",
-                help = "코드는 한 번만 쓸 수 있습니다. 5분 뒤 만료됩니다. 하이픈은 자동으로 들어갑니다. 붙여 넣기 가능.",
+                help = "5분 안에 한 번만 쓸 수 있어요.",
                 mono = true,
                 group = 4,
                 enabled = state.connection !is Connection.Connecting,
@@ -144,7 +154,7 @@ private fun WebBlocked(modifier: Modifier) {
         Card(Modifier.widthIn(max = 440.dp)) {
             Text("이 주소에서는 브라우저로 연결할 수 없습니다.", style = MaterialTheme.typography.titleMedium)
             Text(
-                "현재 주소: ${pageHostLabel()}. 브라우저 보안 때문에 PC 자신(127.0.0.1)이나 https 주소에서만 연결할 수 있습니다. 폰에서는 Aeon Android 앱을 쓰세요.",
+                "현재 주소: ${pageHostLabel()}. 브라우저 보안 때문에 서버가 있는 컴퓨터(127.0.0.1)나 https 주소에서만 연결할 수 있어요. 폰에서는 Aeon 앱을 쓰세요.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

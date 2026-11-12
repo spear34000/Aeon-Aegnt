@@ -76,7 +76,7 @@ actual fun rememberPermissionController(): PermissionController {
     val settings = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { tick++ }
     return remember(context) {
         object : PermissionController {
-            override val items = listOf(PermissionItem(NOTIFICATIONS, "알림", "승인이 필요한 일이 생기면 알려 줍니다. 허용하지 않아도 앱 안에서는 볼 수 있습니다."))
+            override val items = listOf(PermissionItem(NOTIFICATIONS, "알림", "승인이 필요한 일이 생기면 알려 드려요."))
 
             override fun status(id: String): PermissionStatus {
                 tick // read so the caller recomposes after an answer

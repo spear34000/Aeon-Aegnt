@@ -214,26 +214,20 @@ private fun PhoneBottomBar(current: Section, pending: Int, onSelect: (Section) -
     }
 }
 
-/** One status line per task: a dot and words, e.g. "끝남 · 확인됨". The colour is never the only signal. */
+/** One word per task state, with the colour of its dot. The colour is never the only signal. */
 @Composable
 internal fun taskStatusLine(t: TaskSummary): Pair<Color, String> {
     val s = LocalAeonStatus.current
     val neutral = MaterialTheme.colorScheme.onSurfaceVariant
     return when (t.status) {
-        "WAITING_FOR_APPROVAL" -> s.warn to "멈춤 · 승인을 기다림"
-        "RUNNING" -> MaterialTheme.colorScheme.primary to "실행 중"
-        "PENDING" -> MaterialTheme.colorScheme.primary to "계획 중"
+        "WAITING_FOR_APPROVAL" -> s.warn to "승인 대기"
+        "RUNNING", "PENDING" -> MaterialTheme.colorScheme.primary to "진행 중"
         "RETRY_WAIT" -> s.warn to "다시 시도 중"
         "WAITING_FOR_QUOTA" -> s.warn to "한도 대기"
         "WAITING_FOR_DEVICE" -> s.warn to "기기 대기"
         "FAILED" -> s.danger to "실패"
-        "CANCELLED" -> neutral to "멈춤"
-        "COMPLETED" -> when (t.verification?.status) {
-            "verified" -> s.ok to "끝남 · 확인됨"
-            "user_confirmed" -> s.ok to "끝남 · 내가 확인함"
-            "failed" -> s.danger to "끝남 · 확인 실패"
-            else -> neutral to "끝남 · 확인 안 됨"
-        }
+        "CANCELLED" -> neutral to "중단됨"
+        "COMPLETED" -> if (t.verification?.status == "failed") s.danger to "완료 · 확인 실패" else s.ok to "완료"
         else -> neutral to t.status
     }
 }
@@ -257,18 +251,16 @@ private fun ChatDrawer(state: UiState, model: AppModel, modifier: Modifier) {
         }
         LazyColumn(Modifier.weight(1f).padding(top = 12.dp), contentPadding = PaddingValues(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             items(state.tasks, key = { it.id }) { t ->
-                val (dot, text) = taskStatusLine(t)
+                val (dot, _) = taskStatusLine(t)
                 val selected = t.id == state.selectedTaskId
-                Column(
+                val quiet = t.status == "COMPLETED" && t.verification?.status != "failed" || t.status == "CANCELLED"
+                Row(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(AeonShape.CONTROL.dp)).background(if (selected) scheme.surface else Color.Transparent)
-                        .clickable { model.selectTask(t.id) }.padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                        .clickable { model.selectTask(t.id) }.padding(horizontal = 14.dp, vertical = 13.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    Text(t.goal, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        StatusDot(dot)
-                        Text(text, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
-                    }
+                    Text(t.goal, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (quiet && !selected) scheme.onSurfaceVariant else scheme.onSurface)
+                    if (!quiet) StatusDot(dot, 9)
                 }
             }
         }
@@ -293,15 +285,15 @@ fun FeedScreen(state: UiState, model: AppModel, modifier: Modifier = Modifier) {
     val scheme = MaterialTheme.colorScheme
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, bottom = 24.dp)) {
         if (state.approvals.isNotEmpty()) {
-            GroupHeader("내 답을 기다림", state.approvals.size.toString())
+            GroupHeader("승인 대기", state.approvals.size.toString())
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 state.approvals.forEach { a ->
                     val goal = state.tasks.firstOrNull { it.id == a.taskId }?.goal ?: "작업"
-                    ApprovalCard(a, state.approvalSeenAt[a.id], "$goal · ${a.tool}", { model.decide(a.id, it) })
+                    ApprovalCard(a, state.approvalSeenAt[a.id], goal, { model.decide(a.id, it) })
                 }
             }
         }
-        GroupHeader("최근 활동")
+        GroupHeader("활동")
         if (state.tasks.isEmpty()) {
             EmptyState("아직 활동이 없습니다", "새 대화에서 목표를 말하면 여기에 쌓입니다.")
         } else {
@@ -416,13 +408,8 @@ fun AgentHubScreen(state: UiState, model: AppModel, modifier: Modifier = Modifie
             RowDivider(64.dp)
             SettingRow(AeonIcons.Shield, "약관 · 권한", "") { open(SettingsPage.Legal) }
             RowDivider(64.dp)
-            SettingRow(AeonIcons.Info, "정보 · 연결 해제", "") { open(SettingsPage.About) }
+            SettingRow(AeonIcons.Info, "정보", "") { open(SettingsPage.About) }
         }
-        Spacer(Modifier.height(12.dp))
-        Text(
-            "키는 ${state.status?.secretsBackend ?: "이 PC의 보안 저장소"}에만 둡니다. 앱 패키지와 저장소에는 들어 있지 않습니다.",
-            Modifier.padding(horizontal = 4.dp), style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant,
-        )
     }
 }
 
@@ -444,18 +431,19 @@ private fun TaskTile(t: TaskSummary) {
     }
 }
 
-/** 작업: what is running or waiting first, then what is scheduled, then what is finished. Each row says its state in words. */
+/** 작업: grouped by what the owner needs to know first: waiting for approval, running, scheduled, then past work. */
 @Composable
 fun TasksScreen(state: UiState, model: AppModel, modifier: Modifier = Modifier) {
     val scheme = MaterialTheme.colorScheme
     val now = dev.aeon.ui.platform.nowMillis()
-    val done = setOf("COMPLETED", "FAILED", "CANCELLED")
-    val finished = state.tasks.filter { it.status in done }
+    val past = setOf("COMPLETED", "FAILED", "CANCELLED")
+    val waiting = state.tasks.filter { it.status == "WAITING_FOR_APPROVAL" }
     val scheduled = state.tasks.filter { it.status == "PENDING" && it.runAfter > now }
-    val active = state.tasks.filter { it.status !in done && it !in scheduled }
+    val finished = state.tasks.filter { it.status in past }
+    val active = state.tasks.filter { it.status !in past && it !in waiting && it !in scheduled }
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, bottom = 24.dp)) {
         if (state.tasks.isEmpty()) EmptyState("아직 작업이 없습니다", "대화에서 일을 맡기면 여기에 쌓입니다.")
-        listOf("진행 중" to active, "예약됨" to scheduled, "끝난 작업" to finished).forEach { (title, list) ->
+        listOf("승인 대기" to waiting, "진행 중" to active, "예약됨" to scheduled, "지난 작업" to finished).forEach { (title, list) ->
             if (list.isEmpty()) return@forEach
             GroupHeader(title, list.size.toString())
             ListSurface {
@@ -463,7 +451,7 @@ fun TasksScreen(state: UiState, model: AppModel, modifier: Modifier = Modifier) 
                     if (i > 0) RowDivider()
                     val (dot, text) = taskStatusLine(t)
                     Row(
-                        Modifier.fillMaxWidth().defaultMinSize(minHeight = 64.dp).clickable { model.selectTask(t.id, asDetail = t.status in done) }.padding(horizontal = 16.dp, vertical = 10.dp),
+                        Modifier.fillMaxWidth().defaultMinSize(minHeight = 64.dp).clickable { model.selectTask(t.id, asDetail = t.status in past) }.padding(horizontal = 16.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         TaskTile(t)

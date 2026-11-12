@@ -52,7 +52,7 @@ internal class Term(val id: String, val required: Boolean, val title: String, va
 
 internal val TERMS = listOf(
     Term(
-        "service", true, "이용 안내", "승인한 동작의 결과는 내 책임입니다",
+        "service", true, "이용 안내", "승인한 일의 결과는 내 책임이에요",
         "1. Aeon은 Apache-2.0 라이선스의 오픈소스 소프트웨어이며, 어떤 보증도 없이 있는 그대로 제공됩니다.\n\n" +
             "2. 에이전트는 서버를 시작할 때 정한 작업 폴더 안에서만 파일을 다룹니다. 삭제, 명령 실행, 외부로 보내기처럼 되돌릴 수 없거나 위험한 동작은 내가 승인한 뒤에만 실행합니다.\n\n" +
             "3. 승인하면 그 동작은 실제로 실행됩니다. Aeon에는 실행한 동작을 되돌리는 기능이 없습니다. 승인한 동작의 결과는 내 책임입니다.\n\n" +
@@ -112,7 +112,7 @@ internal fun TermDialog(term: Term, onClose: () -> Unit) {
 internal fun PermissionRows(controller: PermissionController) {
     val scheme = MaterialTheme.colorScheme
     if (controller.items.isEmpty()) {
-        Text("이 기기에서는 따로 허용할 권한이 없습니다.", Modifier.padding(horizontal = 4.dp, vertical = 8.dp), style = MaterialTheme.typography.bodyMedium, color = scheme.onSurfaceVariant)
+        Text("이 기기에서는 허용할 권한이 없어요.", Modifier.padding(horizontal = 4.dp, vertical = 8.dp), style = MaterialTheme.typography.bodyMedium, color = scheme.onSurfaceVariant)
         return
     }
     ListSurface {
@@ -121,10 +121,7 @@ internal fun PermissionRows(controller: PermissionController) {
             val status = controller.status(item.id)
             Row(Modifier.fillMaxWidth().defaultMinSize(minHeight = 64.dp).padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(item.title, style = MaterialTheme.typography.titleMedium)
-                        Chip("선택", Tone.Neutral)
-                    }
+                    Text(item.title, style = MaterialTheme.typography.titleMedium)
                     Text(item.reason, style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant)
                     if (status == PermissionStatus.Blocked) Text("시스템 설정에서만 켤 수 있습니다.", style = MaterialTheme.typography.labelMedium, color = LocalAeonStatus.current.warn)
                 }
@@ -151,7 +148,7 @@ fun LegalPage(state: UiState, model: AppModel) {
     Text("권한", style = MaterialTheme.typography.labelLarge, color = s.fg3)
     PermissionRows(controller)
 
-    Text("선택 동의", style = MaterialTheme.typography.labelLarge, color = s.fg3)
+    Text("공유와 알림", style = MaterialTheme.typography.labelLarge, color = s.fg3)
     Card {
         AeonSwitch(online, { model.setOnlineLookups(it) }, "온라인 목록·로고 조회", enabled = state.isAdmin && !state.busy)
         Text(if (state.isAdmin) "서버 전체에 적용됩니다." else "설정을 바꿀 수 있는 기기에서만 바뀝니다.", style = MaterialTheme.typography.bodySmall, color = s.fg3)
@@ -165,7 +162,7 @@ fun LegalPage(state: UiState, model: AppModel) {
         }
     }
 
-    Text("필수 동의", style = MaterialTheme.typography.labelLarge, color = s.fg3)
+    Text("약관", style = MaterialTheme.typography.labelLarge, color = s.fg3)
     Card {
         TERMS.filter { it.required }.forEach { t ->
             Row(Modifier.fillMaxWidth().clickable { open = t }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -190,8 +187,8 @@ fun LegalPage(state: UiState, model: AppModel) {
     if (withdraw) {
         AlertDialog(
             onDismissRequest = { withdraw = false },
-            title = { Text("필수 동의를 철회할까요?") },
-            text = { Text("철회하면 약관 화면으로 돌아가고, 다시 동의하기 전까지 Aeon을 쓸 수 없습니다. 대화와 설정은 지워지지 않습니다.", style = MaterialTheme.typography.bodyMedium) },
+            title = { Text("동의를 철회할까요?") },
+            text = { Text("철회하면 약관 화면으로 돌아가고, 다시 동의하기 전까지 쓸 수 없어요. 대화와 설정은 지워지지 않아요.", style = MaterialTheme.typography.bodyMedium) },
             confirmButton = { TextButton(onClick = { withdraw = false; model.withdrawTerms() }) { Text("철회", color = s.danger) } },
             dismissButton = { TextButton(onClick = { withdraw = false }) { Text("취소") } },
         )

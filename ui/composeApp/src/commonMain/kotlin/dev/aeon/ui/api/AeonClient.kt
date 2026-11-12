@@ -39,6 +39,14 @@ class AeonClient(
 
     suspend fun hello(): HelloResponse = ApiJson.decodeFromString(plain(HttpMethod.Get, "/v1/hello", null))
 
+    /** The name of the Aeon server answering at [url], or null if nothing answers within a few seconds. Sends nothing secret. */
+    suspend fun probe(url: String): String? = kotlinx.coroutines.withTimeoutOrNull(3_000) {
+        runCatching {
+            val r = http.request(url.trimEnd('/') + "/v1/hello") { this.method = HttpMethod.Get }
+            if (r.status.value == 200) ApiJson.decodeFromString<HelloResponse>(r.bodyAsText()).name else null
+        }.getOrNull()
+    }
+
     /** Pairs this device. Verifies the server's proof that it knew the code before trusting the result. */
     suspend fun pair(code: String, deviceName: String): PairResponse {
         val normalized = Signing.normalizeCode(code)
@@ -177,6 +185,25 @@ class AeonClient(
     suspend fun catalog(query: String = "", collection: String? = null): CatalogResponse {
         val q = if (collection != null) "collection=${encodeQueryValue(collection)}" else "q=${encodeQueryValue(query)}"
         return ApiJson.decodeFromString(signed(HttpMethod.Get, "/v1/catalog?$q"))
+    }
+
+    suspend fun skills(): SkillsResponse = ApiJson.decodeFromString(signed(HttpMethod.Get, "/v1/skills"))
+
+    suspend fun skill(folder: String): SkillItem = ApiJson.decodeFromString<SkillResponse>(signed(HttpMethod.Get, "/v1/skills/$folder")).skill
+
+    /** Creates ([create] true) or replaces a skill. The server composes SKILL.md from the three fields. */
+    suspend fun saveSkill(folder: String, name: String, description: String, body: String, create: Boolean): SkillItem {
+        val json = buildJsonObject {
+            put("name", name)
+            put("description", description)
+            put("body", body)
+            if (create) put("create", true)
+        }
+        return ApiJson.decodeFromString<SkillResponse>(signed(HttpMethod.Put, "/v1/skills/$folder", json.toString())).skill
+    }
+
+    suspend fun deleteSkill(folder: String) {
+        signed(HttpMethod.Delete, "/v1/skills/$folder")
     }
 
     /** [path] is the `icon` field of a connection. Returns null when the server found no icon. */

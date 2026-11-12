@@ -1,18 +1,14 @@
 package dev.aeon.ui.screens
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.foundation.clickable
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -25,43 +21,55 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.aeon.ui.api.Approval
 import dev.aeon.ui.design.AeonButton
 import dev.aeon.ui.design.AeonShape
 import dev.aeon.ui.design.ButtonKind
 import dev.aeon.ui.design.LocalAeonStatus
-import dev.aeon.ui.design.RiskBand
 import dev.aeon.ui.platform.koreanClock
 import dev.aeon.ui.platform.koreanDayPrefix
 import dev.aeon.ui.platform.nowMillis
 
-/** Risk kind, level (1 low, 2 medium, 3 high) and the title for each tool class. */
-data class RiskInfo(val kind: String, val level: Int, val levelLabel: String, val title: (Int) -> String)
+/**
+ * How an approval is described to the owner. [level] 3 means the action cannot be undone or leaves this machine: the
+ * allow button is then drawn as a red outline. The judgement itself is made by the server's policy, not here.
+ */
+data class RiskInfo(val kind: String, val level: Int, val title: (Int) -> String)
 
 fun riskInfo(a: Approval): RiskInfo = when (a.risk) {
-    "read" -> RiskInfo("읽기", 1, "낮음") { n -> "파일 ${n}개 읽기" }
-    "write" -> RiskInfo("쓰기", 2, "보통") { n -> "파일 ${n}개 새로 만들기 / 덮어쓰기" }
-    "delete" -> RiskInfo("파일 삭제", 3, "높음") { n -> "파일 ${n}개 영구 삭제" }
-    "exec" -> RiskInfo("명령 실행", 3, "높음") { _ -> "명령 1개 실행" }
-    "network_write", "external_effect" -> RiskInfo("외부 전송", 3, "높음") { n -> "데이터 ${n}개를 외부 서버로 전송" }
-    else -> RiskInfo("확인 필요", 3, "높음") { _ -> "작업 1개 실행" }
+    "read" -> RiskInfo("읽기", 1) { n -> "파일 ${n}개를 읽을까요?" }
+    "write" -> RiskInfo("쓰기", 2) { n -> "파일 ${n}개를 쓸까요?" }
+    "delete" -> RiskInfo("삭제", 3) { n -> "파일 ${n}개를 삭제할까요?" }
+    "exec" -> RiskInfo("명령 실행", 3) { _ -> "명령을 실행할까요?" }
+    "network_write", "external_effect" -> RiskInfo("외부 전송", 3) { _ -> "외부로 보낼까요?" }
+    else -> RiskInfo("확인", 3) { _ -> "이 작업을 실행할까요?" }
 }
 
+private fun fileName(path: String): String = path.trimEnd('/', '\\').substringAfterLast('/').substringAfterLast('\\').ifEmpty { path }
+private fun folderOf(path: String): String = path.trimEnd('/', '\\').let { p -> val i = maxOf(p.lastIndexOf('/'), p.lastIndexOf('\\')); if (i > 0) p.substring(0, i) else "" }
+
 /**
- * Approval card (design: 01 승인 카드). Shows what, where, how risky, when it expires and whether it can be undone.
- * "Allow" is disabled for one second after the card appears (against accidental taps); "Deny" has focus by default.
+ * Approval card. The title says what will happen, the targets are listed by name, and the exact request (full paths,
+ * command line, URL) is one tap away. "Deny" is the strong button and has focus; "Allow" is drawn in red for actions
+ * that cannot be undone and stays disabled for one second after the card appears, against accidental taps.
  */
 @Composable
 fun ApprovalCard(a: Approval, seenAt: Long?, sourceLabel: String, onDecide: (Boolean) -> Unit, modifier: Modifier = Modifier) {
     val s = LocalAeonStatus.current
+    val scheme = MaterialTheme.colorScheme
+    val haptic = LocalHapticFeedback.current
     val now = nowMillis()
     val info = riskInfo(a)
-    val high = info.level == 3
+    val high = info.level == 3 || a.irreversible
     val leftMs = a.expiresAt - now
     var allowReady by remember(a.id) { mutableStateOf(seenAt == null || now - seenAt >= 1000) }
     var showAll by remember(a.id) { mutableStateOf(false) }
+    var details by remember(a.id) { mutableStateOf(false) }
     val denyFocus = remember { FocusRequester() }
     LaunchedEffect(a.id) {
         denyFocus.requestFocus()
@@ -70,81 +78,49 @@ fun ApprovalCard(a: Approval, seenAt: Long?, sourceLabel: String, onDecide: (Boo
             allowReady = true
         }
     }
-    val border = if (high) s.danger else MaterialTheme.colorScheme.outlineVariant
     Column(
-        modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(AeonShape.BUBBLE.dp))
-            .then(if (high) Modifier.border(1.5.dp, border, RoundedCornerShape(AeonShape.BUBBLE.dp)) else Modifier)
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        modifier.fillMaxWidth().background(scheme.surface, RoundedCornerShape(AeonShape.CARD.dp)).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        // 1 risk band + 2 expiry
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            RiskBand(info.kind, info.level, info.levelLabel, null)
-            Spacer(Modifier.weight(1f))
+        Row(verticalAlignment = Alignment.Top) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(info.title(a.resources.size.coerceAtLeast(1)), style = MaterialTheme.typography.titleLarge)
+                Text(sourceLabel, style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
             ExpiryText(a.expiresAt, leftMs, now)
         }
-        // 3 what
-        Text(info.title(a.resources.size.coerceAtLeast(1)), style = MaterialTheme.typography.titleMedium)
-        // 5 where (monospace, first 3, then "N개 더 보기")
         val shown = if (showAll) a.resources else a.resources.take(3)
         if (shown.isNotEmpty()) {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(Modifier.fillMaxWidth().background(scheme.background, RoundedCornerShape(AeonShape.CONTROL.dp)).padding(horizontal = 14.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 shown.forEach { r ->
-                    SelectionContainer {
-                        Text(r, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
+                    Column {
+                        Text(fileName(r), style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        folderOf(r).takeIf { it.isNotEmpty() }?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) }
                     }
                 }
                 if (a.resources.size > 3) {
-                    Text(
-                        if (showAll) "접기" else "${a.resources.size - 3}개 더 보기",
-                        color = MaterialTheme.colorScheme.primary,
-                        style = MaterialTheme.typography.labelMedium,
-                        modifier = Modifier.clickable { showAll = !showAll },
-                    )
+                    Text(if (showAll) "접기" else "${a.resources.size - 3}개 더 보기", color = scheme.primary, style = MaterialTheme.typography.labelLarge, modifier = Modifier.clickable { showAll = !showAll })
                 }
             }
         }
-        // The exact action, as the server recorded it (command line, URL with query, body preview). Copyable.
-        Column(
-            Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(AeonShape.CONTROL.dp)).padding(10.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Text("정확한 내용", style = MaterialTheme.typography.labelMedium, color = s.fg3)
-            SelectionContainer { Text(a.summary, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface) }
+        if (a.irreversible) Text("되돌릴 수 없어요", style = MaterialTheme.typography.labelLarge, color = s.danger)
+        Text(if (details) "자세히 닫기" else "자세히", color = scheme.primary, style = MaterialTheme.typography.labelLarge, modifier = Modifier.clickable { details = !details })
+        if (details) {
+            Column(Modifier.fillMaxWidth().background(scheme.surfaceVariant, RoundedCornerShape(AeonShape.CONTROL.dp)).padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                a.resources.forEach { SelectionContainer { Text(it, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall) } }
+                SelectionContainer { Text(a.summary, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant) }
+            }
         }
-        // 6 result line. Fails closed: Aeon has no undo, so it never claims an action is reversible.
-        if (a.irreversible || a.risk != "read") {
-            Text(
-                if (a.irreversible) "휴지통을 거치지 않습니다. 되돌릴 수 없습니다."
-                else "Aeon에는 이 작업을 되돌리는 기능이 없습니다. 되돌릴 수 있는지 확인되지 않았습니다.",
-                color = s.danger,
-                style = MaterialTheme.typography.labelMedium,
-            )
-        }
-        // 7 decision buttons: same size, deny on the left, allow on the right
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            AeonButton("거부", { onDecide(false) }, Modifier.weight(1f).focusRequester(denyFocus), kind = ButtonKind.Strong)
             AeonButton(
-                "거부",
-                onClick = { onDecide(false) },
-                kind = ButtonKind.Strong,
-                modifier = Modifier.weight(1f).focusRequester(denyFocus),
-            )
-            AeonButton(
-                if (allowReady) "이 한 번만 허용" else "허용 준비 중…",
-                onClick = { onDecide(true) },
+                if (allowReady) "허용" else "잠시만…",
+                { haptic.performHapticFeedback(HapticFeedbackType.LongPress); onDecide(true) },
+                Modifier.weight(1f),
                 kind = if (high) ButtonKind.Destructive else ButtonKind.Primary,
                 enabled = allowReady,
-                modifier = Modifier.weight(1f),
             )
         }
-        // 8 scope and source
-        Text(
-            "허용은 이 요청 1건에만 적용됩니다 · $sourceLabel",
-            style = MaterialTheme.typography.bodySmall,
-            color = s.fg3,
-        )
     }
 }
 
@@ -155,10 +131,7 @@ private fun ExpiryText(expiresAt: Long, leftMs: Long, now: Long) {
     when {
         leftMs <= 0 -> Text("만료됨", color = s.danger, style = MaterialTheme.typography.labelMedium)
         leftMs < 60_000 -> Text("${leftMs / 1000}초 남음", color = s.danger, style = MaterialTheme.typography.labelLarge)
-        leftMs < 10 * 60_000 -> {
-            val sec = (leftMs / 1000) % 60
-            Text("${mins}:${sec.toString().padStart(2, '0')} 남음", color = s.warn, style = MaterialTheme.typography.labelLarge)
-        }
+        leftMs < 10 * 60_000 -> Text("${mins}:${((leftMs / 1000) % 60).toString().padStart(2, '0')} 남음", color = s.warn, style = MaterialTheme.typography.labelLarge)
         leftMs < 60 * 60_000 -> Text("${mins}분 남음", color = s.warn, style = MaterialTheme.typography.labelMedium)
         else -> Text("${koreanDayPrefix(expiresAt, now)}${koreanClock(expiresAt)}까지", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
     }

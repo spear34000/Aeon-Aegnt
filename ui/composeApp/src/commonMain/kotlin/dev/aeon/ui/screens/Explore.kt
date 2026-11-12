@@ -90,10 +90,10 @@ internal fun connectionTitle(c: ConnectionItem): String = if (c.kind == "builtin
 private fun kindLabel(kind: String): String = KINDS.firstOrNull { it.first == kind }?.second ?: kind
 
 private fun subtitle(c: ConnectionItem): String = when (c.kind) {
-    "builtin" -> "기본 도구 · " + c.tools.joinToString(", ")
+    "builtin" -> "기본 도구"
     "skill" -> c.description.ifBlank { "스킬" }
-    "integration" -> listOfNotNull("연동", c.publisher, if (c.requires.isNotEmpty()) "키 필요" else null).joinToString(" · ")
-    else -> "MCP 서버 · 내 PC에서 실행" + (c.runtime?.let { " ($it)" } ?: "")
+    "integration" -> listOfNotNull("연동", c.publisher).joinToString(" · ")
+    else -> "MCP 서버"
 }
 
 @Composable
@@ -203,7 +203,7 @@ private fun ConnectionList(items: List<ConnectionItem>, e: ExploreState, model: 
         items.forEachIndexed { i, c ->
             if (i > 0) RowDivider()
             c.icon?.let { path -> LaunchedEffect(path) { model.requestIcon(path) } }
-            ConnectionRow(c, c.icon?.let { e.icons[it] }, installed) { model.showConnection(c) }
+            ConnectionRow(c, c.icon?.let { e.icons[it] }, installed) { if (c.kind == "skill") { model.loadSkills(); model.editSkill(c.id.removePrefix("skill:")) } else model.showConnection(c) }
         }
     }
 }
@@ -224,14 +224,14 @@ private fun SearchField(value: String, onChange: (String) -> Unit) {
     ) {
         Icon(AeonIcons.Search, contentDescription = null, tint = scheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
         Box(Modifier.weight(1f)) {
-            if (value.isEmpty()) Text("이름으로 찾기 (예: naver, github)", color = scheme.onSurfaceVariant, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
+            if (value.isEmpty()) Text("도구, 연동, 스킬 검색", color = scheme.onSurfaceVariant, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
             BasicTextField(
                 value = value,
                 onValueChange = onChange,
                 singleLine = true,
                 textStyle = MaterialTheme.typography.bodyLarge.copy(color = scheme.onSurface),
                 cursorBrush = SolidColor(scheme.primary),
-                modifier = Modifier.fillMaxWidth().semantics { contentDescription = "추가할 수 있는 연결 검색" },
+                modifier = Modifier.fillMaxWidth().semantics { contentDescription = "도구, 연동, 스킬 검색" },
             )
         }
         if (value.isNotEmpty()) {
@@ -259,39 +259,29 @@ fun ExploreScreen(state: UiState, model: AppModel, modifier: Modifier = Modifier
             Column(Modifier.padding(horizontal = 16.dp)) {
                 state.message?.let { Box(Modifier.padding(top = 12.dp)) { Banner(it, Tone.Neutral, "·", model::dismissMessage) } }
 
-                val installed = e.installed.filter { kind == null || it.kind == kind }
-                GroupHeader("연결됨", installed.size.toString())
-                if (installed.isEmpty()) {
-                    Hint(
-                        when (kind) {
-                            "skill" -> "아직 스킬이 없습니다."
-                            "integration" -> "아직 추가한 연동이 없습니다."
-                            "mcp" -> "내 PC에서 실행하는 MCP 서버는 아직 추가할 수 없습니다."
-                            else -> "서버에서 목록을 받는 중입니다."
-                        },
-                    )
-                } else {
-                    ConnectionList(installed, e, model, installed = true)
-                }
-
+                val q = e.query.trim()
+                val installed = e.installed.filter { c -> (kind == null || c.kind == kind) && (q.isEmpty() || connectionTitle(c).contains(q, true) || c.title.contains(q, true)) }
                 if (kind == "skill") {
-                    GroupHeader("스킬 추가")
-                    ListSurface(Modifier.padding(bottom = 4.dp)) {
-                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Text("스킬은 SKILL.md가 들어 있는 폴더입니다. 아래 위치에 넣으면 이 목록에 나타납니다.", style = MaterialTheme.typography.bodyMedium)
-                            Text(
-                                e.skillsDir.ifBlank { "서버에서 위치를 받는 중" },
-                                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(MaterialTheme.colorScheme.background).padding(12.dp),
-                                fontFamily = FontFamily.Monospace,
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                        }
+                    SkillsSection(state, model, q)
+                } else {
+                    GroupHeader("연결됨", installed.size.toString())
+                    if (installed.isEmpty()) {
+                        Hint(
+                            when {
+                                q.isNotEmpty() -> "연결된 항목에는 없어요."
+                                kind == "integration" -> "추가한 연동이 없어요."
+                                kind == "mcp" -> "추가한 MCP 서버가 없어요."
+                                else -> "불러오는 중이에요."
+                            },
+                        )
+                    } else {
+                        ConnectionList(installed, e, model, installed = true)
                     }
                 }
 
                 if (kind != "skill" && kind != "builtin") {
                     val catalog = e.catalog.filter { c -> (kind == null || c.kind == kind) && e.installed.none { it.id == c.id } }
-                    GroupHeader("추가할 수 있음", trailing = "MCP 공식 레지스트리")
+                    GroupHeader("추가할 수 있음")
                     if (e.query.isBlank() && e.collections.isNotEmpty()) {
                         Row(Modifier.padding(bottom = 10.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             e.collections.forEach { c -> PillChoice(c.title["ko"] ?: c.title["en"] ?: c.id, e.collectionId == c.id) { model.openCollection(c.id) } }
@@ -299,14 +289,15 @@ fun ExploreScreen(state: UiState, model: AppModel, modifier: Modifier = Modifier
                     }
                     when {
                         e.error != null -> Banner(e.error, Tone.Warn, "⚠")
-                        e.loading && catalog.isEmpty() -> Hint("레지스트리에서 찾는 중입니다.")
-                        catalog.isEmpty() -> Hint(if (e.query.isBlank()) "이 묶음에는 지금 등록된 항목이 없습니다." else "‘${e.query}’ 이름으로 등록된 서버가 없습니다. 레지스트리는 영문 이름으로 찾습니다.")
+                        e.loading && catalog.isEmpty() -> Hint("찾는 중이에요.")
+                        catalog.isEmpty() -> Hint(if (e.query.isBlank()) "항목이 없어요." else "찾는 서버가 없어요. 영문 이름으로 검색해 보세요.")
                         else -> ConnectionList(catalog, e, model, installed = false)
                     }
                 }
             }
         }
 
+        state.skills.editing?.let { SkillEditor(it, state, model) }
         AnimatedVisibility(visible = e.detail != null, enter = fadeIn(tween(160)), exit = fadeOut(tween(120))) {
             Box(
                 Modifier.fillMaxSize().background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.45f))
@@ -368,40 +359,71 @@ private fun ConnectionSheet(c: ConnectionItem, state: UiState, model: AppModel) 
             }
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Chip(kindLabel(c.kind), Tone.Accent)
-                if (c.requires.isNotEmpty()) Chip("키 필요", Tone.Warn)
-                if (isAdded) Chip("추가됨", Tone.Ok)
+                                if (isAdded) Chip("추가됨", Tone.Ok)
             }
             if (c.description.isNotBlank()) Text(c.description, style = MaterialTheme.typography.bodyLarge)
             Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(scheme.background).padding(horizontal = 14.dp, vertical = 8.dp)) {
                 c.remoteUrl?.let { InfoLine(AeonIcons.Link, "원격 주소", it.removePrefix("https://")) }
-                c.runtime?.let { InfoLine(AeonIcons.Box, "실행 방식", "내 PC에서 실행 · $it") }
+                c.runtime?.let { InfoLine(AeonIcons.Box, "실행 방식", it) }
                 if (c.requires.isNotEmpty()) InfoLine(AeonIcons.Key, "필요한 키", c.requires.joinToString(", "))
                 if (c.tools.isNotEmpty()) InfoLine(AeonIcons.Plug, "도구", c.tools.joinToString(", "))
                 if (c.kind == "skill") InfoLine(AeonIcons.Book, "폴더", c.id.removePrefix("skill:"))
             }
-            when (c.kind) {
-                "integration" -> Note(
-                    if (isAdded) "설정에 저장된 서버입니다. 에이전트가 이 서버의 도구를 직접 쓰는 기능은 아직 준비 중입니다."
-                    else "추가하면 설정에 저장됩니다. 에이전트가 이 서버의 도구를 직접 쓰는 기능은 아직 준비 중입니다. 키 값은 이 PC의 보안 저장소에만 둡니다.",
-                )
-                "mcp" -> Note("내 PC에서 프로그램을 실행해야 하는 서버입니다. 실행 방식이 정해지기 전이라 아직 추가할 수 없습니다.")
-                "builtin" -> Note("Aeon에 들어 있는 도구입니다. 위험한 동작은 실행 전에 승인을 묻습니다.")
-            }
-            if ((c.kind == "integration") && !e.canEdit) Note("추가와 해제는 Aeon이 실행 중인 PC에서만 할 수 있습니다.")
+            if (c.kind == "integration") Note("에이전트가 이 서버를 쓰는 기능은 아직 준비 중이에요.")
+            if (c.kind == "integration" && !e.canEdit) Note("이 기기는 설정을 바꿀 수 없어요.")
         }
         Column(Modifier.padding(top = 12.dp, bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             when {
                 c.kind == "builtin" || c.kind == "skill" -> {}
-                isAdded -> AeonButton("연결 해제", { model.removeConnection(c) }, Modifier.fillMaxWidth(), kind = ButtonKind.Destructive, enabled = e.canEdit && !state.busy)
+                isAdded -> AeonButton("삭제", { model.removeConnection(c) }, Modifier.fillMaxWidth(), kind = ButtonKind.Destructive, enabled = e.canEdit && !state.busy)
                 c.kind == "integration" -> AeonButton("추가", { model.addConnection(c) }, Modifier.fillMaxWidth(), kind = ButtonKind.Primary, enabled = e.canEdit && !state.busy)
                 else -> AeonButton("추가", {}, Modifier.fillMaxWidth(), kind = ButtonKind.Primary, enabled = false)
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 c.websiteUrl?.takeIf { it.startsWith("https://") }?.let { url ->
-                    AeonButton("사이트 보기", { runCatching { uri.openUri(url) } }, Modifier.weight(1f), kind = ButtonKind.Ghost)
+                    AeonButton("자세히", { runCatching { uri.openUri(url) } }, Modifier.weight(1f), kind = ButtonKind.Ghost)
                 }
                 AeonButton("닫기", { model.showConnection(null) }, Modifier.weight(1f), kind = ButtonKind.Ghost)
             }
         }
     }
+}
+
+
+/** The skills list with a button to write a new one. Rows open the editor. */
+@Composable
+private fun SkillsSection(state: UiState, model: AppModel, query: String) {
+    val sk = state.skills
+    LaunchedEffect(Unit) { model.loadSkills() }
+    val list = sk.list.filter { query.isEmpty() || it.name.contains(query, true) || it.description.contains(query, true) }
+    GroupHeader("내 스킬", list.size.toString())
+    if (sk.canEdit) AeonButton("스킬 만들기", { model.editSkill(null) }, Modifier.fillMaxWidth().padding(bottom = 10.dp), kind = ButtonKind.Primary)
+    if (list.isEmpty()) {
+        Hint(if (!sk.loaded) "불러오는 중이에요." else if (query.isNotEmpty()) "찾는 스킬이 없어요." else "스킬이 없어요.")
+    } else {
+        ListSurface {
+            list.forEachIndexed { i, k ->
+                if (i > 0) RowDivider()
+                Row(
+                    Modifier.fillMaxWidth().defaultMinSize(minHeight = 64.dp).clickable { model.editSkill(k.folder) }.padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Box(Modifier.size(44.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
+                        Icon(AeonIcons.Book, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(22.dp))
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text(k.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        if (k.description.isNotBlank()) Text(k.description, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    Icon(AeonIcons.Chevron, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                }
+            }
+        }
+    }
+    if (sk.dir.isNotBlank()) {
+        androidx.compose.foundation.text.selection.SelectionContainer {
+            Text("저장 위치 ${sk.dir}", Modifier.padding(start = 4.dp, top = 12.dp), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+    Hint("에이전트가 스킬을 쓰는 기능은 아직 준비 중이에요.")
 }

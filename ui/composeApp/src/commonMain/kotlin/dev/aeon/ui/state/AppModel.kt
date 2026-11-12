@@ -64,6 +64,17 @@ data class ModelState(
     val error: String? = null,
 )
 
+/**
+ * What a scanned pairing link suggested: addresses to try and a code. [address] is the first one that answered a
+ * hello request. Nothing has been sent with the code: the owner still taps connect.
+ */
+data class PairPrefill(val addresses: List<String>, val code: String, val address: String? = null, val serverName: String? = null, val probing: Boolean = true)
+
+/** The skill being written or changed. [folder] is null for a new one. */
+data class SkillDraft(val folder: String?, val name: String = "", val description: String = "", val body: String = "", val saving: Boolean = false, val error: String? = null)
+
+data class SkillsState(val list: List<dev.aeon.ui.api.SkillItem> = emptyList(), val dir: String = "", val canEdit: Boolean = false, val loaded: Boolean = false, val editing: SkillDraft? = null)
+
 /** A pairing code shown on this device so another device can be let in. */
 data class NewDevice(val code: String, val expiresAt: Long, val admin: Boolean, val addresses: List<String>)
 
@@ -123,6 +134,8 @@ data class UiState(
     /** False for a pairing made before the server had a sealing key: keys cannot be sent from this device until it pairs again. */
     val canSeal: Boolean = false,
     val setup: SetupState = SetupState(),
+    val pairPrefill: PairPrefill? = null,
+    val skills: SkillsState = SkillsState(),
 ) {
     /** This device may change settings, keys, connections and devices. */
     val isAdmin: Boolean get() = status?.admin == true
@@ -222,6 +235,7 @@ class AppModel(
                 store.put(KEY_DEVICE, res.deviceId)
                 if (client.serverKey.isNotEmpty()) store.put(KEY_SERVER_KEY, client.serverKey) else store.remove(KEY_SERVER_KEY)
                 _state.update { it.copy(serverUrl = client.baseUrl, connection = Connection.Connected(res.serverName), busy = false, canSeal = client.serverKey.isNotEmpty()) }
+                _state.update { it.copy(pairPrefill = null) }
                 if (_state.value.setup.step == SetupStep.Connect) goStep(SetupStep.Coach)
                 if (dev.aeon.ui.platform.supportsBackgroundCheck && _state.value.setup.consents.background) runCatching { dev.aeon.ui.platform.setBackgroundApprovalCheck(true) }
                 startPolling()
@@ -235,7 +249,11 @@ class AppModel(
                         connection = if (stillPaired) previousConnection else Connection.Unpaired,
                         serverUrl = previousUrl,
                         busy = false,
-                        message = describe(e),
+                        message = when {
+                            e is AeonException && e.status == 403 -> "코드가 맞지 않거나 만료됐어요. 서버에서 새 코드를 받으세요."
+                            e is AeonException && e.status == 429 -> "시도가 너무 많아요. 잠시 뒤에 다시 해 주세요."
+                            else -> describe(e)
+                        },
                     )
                 }
                 if (stillPaired) startPolling()
@@ -685,6 +703,37 @@ class AppModel(
         }
     }
 
+    /**
+     * Handles `aeon://pair?...` (a scanned QR code). Any app can send this link, so it is parsed strictly and only
+     * pre-fills the connect screen. Before the first-run terms are agreed the flow jumps to them, so the short-lived
+     * code is still valid when the connect step is reached.
+     */
+    fun receivePairLink(raw: String) {
+        val link = dev.aeon.ui.api.PairLink.parse(raw)
+        if (link == null) {
+            _state.update { it.copy(message = "읽을 수 없는 QR 코드예요.") }
+            return
+        }
+        if (_state.value.connection !is Connection.Unpaired) {
+            _state.update { it.copy(message = "이미 서버에 연결되어 있어요. 다른 서버에 연결하려면 먼저 연결을 끊으세요.") }
+            return
+        }
+        _state.update { it.copy(pairPrefill = PairPrefill(link.addresses, link.code, probing = link.addresses.isNotEmpty())) }
+        val step = _state.value.setup.step
+        if (step == SetupStep.Intro || step == SetupStep.Welcome) goStep(SetupStep.Terms)
+        scope.launch {
+            var found: Pair<String, String>? = null
+            for (a in link.addresses) {
+                val name = client.probe(a) ?: continue
+                found = a to name
+                break
+            }
+            _state.update { s -> s.copy(pairPrefill = s.pairPrefill?.takeIf { it.code == link.code }?.copy(address = found?.first, serverName = found?.second, probing = false) ?: s.pairPrefill) }
+        }
+    }
+
+    fun clearPairPrefill() = _state.update { it.copy(pairPrefill = null) }
+
     fun dismissPairingCode() {
         _state.update { it.copy(newDevice = null) }
         loadDevices()
@@ -806,7 +855,7 @@ class AppModel(
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
-            val text = if (e is AeonException && e.status == 502) "목록을 가져오지 못했습니다. Aeon이 실행 중인 PC의 인터넷 연결을 확인하세요." else describe(e)
+            val text = if (e is AeonException && e.status == 502) "목록을 가져오지 못했습니다. Aeon 서버의 인터넷 연결을 확인하세요." else describe(e)
             explore { it.copy(catalog = emptyList(), loading = false, error = text) }
         }
     }
@@ -822,7 +871,68 @@ class AppModel(
 
     fun showConnection(c: ConnectionItem?) = explore { it.copy(detail = c) }
 
-    /** Saves a remote server into the settings. The server refuses this unless the request comes from the PC itself. */
+    // ---------------------------------------------------------------- 스킬
+
+    private fun skills(change: (SkillsState) -> SkillsState) = _state.update { it.copy(skills = change(it.skills)) }
+
+    fun loadSkills() {
+        scope.launch {
+            runCatching { client.skills() }.onSuccess { r -> skills { it.copy(list = r.skills, dir = r.dir, canEdit = r.canEdit, loaded = true) } }
+        }
+    }
+
+    /** Opens the editor on an existing skill, or on a new one when [folder] is null. */
+    fun editSkill(folder: String?) {
+        if (folder == null) return skills { it.copy(editing = SkillDraft(null)) }
+        val s = _state.value.skills.list.firstOrNull { it.folder == folder } ?: return
+        skills { it.copy(editing = SkillDraft(s.folder, s.name, s.description, s.body)) }
+    }
+
+    fun changeSkillDraft(change: (SkillDraft) -> SkillDraft) = skills { s -> s.copy(editing = s.editing?.let { change(it).copy(error = null) }) }
+
+    fun closeSkillEditor() = skills { it.copy(editing = null) }
+
+    /** A folder name for a new skill: its name in ASCII letters and digits, or a time-based one when there are none. */
+    private fun skillFolder(name: String, taken: Set<String>): String {
+        val base = name.lowercase().map { if (it in 'a'..'z' || it in '0'..'9') it else '-' }.joinToString("").replace(Regex("-+"), "-").trim('-').take(40)
+            .ifEmpty { "skill-" + dev.aeon.ui.platform.nowMillis().toString(36) }
+        var folder = base
+        var n = 2
+        while (folder in taken) folder = "$base-${n++}"
+        return folder
+    }
+
+    fun saveSkill() {
+        val d = _state.value.skills.editing ?: return
+        if (d.name.isBlank() || d.saving) return
+        scope.launch {
+            skills { s -> s.copy(editing = s.editing?.copy(saving = true, error = null)) }
+            try {
+                val folder = d.folder ?: skillFolder(d.name, _state.value.skills.list.map { it.folder }.toSet())
+                client.saveSkill(folder, d.name.trim(), d.description.trim(), d.body, create = d.folder == null)
+                val r = client.skills()
+                skills { it.copy(list = r.skills, dir = r.dir, editing = null) }
+                loadExplore()
+            } catch (e: Exception) {
+                skills { s -> s.copy(editing = s.editing?.copy(saving = false, error = if (e is AeonException && e.status == 403) "이 기기는 스킬을 바꿀 수 없어요." else describe(e))) }
+            }
+        }
+    }
+
+    fun deleteSkill(folder: String) {
+        scope.launch {
+            try {
+                client.deleteSkill(folder)
+                val r = client.skills()
+                skills { it.copy(list = r.skills, editing = null) }
+                loadExplore()
+            } catch (e: Exception) {
+                skills { s -> s.copy(editing = s.editing?.copy(error = describe(e))) }
+            }
+        }
+    }
+
+    /** Saves a remote server into the settings. The server refuses this from a device that may not change settings. */
     fun addConnection(c: ConnectionItem) = action("추가했습니다") {
         val url = c.remoteUrl ?: throw IllegalStateException("원격 주소가 없는 항목은 아직 추가할 수 없습니다.")
         val name = c.id.removePrefix("mcp:")

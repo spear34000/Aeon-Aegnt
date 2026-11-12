@@ -11,3 +11,5 @@ ui/**/build/
 local.properties
 *.class
 !kotlin-js-store/
+ui/.idea/
+ui/gradle/gradle-daemon-jvm.properties

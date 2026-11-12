@@ -144,6 +144,35 @@ class SetupFlowTest {
         assertEquals("지우", m.setup.profileDraft.userName)
     }
 
+    private fun waitFor(timeoutMs: Long = 8000, cond: () -> Boolean) {
+        val end = System.currentTimeMillis() + timeoutMs
+        while (!cond() && System.currentTimeMillis() < end) Thread.sleep(50)
+        assertTrue(cond(), "condition not reached in time")
+    }
+
+    @Test
+    fun aScannedLinkOnlyPrefillsTheConnectScreenAndMovesAFreshInstallToTheTerms() {
+        val m = model(MapStore())
+        m.receivePairLink("aeon://pair?u=http%3A%2F%2F127.0.0.1%3A9&c=75KFXQWOXQGQ7VLQ")
+        assertEquals(SetupStep.Terms, m.setup.step, "the agreement still comes first, but the short-lived code is not left to expire in the intro")
+        assertEquals("75KFXQWOXQGQ7VLQ", m.state.value.pairPrefill?.code)
+        waitFor { m.state.value.pairPrefill?.probing == false }
+        assertEquals(null, m.state.value.pairPrefill?.address, "nothing answers there, so no address is offered as found")
+        assertTrue(m.state.value.connection is dev.aeon.ui.state.Connection.Unpaired, "a link never pairs by itself")
+
+        m.receivePairLink("aeon://pair?c=nope")
+        assertEquals("읽을 수 없는 QR 코드예요.", m.state.value.message)
+        assertEquals("75KFXQWOXQGQ7VLQ", m.state.value.pairPrefill?.code, "a bad link does not replace a good one")
+    }
+
+    @Test
+    fun aLinkIsRefusedOnADeviceThatIsAlreadyConnected() {
+        val m = model(MapStore(mutableMapOf("serverUrl" to "http://127.0.0.1:9", "deviceId" to "dev_0123456789abcdef01")))
+        m.receivePairLink("aeon://pair?c=75KFXQWOXQGQ7VLQ")
+        assertEquals(null, m.state.value.pairPrefill)
+        assertTrue(m.state.value.message!!.contains("이미 서버에 연결"))
+    }
+
     @Test
     fun consentsRoundTripAndRejectGarbage() {
         val c = Consents(service = true, data = true, online = false, background = true, acceptedAt = 1794456211444)

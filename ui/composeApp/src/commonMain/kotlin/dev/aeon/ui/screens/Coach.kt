@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -74,12 +75,12 @@ private class CoachStep(val target: String, val title: String, val body: String)
 
 /** Order of the tour. A step whose control is not on screen (for example on the wide layout) is left out. */
 private val STEPS = listOf(
-    CoachStep("composer.input", "맡길 일을 적으세요", "예: “다운로드 폴더에서 오래된 설치 파일 정리해 줘”. 한 일은 단계마다 기록으로 남습니다."),
-    CoachStep("composer.attach", "파일 올리기", "문서나 이미지를 작업 폴더에 올리고 함께 맡길 수 있습니다."),
-    CoachStep("composer.model", "모델 고르기", "제공자, 모델, 추론 강도를 여기서 바꿉니다. API 키는 암호화해서 보냅니다."),
-    CoachStep("nav.feed", "피드에서 승인하기", "되돌릴 수 없는 일은 실행 전에 여기서 묻습니다. 누르지 않으면 실행하지 않습니다."),
-    CoachStep("nav.explore", "둘러보기", "연동, MCP 서버, 스킬을 찾아 연결합니다."),
-    CoachStep("nav.agent", "내 에이전트", "부르는 이름과 말투, 기기, 키, 약관과 권한을 언제든 다시 바꿀 수 있습니다."),
+    CoachStep("composer.input", "맡길 일 적기", "하고 싶은 일을 적으면 돼요."),
+    CoachStep("composer.attach", "파일 올리기", "문서나 이미지를 함께 맡길 수 있어요."),
+    CoachStep("composer.model", "모델 바꾸기", "모델과 추론 강도를 여기서 골라요."),
+    CoachStep("nav.feed", "승인하기", "삭제 같은 일은 여기서 허락해야 실행돼요."),
+    CoachStep("nav.explore", "연동과 스킬", "도구를 연결하고 스킬을 만들어요."),
+    CoachStep("nav.agent", "내 에이전트", "이름, 말투, 기기를 바꿀 수 있어요."),
 )
 
 /**
@@ -108,6 +109,9 @@ fun CoachOverlay(index: Int, onIndex: (Int) -> Unit, onDone: () -> Unit) {
     val raw = registry.rects[step.target] ?: return
     val target by animateRectAsState(Rect(raw.left - origin.x - pad, raw.top - origin.y - pad, raw.right - origin.x + pad, raw.bottom - origin.y + pad), tween(260), label = "coach")
     val scrim = MaterialTheme.colorScheme.scrim.copy(alpha = 0.62f)
+    val pulse by androidx.compose.animation.core.rememberInfiniteTransition(label = "ring").animateFloat(
+        0f, 1f, androidx.compose.animation.core.infiniteRepeatable(tween(1100), androidx.compose.animation.core.RepeatMode.Reverse), label = "pulse",
+    )
 
     BoxWithConstraints(
         Modifier.fillMaxSize().onGloballyPositioned { origin = it.positionInRoot() }.pointerInput(Unit) { detectTapGestures { } }
@@ -118,6 +122,12 @@ fun CoachOverlay(index: Int, onIndex: (Int) -> Unit, onDone: () -> Unit) {
             drawRect(scrim)
             val r = minOf(target.height / 2f, 28.dp.toPx())
             drawRoundRect(Color.Black, Offset(target.left, target.top), Size(target.width, target.height), CornerRadius(r, r), blendMode = BlendMode.Clear)
+            // A ring that breathes around the control, so the eye goes there before the card is read.
+            val grow = 3.dp.toPx() + 5.dp.toPx() * pulse
+            drawRoundRect(
+                Color.White.copy(alpha = 0.9f - 0.5f * pulse), Offset(target.left - grow, target.top - grow), Size(target.width + grow * 2, target.height + grow * 2),
+                CornerRadius(r + grow, r + grow), style = androidx.compose.ui.graphics.drawscope.Stroke(2.dp.toPx()),
+            )
         }
         // The card goes on the side of the control that has more room.
         val gap = with(density) { 14.dp.toPx() }
@@ -130,8 +140,8 @@ fun CoachOverlay(index: Int, onIndex: (Int) -> Unit, onDone: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Text("${i + 1} / ${steps.size}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(step.title, style = MaterialTheme.typography.titleLarge)
-            Text(step.body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(step.title, style = MaterialTheme.typography.headlineMedium)
+            Text(step.body, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 AeonButton("건너뛰기", onDone, kind = ButtonKind.Ghost, wide = true)
                 Spacer(Modifier.weight(1f))

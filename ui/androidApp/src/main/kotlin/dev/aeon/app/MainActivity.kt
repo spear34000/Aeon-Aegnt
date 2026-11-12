@@ -65,6 +65,11 @@ class MainActivity : ComponentActivity() {
 
     /** A tap on the approval notification lands on 피드. */
     private fun openFrom(intent: android.content.Intent?) {
-        if (intent?.getStringExtra(dev.aeon.ui.platform.EXTRA_OPEN) == "feed") (application as AeonApplication).model.go(dev.aeon.ui.state.Section.Feed)
+        val model = (application as AeonApplication).model
+        if (intent?.getStringExtra(dev.aeon.ui.platform.EXTRA_OPEN) == "feed") model.go(dev.aeon.ui.state.Section.Feed)
+        if (intent?.action == android.content.Intent.ACTION_VIEW && intent.data?.scheme == "aeon") {
+            model.receivePairLink(intent.data.toString())
+            intent.data = null // handled: a rotation must not apply the same link again
+        }
     }
 }

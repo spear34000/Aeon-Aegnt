@@ -110,64 +110,35 @@ fun Chip(text: String, tone: Tone, icon: String? = null, modifier: Modifier = Mo
     }
 }
 
-/** The task-status chip (design: 계획 중, 실행 중, 승인 대기, 한도 대기, 끝남, 실패, 멈춤). */
+/** The task-status chip. One word per state: 진행 중, 승인 대기, 완료, 실패, 중단됨. */
 @Composable
 fun TaskStatusChip(status: String) {
-    val (text, tone, icon) = when (status) {
-        "PENDING" -> Triple("계획 중", Tone.Neutral, "◌")
-        "RUNNING" -> Triple("실행 중", Tone.Accent, "◌")
-        "RETRY_WAIT" -> Triple("다시 시도 중", Tone.Warn, "◌")
-        "WAITING_FOR_APPROVAL" -> Triple("승인 대기", Tone.Warn, "✋")
-        "WAITING_FOR_QUOTA" -> Triple("한도 대기", Tone.Warn, "⌛")
-        "WAITING_FOR_DEVICE" -> Triple("기기 대기", Tone.Warn, "▭")
-        "COMPLETED" -> Triple("끝남", Tone.Ok, "⚑")
-        "FAILED" -> Triple("실패", Tone.Danger, "✕")
-        "CANCELLED" -> Triple("멈춤", Tone.Neutral, "■")
-        else -> Triple(status, Tone.Neutral, "·")
+    val (text, tone) = when (status) {
+        "PENDING", "RUNNING" -> "진행 중" to Tone.Accent
+        "RETRY_WAIT" -> "다시 시도 중" to Tone.Warn
+        "WAITING_FOR_APPROVAL" -> "승인 대기" to Tone.Warn
+        "WAITING_FOR_QUOTA" -> "한도 대기" to Tone.Warn
+        "WAITING_FOR_DEVICE" -> "기기 대기" to Tone.Warn
+        "COMPLETED" -> "완료" to Tone.Ok
+        "FAILED" -> "실패" to Tone.Danger
+        "CANCELLED" -> "중단됨" to Tone.Neutral
+        else -> status to Tone.Neutral
     }
-    Chip(text, tone, icon)
+    Chip(text, tone)
 }
 
 /**
- * Verification badge. The agent's own "done" is shown separately (see [AgentReport]); this badge only
- * states what was checked against the real files.
+ * What was checked against the real files. Says something only when it carries information: a check that passed, one
+ * the owner did, or one that failed. A task without a check shows nothing here (the agent's own "done" is not a check).
  */
 @Composable
 fun VerifyBadge(status: String?, failedCount: Int = 0) {
     when (status) {
-        "verified" -> Chip("실제 파일로 확인됨", Tone.Ok, "✓")
-        "user_confirmed" -> Chip("사용자가 확인함", Tone.Accent, "✓")
-        "failed" -> Chip(if (failedCount > 0) "확인 실패 · 파일 ${failedCount}개 없음" else "확인 실패", Tone.Danger, "✕")
-        "unverified" -> Chip("확인 안 됨 · 검사 기준 없음", Tone.Neutral, "○")
-        null -> Chip("확인 전", Tone.Neutral, "◌")
-        else -> Chip(status, Tone.Neutral, "·")
+        "verified" -> Chip("확인됨", Tone.Ok, "✓")
+        "user_confirmed" -> Chip("내가 확인함", Tone.Accent, "✓")
+        "failed" -> Chip(if (failedCount > 0) "확인 실패 · ${failedCount}개" else "확인 실패", Tone.Danger, "✕")
+        else -> {}
     }
-}
-
-/** Risk band: kind + word + three bars. Colour is secondary to the bars and the word. */
-@Composable
-fun RiskBand(kind: String, level: Int, label: String, reversibleLine: String?) {
-    val s = LocalAeonStatus.current
-    val tone = when (level) {
-        1 -> Tone.Neutral
-        2 -> Tone.Warn
-        else -> Tone.Danger
-    }
-    val fg = when (tone) {
-        Tone.Danger -> s.danger
-        Tone.Warn -> s.warn
-        else -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(kind, color = fg, style = MaterialTheme.typography.labelLarge)
-        Text("· 위험도 $label", color = fg, style = MaterialTheme.typography.labelMedium)
-        Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-            repeat(3) { i ->
-                Box(Modifier.width(10.dp).height(6.dp).background(if (i < level) fg else MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(2.dp)))
-            }
-        }
-    }
-    if (reversibleLine != null) Text(reversibleLine, color = fg, style = MaterialTheme.typography.bodySmall)
 }
 
 @Composable

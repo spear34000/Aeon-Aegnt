@@ -101,16 +101,16 @@ private fun ModelsPage(state: UiState, model: AppModel) {
         Text(if (cur == null) "아직 고르지 않았습니다." else "${cur.providerName} · ${cur.model.ifBlank { "모델 이름 없음" }}${cur.reasoningEffort?.let { " · 추론 $it" } ?: ""}", style = MaterialTheme.typography.bodyLarge)
         AeonButton("제공자와 모델 바꾸기", { model.openModelSheet() }, Modifier.fillMaxWidth(), kind = ButtonKind.Primary)
     }
-    Text("제공자 목록은 models.dev에서 가져오며, 대화 입력창의 모델 버튼에서도 바꿀 수 있습니다. 새 작업부터 적용됩니다.", style = MaterialTheme.typography.bodySmall, color = s.fg3)
+    
 }
 
 @Composable
 private fun KeysPage(state: UiState, model: AppModel) {
     val s = LocalAeonStatus.current
     LaunchedEffect(Unit) { model.loadModels() }
-    Text("키는 저장 후 다시 보이지 않습니다. 저장 위치: ${state.secretsBackend.ifBlank { "Aeon이 실행 중인 기기" }}. 전송 중에는 암호화됩니다.", style = MaterialTheme.typography.bodySmall, color = s.fg3)
+    Text("저장한 키는 다시 보이지 않아요.", style = MaterialTheme.typography.bodySmall, color = s.fg3)
     val rows = state.models.providers.filter { it.keyName != null && (it.hasKey || it.inUse) }
-    if (rows.isEmpty()) Text("키가 필요한 제공자를 고르면 여기에 나타납니다.", style = MaterialTheme.typography.bodyMedium, color = s.fg3)
+    if (rows.isEmpty()) Text("모델에서 제공자를 고르면 여기에 나타나요.", style = MaterialTheme.typography.bodyMedium, color = s.fg3)
     rows.forEach { p -> KeyRow(p.name, p.keyName!!, p.hasKey || state.secretNames.contains(p.keyName), model) }
 }
 
@@ -135,7 +135,7 @@ private fun KeyRow(title: String, name: String, stored: Boolean, model: AppModel
             onValueChange = { value = it },
             label = if (stored) "새 키로 바꾸기" else "키 붙여 넣기",
             placeholder = "예: sk-로 시작하는 키",
-            help = "Windows는 DPAPI로 이 PC에만 암호화해 저장합니다.",
+            help = null,
             secret = !reveal,
             mono = true,
         )
@@ -178,6 +178,6 @@ private fun AboutPage(state: UiState, model: AppModel) {
         state.status?.let { Text("작업 ${state.tasks.size}개 · 키 저장 위치: ${it.secretsBackend}", style = MaterialTheme.typography.bodySmall, color = s.fg3) }
     }
     state.status?.setupProblem?.let { Banner("설정 필요: $it", Tone.Warn, "•") }
-    AeonButton("이 기기 연결 해제", { model.unpair() }, kind = ButtonKind.Secondary, modifier = Modifier.widthIn(min = 200.dp))
-    Text("연결 해제는 이 기기에서만 끊습니다. 서버의 기기 목록에서 폐기하려면 기기 탭을 쓰세요.", style = MaterialTheme.typography.bodySmall, color = s.fg3)
+    AeonButton("이 기기 연결 끊기", { model.unpair() }, kind = ButtonKind.Secondary, modifier = Modifier.widthIn(min = 200.dp))
+    
 }

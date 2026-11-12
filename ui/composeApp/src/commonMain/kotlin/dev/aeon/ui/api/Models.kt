@@ -220,6 +220,13 @@ data class UsageRecord(
 @Serializable data class CatalogResponse(val connections: List<ConnectionItem> = emptyList(), val nextCursor: String? = null, val disabled: Boolean = false)
 @Serializable data class CollectionsResponse(val collections: List<CatalogCollection> = emptyList())
 @Serializable data class IconResponse(val icon: IconPayload)
+
+/** A skill: a folder with a SKILL.md. [folder] is the name on disk. */
+@Serializable
+data class SkillItem(val folder: String, val name: String, val description: String = "", val body: String = "", val size: Long = 0, val updatedAt: Double = 0.0)
+
+@Serializable data class SkillsResponse(val skills: List<SkillItem> = emptyList(), val dir: String = "", val canEdit: Boolean = false)
+@Serializable data class SkillResponse(val skill: SkillItem)
 @Serializable data class HelloResponse(val name: String = "Aeon", val api: Int = 1, val pairingRequired: Boolean = true)
 @Serializable data class PairResponse(val deviceId: String, val serverProof: String, val serverName: String = "Aeon", val admin: Boolean = true, val serverKey: String? = null, val serverKeyProof: String? = null)
 @Serializable data class ProvidersResponse(val providers: List<ProviderRow> = emptyList(), val current: CurrentModel? = null, val catalogError: String? = null, val online: Boolean = true)

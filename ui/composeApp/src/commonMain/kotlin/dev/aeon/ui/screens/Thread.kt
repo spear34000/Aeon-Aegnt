@@ -68,7 +68,7 @@ fun ConversationScreen(state: UiState, model: AppModel, wide: Boolean, modifier:
 
     Column(modifier.fillMaxSize()) {
         // On the phone the top bar already says who this is; the title row appears only once a task is open.
-        if (wide || state.selectedTaskId != null) ConversationHeader(summary?.goal, summary?.status, detail?.verificationDetail?.status, wide, onDetail = { state.selectedTaskId?.let { model.selectTask(it, asDetail = true) } }, hasTask = state.selectedTaskId != null)
+        if (wide || state.selectedTaskId != null) ConversationHeader(summary?.goal, wide, onDetail = { state.selectedTaskId?.let { model.selectTask(it, asDetail = true) } }, hasTask = state.selectedTaskId != null)
         if (offline) {
             Banner("서버에 연결할 수 없습니다. Aeon 서버가 켜져 있고 같은 네트워크에 있는지 확인하세요.", Tone.Danger, "⚠", null)
         }
@@ -107,7 +107,7 @@ fun ConversationScreen(state: UiState, model: AppModel, wide: Boolean, modifier:
                                 ApprovalCard(
                                     a = pending,
                                     seenAt = state.approvalSeenAt[pending.id],
-                                    sourceLabel = "${detail.goal} · ${pending.tool}",
+                                    sourceLabel = detail.goal,
                                     onDecide = { model.decide(pending.id, it) },
                                 )
                             }
@@ -119,7 +119,6 @@ fun ConversationScreen(state: UiState, model: AppModel, wide: Boolean, modifier:
                     when (detail.status) {
                         "RUNNING", "PENDING", "RETRY_WAIT" -> item(key = "running-${detail.id}") {
                             Row(Modifier.padding(start = 40.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Text("실행 중 · ${detail.steps.size}단계", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
                                 Spacer(Modifier.weight(1f))
                                 AeonButton("멈추기", { model.cancel(detail.id) }, kind = ButtonKind.Ghost)
                             }
@@ -130,7 +129,7 @@ fun ConversationScreen(state: UiState, model: AppModel, wide: Boolean, modifier:
                                 Text(detail.error ?: "원인을 알 수 없습니다.", color = LocalAeonStatus.current.danger, style = MaterialTheme.typography.bodyMedium)
                             }
                         }
-                        "CANCELLED" -> item(key = "cancel-${detail.id}") { Chip("멈춤 · 에이전트 보고 없음", Tone.Neutral, "■") }
+                        "CANCELLED" -> item(key = "cancel-${detail.id}") { Chip("중단됨", Tone.Neutral) }
                     }
                 }
             }
@@ -151,20 +150,12 @@ fun ConversationScreen(state: UiState, model: AppModel, wide: Boolean, modifier:
 }
 
 @Composable
-private fun ConversationHeader(title: String?, status: String?, verify: String?, wide: Boolean, onDetail: () -> Unit, hasTask: Boolean) {
+private fun ConversationHeader(title: String?, wide: Boolean, onDetail: () -> Unit, hasTask: Boolean) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(title ?: "새 대화", style = MaterialTheme.typography.titleMedium, maxLines = 1)
-            if (status != null) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TaskStatusChip(status)
-                    if (status == "COMPLETED") VerifyBadge(verify)
-                }
-            }
-        }
+        Text(title ?: "새 대화", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, maxLines = 1)
         if (hasTask) AeonButton(if (wide) "작업 상세" else "상세", onDetail, kind = ButtonKind.Ghost, wide = wide)
     }
 }
@@ -196,16 +187,9 @@ fun AgentMessage(text: String, body: (@Composable () -> Unit)? = null) {
 
 @Composable
 private fun ResultBlock(d: TaskDetail) {
-    AgentMessage("에이전트 보고: 완료") {
-        if (d.result != null) SelectionContainer { Text(d.result, style = MaterialTheme.typography.bodyLarge) }
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            VerifyBadge(d.verificationDetail?.status, d.verificationDetail?.evidence?.count { !it.passed } ?: 0)
-        }
-        Text(
-            "위 보고는 에이전트의 말입니다. 확인 배지만 실제 파일을 보고 판단한 결과입니다.",
-            style = MaterialTheme.typography.bodySmall,
-            color = LocalAeonStatus.current.fg3,
-        )
+    // The agent's own report and the check against the real files are shown apart: only the badge is a check.
+    AgentMessage(d.result?.takeIf { it.isNotBlank() } ?: "작업을 마쳤습니다.") {
+        VerifyBadge(d.verificationDetail?.status, d.verificationDetail?.evidence?.count { !it.passed } ?: 0)
     }
 }
 
@@ -218,8 +202,7 @@ private fun QuotaCard(d: TaskDetail, model: AppModel) {
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text("한도 대기", color = s.warn, style = MaterialTheme.typography.labelLarge)
-        Text(d.note ?: "모델 사용 한도에 걸렸습니다. 잠시 뒤 자동으로 이어서 합니다.", style = MaterialTheme.typography.bodyMedium)
+        Text(d.note ?: "모델 사용 한도에 걸렸어요. 잠시 뒤 이어서 합니다.", style = MaterialTheme.typography.bodyMedium)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             AeonButton("작업 정지", { model.cancel(d.id) }, kind = ButtonKind.Secondary)
             AeonButton("설정 바꾸기", { model.openSettings(dev.aeon.ui.state.SettingsPage.Models) }, kind = ButtonKind.Ghost)
@@ -261,12 +244,6 @@ private fun ProgressCard(d: TaskDetail, waiting: Boolean) {
                 Text(st.tool, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
             }
         }
-        if (waiting) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Box(Modifier.size(20.dp).background(s.warnSoft, CircleShape), contentAlignment = Alignment.Center) { Box(Modifier.size(7.dp).background(s.warn, CircleShape)) }
-                Text("승인을 기다리는 중", style = MaterialTheme.typography.labelLarge, color = s.warn)
-            }
-        }
     }
 }
 
@@ -289,7 +266,6 @@ private fun WelcomeBlock(state: UiState, model: AppModel) {
     Column(Modifier.fillMaxWidth().padding(top = 40.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         androidx.compose.material3.Icon(dev.aeon.ui.design.AeonIcons.Mark, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(44.dp))
         Text(greeting, style = MaterialTheme.typography.headlineMedium)
-        Text("한 일은 기록으로 남기고, 되돌릴 수 없는 일은 먼저 묻습니다.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         ListSurface(Modifier.padding(top = 12.dp)) {
             SUGGESTIONS.forEachIndexed { i, text ->
                 if (i > 0) RowDivider(16.dp)
