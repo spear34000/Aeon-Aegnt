@@ -68,7 +68,7 @@ data class ModelState(
  * What a scanned pairing link suggested: addresses to try and a code. [address] is the first one that answered a
  * hello request. Nothing has been sent with the code: the owner still taps connect.
  */
-data class PairPrefill(val addresses: List<String>, val code: String, val address: String? = null, val serverName: String? = null, val probing: Boolean = true)
+data class PairPrefill(val addresses: List<String>, val code: String, val address: String? = null, val serverName: String? = null, val probing: Boolean = false, val probed: Boolean = false)
 
 /** The skill being written or changed. [folder] is null for a new one. */
 data class SkillDraft(val folder: String?, val name: String = "", val description: String = "", val body: String = "", val saving: Boolean = false, val error: String? = null)
@@ -718,17 +718,29 @@ class AppModel(
             _state.update { it.copy(message = "이미 서버에 연결되어 있어요. 다른 서버에 연결하려면 먼저 연결을 끊으세요.") }
             return
         }
-        _state.update { it.copy(pairPrefill = PairPrefill(link.addresses, link.code, probing = link.addresses.isNotEmpty())) }
+        // Nothing is contacted yet: the addresses are only remembered, and the connect screen shows them for the owner to check.
+        _state.update { it.copy(pairPrefill = PairPrefill(link.addresses, link.code)) }
         val step = _state.value.setup.step
         if (step == SetupStep.Intro || step == SetupStep.Welcome) goStep(SetupStep.Terms)
+    }
+
+    /**
+     * Called by the connect screen once it is showing and the terms are agreed: asks the suggested addresses that are
+     * on a local network whether an Aeon server answers (a plain hello, nothing secret), and picks the first that does.
+     */
+    fun probePrefill() {
+        val p = _state.value.pairPrefill ?: return
+        if (p.probed || _state.value.connection !is Connection.Unpaired || !_state.value.setup.consents.requiredOk) return
+        _state.update { it.copy(pairPrefill = p.copy(probing = true, probed = true)) }
         scope.launch {
             var found: Pair<String, String>? = null
-            for (a in link.addresses) {
+            for (a in p.addresses) {
+                if (!dev.aeon.ui.api.PairLink.isLanAddress(a)) continue
                 val name = client.probe(a) ?: continue
                 found = a to name
                 break
             }
-            _state.update { s -> s.copy(pairPrefill = s.pairPrefill?.takeIf { it.code == link.code }?.copy(address = found?.first, serverName = found?.second, probing = false) ?: s.pairPrefill) }
+            _state.update { s -> s.copy(pairPrefill = s.pairPrefill?.takeIf { it.code == p.code }?.copy(address = found?.first, serverName = found?.second, probing = false) ?: s.pairPrefill) }
         }
     }
 

@@ -10,6 +10,24 @@ data class PairLink(val addresses: List<String>, val code: String) {
         const val MAX_ADDRESSES = 3
         private val CODE = Regex("[A-Z2-7]{16}")
 
+        /** True for addresses on a home or office network (private ranges, shared 100.64/10 used by VPNs, loopback, `.local`). */
+        fun isLanAddress(origin: String): Boolean {
+            val host = runCatching { io.ktor.http.Url(origin).host.lowercase() }.getOrNull() ?: return false
+            if (host == "localhost" || host.endsWith(".local")) return true
+            val parts = host.split('.')
+            val p = parts.mapNotNull { it.toIntOrNull() }
+            if (parts.size != 4 || p.size != 4) return false
+            return p[0] == 10 || p[0] == 127 || (p[0] == 192 && p[1] == 168) || (p[0] == 172 && p[1] in 16..31) || (p[0] == 100 && p[1] in 64..127)
+        }
+
+        /** protocol://host[:port], rebuilt from the parsed parts instead of reusing the text that arrived. */
+        private fun normalised(s: String): String? {
+            val u = runCatching { io.ktor.http.Url(s) }.getOrNull() ?: return null
+            val port = if (u.specifiedPort != 0) ":${u.specifiedPort}" else ""
+            val host = if (u.host.contains(':')) "[${u.host}]" else u.host
+            return "${u.protocol.name}://$host$port"
+        }
+
         private fun isHttpOrigin(s: String): Boolean {
             val u = runCatching { io.ktor.http.Url(s) }.getOrNull() ?: return false
             val http = u.protocol == io.ktor.http.URLProtocol.HTTP || u.protocol == io.ktor.http.URLProtocol.HTTPS
@@ -44,7 +62,7 @@ data class PairLink(val addresses: List<String>, val code: String) {
                 if (eq < 0) continue
                 val value = decode(part.substring(eq + 1)) ?: return null
                 when (part.substring(0, eq)) {
-                    "u" -> if (addresses.size < MAX_ADDRESSES && isHttpOrigin(if (value.endsWith("/")) value else "$value/")) addresses.add(value.trimEnd('/'))
+                    "u" -> if (addresses.size < MAX_ADDRESSES && isHttpOrigin(if (value.endsWith("/")) value else "$value/")) normalised(value)?.let { addresses.add(it) }
                     "c" -> if (CODE.matches(value.uppercase())) code = value.uppercase()
                 }
             }

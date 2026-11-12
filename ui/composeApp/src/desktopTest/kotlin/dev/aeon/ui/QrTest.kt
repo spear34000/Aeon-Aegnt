@@ -38,6 +38,12 @@ class QrTest {
     }
 
     @Test
+    fun onlyLocalNetworkAddressesAreProbed() {
+        for (ok in listOf("http://192.168.0.12:7421", "http://10.0.2.2:7421", "http://172.16.0.2:7421", "http://100.115.170.78:7421", "http://127.0.0.1:7421", "http://localhost:7421", "http://nas.local:7421")) assertTrue(PairLink.isLanAddress(ok), ok)
+        for (no in listOf("http://8.8.8.8:7421", "http://172.32.0.1:1", "http://192.169.0.1:1", "http://evil.example:7421", "https://aeon.example.com", "http://100.128.0.1:1")) assertEquals(false, PairLink.isLanAddress(no), no)
+    }
+
+    @Test
     fun pairLinkRoundTripsAndDropsUnsafeParts() {
         val link = PairLink.build(listOf("http://192.168.0.12:7421", "http://100.115.170.78:7421"), "75KF-XQWO-XQGQ-7VLQ")
         assertEquals("aeon://pair?u=http%3A%2F%2F192.168.0.12%3A7421&u=http%3A%2F%2F100.115.170.78%3A7421&c=75KFXQWOXQGQ7VLQ", link)

@@ -104,11 +104,16 @@ fun ApprovalCard(a: Approval, seenAt: Long?, sourceLabel: String, onDecide: (Boo
             }
         }
         if (a.irreversible) Text("되돌릴 수 없어요", style = MaterialTheme.typography.labelLarge, color = s.danger)
-        Text(if (details) "자세히 닫기" else "자세히", color = scheme.primary, style = MaterialTheme.typography.labelLarge, modifier = Modifier.clickable { details = !details })
-        if (details) {
+        // What will run or leave this machine (a command line, a URL, a request body) is always shown as it will be
+        // used: it is what the owner is approving. For file actions the names and folders above are enough, and the
+        // exact request is one tap away.
+        val always = a.risk == "exec" || a.risk == "network_write" || a.risk == "external_effect" || info.kind == "확인"
+        if (!always) Text(if (details) "자세히 닫기" else "자세히", color = scheme.primary, style = MaterialTheme.typography.labelLarge, modifier = Modifier.clickable { details = !details })
+        if (always || details) {
             Column(Modifier.fillMaxWidth().background(scheme.surfaceVariant, RoundedCornerShape(AeonShape.CONTROL.dp)).padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                a.resources.forEach { SelectionContainer { Text(it, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall) } }
-                SelectionContainer { Text(a.summary, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant) }
+                Text(a.tool, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant)
+                if (!always) a.resources.forEach { SelectionContainer { Text(it, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall) } }
+                SelectionContainer { Text(a.summary, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall) }
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

@@ -73,6 +73,7 @@ fun ConnectScreen(state: UiState, model: AppModel, modifier: Modifier = Modifier
         return
     }
     val prefill = state.pairPrefill
+    androidx.compose.runtime.LaunchedEffect(prefill?.code, state.setup.consents.requiredOk) { model.probePrefill() }
     var url by remember(state.serverUrl, prefill?.address, prefill?.code) { mutableStateOf(prefill?.address ?: prefill?.addresses?.firstOrNull() ?: state.serverUrl) }
     var code by remember(prefill?.code) { mutableStateOf(prefill?.code.orEmpty()) }
     var acceptHttp by remember { mutableStateOf(false) }
@@ -94,13 +95,14 @@ fun ConnectScreen(state: UiState, model: AppModel, modifier: Modifier = Modifier
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             if (prefill != null) {
+                // Any app can send a link, so the address it brought is named, and the owner connects only if it is theirs.
+                val shown = prefill.address ?: prefill.addresses.firstOrNull()
                 val text = when {
                     prefill.probing -> "서버를 찾는 중이에요…"
-                    prefill.address != null -> "${prefill.serverName ?: "서버"}를 찾았어요. 연결을 누르세요."
-                    prefill.addresses.isNotEmpty() -> "서버에 닿지 않아요. 같은 네트워크인지 확인하세요."
+                    shown != null -> "QR 코드에서 받은 주소: ${shown.substringAfter("://")}. 내 서버가 맞는지 확인하고 연결하세요."
                     else -> "QR 코드에서 코드를 받았어요. 주소를 입력하세요."
                 }
-                Banner(text, if (prefill.probing || prefill.address != null) Tone.Ok else Tone.Warn, if (prefill.address != null) "✓" else "·")
+                Banner(text, if (prefill.address != null) Tone.Ok else Tone.Warn, if (prefill.address != null) "✓" else "⚠")
             }
             AeonTextField(
                 value = url,
