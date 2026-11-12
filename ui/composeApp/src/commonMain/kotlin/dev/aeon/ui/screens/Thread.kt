@@ -70,10 +70,10 @@ fun ConversationScreen(state: UiState, model: AppModel, wide: Boolean, modifier:
         // On the phone the top bar already says who this is; the title row appears only once a task is open.
         if (wide || state.selectedTaskId != null) ConversationHeader(summary?.goal, summary?.status, detail?.verificationDetail?.status, wide, onDetail = { state.selectedTaskId?.let { model.selectTask(it, asDetail = true) } }, hasTask = state.selectedTaskId != null)
         if (offline) {
-            Banner("서버 연결이 끊겼습니다. PC가 켜져 있고 Aeon 서버가 실행 중인지 확인하세요.", Tone.Danger, "⚠", null)
+            Banner("서버에 연결할 수 없습니다. Aeon 서버가 켜져 있고 같은 네트워크에 있는지 확인하세요.", Tone.Danger, "⚠", null)
         }
         state.status?.setupProblem?.let {
-            Banner("모델을 쓸 수 없습니다: $it. 입력창의 모델 버튼에서 키를 넣거나 다른 모델을 고르세요.", Tone.Warn, "•")
+            Banner("지금 고른 모델은 키가 없어 쓸 수 없습니다. 입력창의 모델 버튼에서 키를 넣거나 다른 모델을 고르세요.", Tone.Warn, "•")
         }
         state.message?.let { Banner(it, Tone.Neutral, "·", model::dismissMessage) }
 

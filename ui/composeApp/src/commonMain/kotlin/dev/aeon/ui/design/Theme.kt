@@ -68,6 +68,7 @@ private val DarkStatus = AeonStatus(
 fun AeonTheme(dark: Boolean? = null, content: @Composable () -> Unit) {
     val isDark = dark ?: isSystemInDarkTheme()
     val scheme: ColorScheme = if (isDark) Dark else Light
+    dev.aeon.ui.platform.PlatformSystemBars(isDark)
     CompositionLocalProvider(LocalAeonStatus provides if (isDark) DarkStatus else LightStatus) {
         MaterialTheme(colorScheme = scheme, typography = aeonTypography(), content = content)
     }

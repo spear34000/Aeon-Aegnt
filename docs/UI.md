@@ -22,7 +22,18 @@ Built from the mockup so far: theme tokens, buttons, cards, the phone top bars, 
 
 Composer: `+` uploads a file (stored under `uploads/` in the workspace, the message names its path), a model button shows provider, model and reasoning effort and opens a sheet (providers from the server catalogue, key entry, effort, consent, model list), and the blue arrow sends. 내 에이전트 › 개인화 sets what the agent calls the owner, tone, length and language; 기기 lists every paired device, makes a pairing code for another one and sets who may change settings. Clients: Android (phone), Windows x64 and ARM64 and Linux (Compose Desktop, jpackage builds only for the machine it runs on), web. iOS is out of scope.
 
-Still the old layout, with only the new colours: the conversation body (progress card, inline approval), the approval card, 작업 and task detail, pairing, and the wide layout.
+First run (all platforms, state in `state/Setup.kt`, screens in `screens/Setup.kt`, `Coach.kt`, `Legal.kt`): splash → 앱 소개 (4 pages, swipe, skip) → 웰컴 → 권한과 약관 → 서버 연결 (the pairing screen) → 코치마크 on the real main screen → 프로필 (3 pages, every field optional) → main screen.
+
+- It runs once. Progress, the choices and the profile being typed are written to the device's key-value store as they change, so closing the app resumes at the same step. A device paired before this flow existed goes straight to the main screen. If the store cannot be written the flow continues in memory and the terms screen says so.
+- The splash is shown on every start for as long as restoring state takes (about a second at least). Android 12+ shows its own launch screen first with the same mark.
+- 권한: Android asks for notifications (optional, with its reason; after "don't ask again" the button opens the system settings). Desktop and web have no runtime permission and say so. Files are chosen with the system picker, which needs none.
+- 약관: two required notices (이용 안내, 데이터 처리 안내) and two optional consents with a real effect: 온라인 목록·로고 조회 (server setting `onlineLookups`, applied by a device that may change settings) and 백그라운드 승인 확인 (Android only, per device: a JobScheduler job about every 15 minutes that posts "승인이 필요한 일 N건" and opens 피드 when tapped). Declining a required notice stops there; taking it back later in the settings returns to this screen without deleting anything.
+- 코치마크: six steps that dim everything except the real control (composer, attach, model, 피드, 둘러보기, 내 에이전트). Controls register their position with `Modifier.coachTarget`; a control that is not on screen is skipped. Taps do not reach the screen underneath.
+- 프로필: name the agent uses, agent name, language, tone, answer length, interests (chips, up to 12) and free notes, with a preview. On "완료" it is saved to the server (`config.profile`), which rebuilds the runtime so the next task's system prompt carries it. If the server cannot be reached the owner can retry or continue; the profile is then sent automatically after the next successful poll.
+- Everything can be changed again: 내 에이전트 › 개인화 (profile) and › 약관·권한 (permissions, optional consents, withdraw, replay the intro or the coach marks).
+- System back (Android) goes one step back inside the flow, closes the drawer, a sheet or the task detail on the main screen, and otherwise leaves the app. Light haptic ticks mark page changes and choices; a stronger one marks finishing a step.
+
+The conversation body (greeting by name, suggestions, progress card with one line per action, inline approval card with 거부 as the strong button), 작업 (진행 중 / 예약됨 / 끝난 작업) and the pairing screen follow the mockup. Still the old layout, with only the new colours: task detail, the settings pages for usage and info, and the wide layout.
 
 Deviations (what the design asks that is not built, or was built differently):
 

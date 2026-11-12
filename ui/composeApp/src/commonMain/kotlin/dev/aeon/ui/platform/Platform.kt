@@ -47,6 +47,10 @@ const val MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 @androidx.compose.runtime.Composable
 expect fun rememberFilePicker(onPicked: (PickedFile?, String?) -> Unit): () -> Unit
 
+/** Makes the system bar icons readable on the app's own background (dark icons on a light theme and the reverse). */
+@androidx.compose.runtime.Composable
+expect fun PlatformSystemBars(dark: Boolean)
+
 /** Calls [onBack] for the system back gesture or button while [enabled]. No effect where there is none. */
 @androidx.compose.runtime.Composable
 expect fun PlatformBackHandler(enabled: Boolean, onBack: () -> Unit)

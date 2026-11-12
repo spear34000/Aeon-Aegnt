@@ -94,6 +94,16 @@ fun PhoneLayout(state: UiState, model: AppModel) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val drawerWidth = maxWidth * 0.7f
         val current = tabFor(state.section)
+        // System back closes whatever is open on top, innermost first, before it leaves the app.
+        val detailOpen = state.showDetail && state.selectedTaskId != null
+        dev.aeon.ui.platform.PlatformBackHandler(enabled = state.models.open || state.explore.detail != null || state.drawerOpen || detailOpen) {
+            when {
+                state.models.open -> model.closeModelSheet()
+                state.explore.detail != null -> model.showConnection(null)
+                state.drawerOpen -> model.closeDrawer()
+                else -> model.closeDetail()
+            }
+        }
         Column(Modifier.fillMaxSize()) {
             if (!(state.showDetail && state.selectedTaskId != null)) {
                 if (current == Section.Chat) ChatTopBar(state, model) else TitleBar(TABS.first { it.section == current }.label)
@@ -148,10 +158,10 @@ private fun ChatTopBar(state: UiState, model: AppModel) {
     val s = LocalAeonStatus.current
     val busy = state.tasks.any { it.status == "RUNNING" || it.status == "PENDING" || it.status == "RETRY_WAIT" }
     val (dot, text) = when {
-        state.connection !is Connection.Connected -> s.danger to "PC에 연결되지 않음"
+        state.connection !is Connection.Connected -> s.danger to "서버에 연결되지 않음"
         state.pendingCount > 0 -> s.warn to "승인을 기다리는 중"
         busy -> MaterialTheme.colorScheme.primary to "작업 중"
-        else -> s.ok to "내 PC와 연결됨"
+        else -> s.ok to "서버와 연결됨"
     }
     Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         CircleButton(AeonIcons.Menu, "대화 목록 열기", model::openDrawer)
@@ -270,7 +280,7 @@ private fun ChatDrawer(state: UiState, model: AppModel, modifier: Modifier) {
         ) {
             StatusDot(if (connected) s.ok else s.danger, 9)
             Column {
-                Text(if (connected) "내 PC와 연결됨" else "PC에 연결되지 않음", style = MaterialTheme.typography.labelLarge)
+                Text(if (connected) "서버와 연결됨" else "서버에 연결되지 않음", style = MaterialTheme.typography.labelLarge)
                 Text(state.serverUrl.removePrefix("http://").removePrefix("https://"), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
             }
         }

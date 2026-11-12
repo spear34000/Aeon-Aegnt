@@ -4,6 +4,7 @@ import android.app.Application
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import dev.aeon.ui.api.AeonClient
@@ -45,13 +46,25 @@ class AeonApplication : Application() {
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge() // the app draws its own background under the status and navigation bars
         val model = (application as AeonApplication).model
         lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onStart(owner: LifecycleOwner) = model.start()
             override fun onStop(owner: LifecycleOwner) = model.stop()
         })
+        openFrom(intent)
         setContent {
             AppRoot(model) { s, m -> PhoneLayout(s, m) }
         }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        openFrom(intent)
+    }
+
+    /** A tap on the approval notification lands on 피드. */
+    private fun openFrom(intent: android.content.Intent?) {
+        if (intent?.getStringExtra(dev.aeon.ui.platform.EXTRA_OPEN) == "feed") (application as AeonApplication).model.go(dev.aeon.ui.state.Section.Feed)
     }
 }

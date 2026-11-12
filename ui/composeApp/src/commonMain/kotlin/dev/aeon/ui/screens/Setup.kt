@@ -191,7 +191,7 @@ private val INTRO = listOf(
             ArtRow(AeonIcons.Check, "요약 문서 쓰기", "확인됨 · 파일이 있음", ok = true)
         }
     },
-    IntroPage("되돌릴 수 없는 일은 먼저 묻습니다", "삭제, 명령 실행, 외부 전송은 승인 없이는 실행하지 않습니다. 답하지 않으면 실행하지 않고, 허용은 그 한 번에만 적용됩니다.") {
+    IntroPage("되돌릴 수 없는 일은\n먼저 묻습니다", "삭제, 명령 실행, 외부 전송은 승인 없이는 실행하지 않습니다. 답하지 않으면 실행하지 않고, 허용은 그 한 번에만 적용됩니다.") {
         ArtCard {
             Chip("되돌릴 수 없음", Tone.Danger)
             Text("파일 3개를 영구 삭제할까요?", style = MaterialTheme.typography.titleLarge)
@@ -212,7 +212,7 @@ private val INTRO = listOf(
             ArtRow(AeonIcons.Key, "API 키", "암호화 보관")
         }
     },
-    IntroPage("모델과 도구는 내가 고릅니다", "쓸 모델 제공자와 모델, 추론 강도를 직접 고르고, 필요한 연동과 MCP 서버, 스킬만 연결합니다. 내 기기 밖으로 요청을 보내는 제공자는 처음에 동의를 받습니다.") {
+    IntroPage("모델과 도구는\n내가 고릅니다", "쓸 모델 제공자와 모델, 추론 강도를 직접 고르고, 필요한 연동과 MCP 서버, 스킬만 연결합니다. 내 기기 밖으로 요청을 보내는 제공자는 처음에 동의를 받습니다.") {
         ArtCard {
             ArtRow(AeonIcons.Cpu, "모델", "제공자 · 모델 · 추론 강도")
             ArtRow(AeonIcons.Plug, "연동과 MCP 서버", "필요한 것만")

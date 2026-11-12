@@ -69,7 +69,9 @@ fun AppRoot(model: AppModel, shell: @Composable (UiState, AppModel) -> Unit) {
         dev.aeon.ui.state.ThemeMode.Dark -> true
     }) {
         CompositionLocalProvider(LocalCoach provides coach) {
-            Surface(Modifier.fillMaxSize().safeDrawingPadding(), color = MaterialTheme.colorScheme.background) {
+            // The background fills the whole window, under the system bars; the content keeps clear of them.
+            Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+              Box(Modifier.fillMaxSize().safeDrawingPadding()) {
                 val setup = state.setup
                 val screen = when {
                     !splashDone || !setup.loaded -> RootScreen.Splash
@@ -108,6 +110,7 @@ fun AppRoot(model: AppModel, shell: @Composable (UiState, AppModel) -> Unit) {
                         }
                     }
                 }
+              }
             }
         }
     }

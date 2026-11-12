@@ -126,7 +126,8 @@ data class UiState(
 ) {
     /** This device may change settings, keys, connections and devices. */
     val isAdmin: Boolean get() = status?.admin == true
-    val profile: Profile get() = config?.profile ?: Profile()
+    /** What the server holds; before the settings have been read (or while offline), what was typed on this device. */
+    val profile: Profile get() = if (config != null) config.profile ?: Profile() else setup.profileDraft
 
     val pendingCount: Int get() = approvals.count { it.status == "pending" }
 
@@ -222,6 +223,7 @@ class AppModel(
                 if (client.serverKey.isNotEmpty()) store.put(KEY_SERVER_KEY, client.serverKey) else store.remove(KEY_SERVER_KEY)
                 _state.update { it.copy(serverUrl = client.baseUrl, connection = Connection.Connected(res.serverName), busy = false, canSeal = client.serverKey.isNotEmpty()) }
                 if (_state.value.setup.step == SetupStep.Connect) goStep(SetupStep.Coach)
+                if (dev.aeon.ui.platform.supportsBackgroundCheck && _state.value.setup.consents.background) runCatching { dev.aeon.ui.platform.setBackgroundApprovalCheck(true) }
                 startPolling()
             } catch (e: Exception) {
                 client.baseUrl = previousUrl
@@ -289,6 +291,8 @@ class AppModel(
             }
             if (_state.value.setup.step == SetupStep.Connect) goStep(SetupStep.Coach)
             syncSetup(status.admin)
+            // The greeting and the settings need the saved profile; read it once after connecting.
+            if (_state.value.config == null) runCatching { client.config() }.onSuccess { cfg -> _state.update { it.copy(config = cfg, draft = it.draft ?: cfg) } }
         } catch (e: AeonException) {
             if (e.status == 401) {
                 // Revoked or clock skew: stop hammering the server and ask the user to pair again.
@@ -464,6 +468,7 @@ class AppModel(
 
     private fun goStep(step: SetupStep) {
         save(KEY_SETUP_STEP, step.name)
+        if (step == SetupStep.Done) save(KEY_SETUP_COMPLETED, "1")
         setup { it.copy(step = step, error = null, saving = false) }
         if (step == SetupStep.Coach) _state.update { it.copy(section = Section.Chat, selectedTaskId = null, selectedTask = null, showDetail = false, drawerOpen = false) }
     }
@@ -504,7 +509,14 @@ class AppModel(
         setConsents(c.copy(acceptedAt = dev.aeon.ui.platform.nowMillis()))
         save(KEY_SETUP_ONLINE_PENDING, "1")
         setup { it.copy(onlinePending = true) }
-        goStep(if (_state.value.connection is Connection.Unpaired) SetupStep.Connect else SetupStep.Coach)
+        // Agreeing again after taking the agreement back does not repeat the tour and the profile.
+        goStep(
+            when {
+                _state.value.connection is Connection.Unpaired -> SetupStep.Connect
+                read(KEY_SETUP_COMPLETED) == "1" -> SetupStep.Done
+                else -> SetupStep.Coach
+            },
+        )
     }
 
     /** Taking back a required agreement returns the app to the terms; nothing else is deleted. */
@@ -852,6 +864,7 @@ class AppModel(
         const val KEY_DEVICE = "deviceId"
         const val KEY_THEME = "themeMode"
         const val KEY_SERVER_KEY = "serverKey"
+        const val KEY_SETUP_COMPLETED = "setup.completed"
         const val KEY_SETUP_STEP = "setup.step"
         const val KEY_SETUP_INTRO = "setup.introPage"
         const val KEY_SETUP_CONSENTS = "setup.consents"

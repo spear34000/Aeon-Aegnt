@@ -58,7 +58,9 @@ Sealing ("AEON-SEAL-V1", `src/node/server/seal.ts`): the server has an ECDH P-25
 
 Devices have an `admin` flag (default true): without it a device keeps chat and approvals but cannot change settings, keys, connections or devices. API keys for catalogue providers are stored under `AEON_EP_<ID>_KEY`, a name Aeon derives from the provider id and nothing else uses.
 
-`config.profile` (`userName`, `agentName`, `tone`, `detail`, `language`, `about`) is added to the system prompt as wording preferences only.
+`config.profile` (`userName`, `agentName`, `tone`, `detail`, `language`, `interests` (up to 12 labels), `about`) is added to the system prompt as wording preferences only.
+
+`config.onlineLookups: false` records that the owner declined internet lookups for lists and logos: `/v1/catalog` then answers `{connections: [], disabled: true}`, `/v1/icons` answers 404 and `/v1/providers` serves built-ins plus the last cached catalogue with `online: false`. Changing it needs the right to change settings.
 
 ## Connections
 

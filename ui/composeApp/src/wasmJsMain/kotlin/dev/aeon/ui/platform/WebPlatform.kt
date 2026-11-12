@@ -166,6 +166,10 @@ actual fun rememberPermissionController(): PermissionController = NoPermissions
 
 actual val supportsBackgroundCheck: Boolean = false
 
+@androidx.compose.runtime.Composable
+actual fun PlatformSystemBars(dark: Boolean) {
+}
+
 actual fun setBackgroundApprovalCheck(enabled: Boolean) {
 }
 

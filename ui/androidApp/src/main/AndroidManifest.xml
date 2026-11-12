@@ -5,6 +5,8 @@
          No storage, location, contacts or any other permission: files are chosen through the system picker. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Needed to schedule the background approval check "only while there is a network" (no prompt; reads no location). -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <application
         android:name=".AeonApplication"

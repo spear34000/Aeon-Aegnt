@@ -40,6 +40,17 @@ actual fun PlatformBackHandler(enabled: Boolean, onBack: () -> Unit) {
     BackHandler(enabled = enabled, onBack = onBack)
 }
 
+@Composable
+actual fun PlatformSystemBars(dark: Boolean) {
+    val view = androidx.compose.ui.platform.LocalView.current
+    androidx.compose.runtime.SideEffect {
+        val window = view.context.findActivity()?.window ?: return@SideEffect
+        val bars = androidx.core.view.WindowCompat.getInsetsController(window, view)
+        bars.isAppearanceLightStatusBars = !dark
+        bars.isAppearanceLightNavigationBars = !dark
+    }
+}
+
 private const val NOTIFICATIONS = "notifications"
 
 private tailrec fun Context.findActivity(): Activity? = when (this) {
@@ -94,6 +105,9 @@ actual val supportsBackgroundCheck: Boolean = true
 private const val JOB_ID = 7421
 private const val CHANNEL = "approvals"
 private const val KEY_NOTIFIED = "notifiedApprovals"
+
+/** Intent extra set by the approval notification: the app opens on 피드, where approvals are answered. */
+const val EXTRA_OPEN = "aeon.open"
 
 /**
  * About every 15 minutes (the shortest period Android allows), while there is a network, the system runs
@@ -157,7 +171,7 @@ private fun notifyApprovals(context: Context, count: Int) {
     if (Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
     val manager = context.getSystemService(NotificationManager::class.java)
     manager.createNotificationChannel(NotificationChannel(CHANNEL, "승인 요청", NotificationManager.IMPORTANCE_HIGH).apply { description = "에이전트가 실행 전에 묻는 일" })
-    val open = context.packageManager.getLaunchIntentForPackage(context.packageName)
+    val open = context.packageManager.getLaunchIntentForPackage(context.packageName)?.putExtra(EXTRA_OPEN, "feed")
     val tap = open?.let { PendingIntent.getActivity(context, 0, it, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT) }
     val icon = context.resources.getIdentifier("ic_stat_aeon", "drawable", context.packageName).takeIf { it != 0 } ?: android.R.drawable.stat_notify_more
     // The text says only that something waits: details stay inside the app, not on the lock screen.
