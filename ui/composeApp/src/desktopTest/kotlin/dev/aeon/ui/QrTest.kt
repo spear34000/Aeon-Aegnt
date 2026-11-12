@@ -50,8 +50,8 @@ class QrTest {
         assertEquals(PairLink(listOf("http://192.168.0.12:7421", "http://100.115.170.78:7421"), "75KFXQWOXQGQ7VLQ"), PairLink.parse(link))
         assertTrue(Qr.encode(link).version <= 6)
 
-        val many = PairLink.build(listOf("http://a:1", "javascript:alert(1)", "http://u:p@evil:1", "http://b:2", "http://c:3", "http://d:4"), "75KFXQWOXQGQ7VLQ")
-        assertEquals(listOf("http://a:1", "http://b:2", "http://c:3"), PairLink.parse(many)!!.addresses)
+        val many = PairLink.build(listOf("http://a:1", "javascript:alert(1)", "http://u:p@evil:1", "http://b:2", "http://c:3", "http://d:4", "http://e:5"), "75KFXQWOXQGQ7VLQ")
+        assertEquals(listOf("http://a:1", "http://b:2", "http://c:3", "http://d:4"), PairLink.parse(many)!!.addresses)
 
         val code = "75KFXQWOXQGQ7VLQ"
         for (bad in listOf("http://pair?c=$code", "aeon://other?c=$code", "aeon://pair?c=nothex", "aeon://pair?u=http%3A%2F%2Fa%3A1", "aeon://pair?c=$code%", "aeon://pair?c=$code%zz", "")) assertNull(PairLink.parse(bad), bad)

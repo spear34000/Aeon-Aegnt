@@ -37,6 +37,13 @@ export async function serveCommand(o: ServeOptions): Promise<number> {
     for (const list of Object.values(networkInterfaces())) {
       for (const a of list ?? []) if (a.family === "IPv4" && !a.internal && !a.address.startsWith("169.254.") && (any || a.address === o.host)) out.push(`http://${a.address}:${boundPort}`);
     }
+    // A phone is most likely on the 192.168.x or 10.x network: put those first, VPN-style 100.64/10 and the rest later.
+    const rank = (u: string): number => {
+      const ip = u.slice("http://".length).split(":")[0]!;
+      const [a, b] = ip.split(".").map(Number) as [number, number];
+      return a === 192 && b === 168 ? 0 : a === 10 ? 1 : a === 172 && b >= 16 && b <= 31 ? 2 : a === 100 && b >= 64 && b <= 127 ? 3 : 4;
+    };
+    out.sort((x, y) => rank(x) - rank(y));
     return out.length > 0 || any ? out : [`http://${o.host}:${boundPort}`];
   };
   const server = new AeonServer({

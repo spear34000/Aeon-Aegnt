@@ -54,7 +54,7 @@ fun SkillEditor(draft: SkillDraft, state: UiState, model: AppModel) {
             if (!canEdit) Banner("이 기기는 스킬을 바꿀 수 없어요.", Tone.Warn, "⚠")
             AeonTextField(draft.name, { v -> model.changeSkillDraft { it.copy(name = v.replace('\n', ' ').take(80)) } }, "이름", placeholder = "예: 회의록 정리", enabled = canEdit)
             AeonTextField(draft.description, { v -> model.changeSkillDraft { it.copy(description = v.replace('\n', ' ').take(300)) } }, "설명", placeholder = "언제 쓰는 스킬인지 한 줄로", enabled = canEdit)
-            AeonTextField(draft.body, { v -> model.changeSkillDraft { it.copy(body = v.take(90_000)) } }, "지침", singleLine = false, placeholder = "에이전트가 따를 순서나 규칙을 적어요", enabled = canEdit, modifier = Modifier.widthIn(min = 0.dp))
+            AeonTextField(draft.body, { v -> model.changeSkillDraft { it.copy(body = v.take(90_000)) } }, "지침", singleLine = false, placeholder = "에이전트가 따를 순서나 규칙을 적어요", enabled = canEdit, minHeight = 240.dp)
             draft.folder?.let { Text("${state.skills.dir}/$it/SKILL.md", style = MaterialTheme.typography.bodySmall, color = s.fg3) }
             if (canEdit && draft.folder != null) AeonButton("삭제", { confirm = true }, Modifier.fillMaxWidth(), kind = ButtonKind.Destructive)
         }

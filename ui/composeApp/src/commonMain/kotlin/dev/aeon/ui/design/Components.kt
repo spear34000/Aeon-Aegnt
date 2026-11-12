@@ -177,6 +177,7 @@ fun AeonTextField(
     keyboard: KeyboardType = KeyboardType.Text,
     /** Shows a dash every N characters without changing the stored value (used for pairing codes). */
     group: Int = 0,
+    minHeight: androidx.compose.ui.unit.Dp = 44.dp,
 ) {
     val s = LocalAeonStatus.current
     var focused by remember { mutableStateOf(false) }
@@ -188,11 +189,11 @@ fun AeonTextField(
     Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(label, style = MaterialTheme.typography.labelMedium, color = if (enabled) MaterialTheme.colorScheme.onSurface else s.fg3)
         Box(
-            Modifier.fillMaxWidth().defaultMinSize(minHeight = 44.dp)
+            Modifier.fillMaxWidth().defaultMinSize(minHeight = minHeight)
                 .background(if (enabled) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(AeonShape.CONTROL.dp))
                 .border(if (focused || error != null) 1.5.dp else 1.dp, borderColor, RoundedCornerShape(AeonShape.CONTROL.dp))
                 .padding(horizontal = 12.dp, vertical = 10.dp),
-            contentAlignment = Alignment.CenterStart,
+            contentAlignment = if (singleLine) Alignment.CenterStart else Alignment.TopStart,
         ) {
             run {
                 BasicTextField(

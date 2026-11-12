@@ -98,7 +98,7 @@ fun ConversationScreen(state: UiState, model: AppModel, wide: Boolean, modifier:
                         }
                     }
                     val pending: Approval? = state.approvals.firstOrNull { it.id == detail.pendingApprovalId && it.status == "pending" }
-                    if (detail.steps.isNotEmpty() || pending != null) {
+                    if (detail.steps.isNotEmpty()) {
                         item(key = "progress-${detail.id}") { ProgressCard(detail, waiting = pending != null) }
                     }
                     if (pending != null) {

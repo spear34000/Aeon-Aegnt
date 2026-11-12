@@ -419,8 +419,8 @@ private fun TaskTile(t: TaskSummary) {
     val s = LocalAeonStatus.current
     val scheme = MaterialTheme.colorScheme
     val (icon, bg, fg) = when {
-        t.status == "COMPLETED" && (t.verification?.status == "verified" || t.verification?.status == "user_confirmed") -> Triple(AeonIcons.Check, s.okSoft, s.ok)
         t.status == "FAILED" || (t.status == "COMPLETED" && t.verification?.status == "failed") -> Triple(AeonIcons.Close, s.dangerSoft, s.danger)
+        t.status == "COMPLETED" -> Triple(AeonIcons.Check, s.okSoft, s.ok)
         t.status.startsWith("WAITING") || t.status == "RETRY_WAIT" -> Triple(AeonIcons.Pause, s.warnSoft, s.warn)
         t.status == "PENDING" && t.runAfter > dev.aeon.ui.platform.nowMillis() -> Triple(AeonIcons.Clock, scheme.surfaceVariant, scheme.onSurface)
         t.status == "RUNNING" || t.status == "PENDING" -> Triple(AeonIcons.Send, s.accentSoft, s.onAccentSoft)

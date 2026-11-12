@@ -7,7 +7,7 @@ package dev.aeon.ui.api
  */
 data class PairLink(val addresses: List<String>, val code: String) {
     companion object {
-        const val MAX_ADDRESSES = 3
+        const val MAX_ADDRESSES = 4
         private val CODE = Regex("[A-Z2-7]{16}")
 
         /** True for addresses on a home or office network (private ranges, shared 100.64/10 used by VPNs, loopback, `.local`). */

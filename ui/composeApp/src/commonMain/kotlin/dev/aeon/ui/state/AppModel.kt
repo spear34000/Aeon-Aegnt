@@ -677,7 +677,7 @@ class AppModel(
     // ---------------------------------------------------------------- 개인화
 
     /** Saves how the agent addresses the owner. Allowed from every paired device. */
-    fun saveProfile(profile: Profile) = action("저장했습니다") {
+    fun saveProfile(profile: Profile) = action("저장했어요") {
         val cfg = client.config()
         val saved = client.saveConfig(cfg.copy(profile = cleanProfile(profile)))
         _state.update { it.copy(config = saved, draft = saved) }
@@ -751,7 +751,7 @@ class AppModel(
         loadDevices()
     }
 
-    fun renameDevice(id: String, name: String) = action("이름을 바꿨습니다") {
+    fun renameDevice(id: String, name: String) = action("이름을 바꿨어요") {
         client.updateDevice(id, name = name.trim())
         _state.update { it.copy(devices = client.devices()) }
     }
@@ -761,10 +761,10 @@ class AppModel(
         _state.update { it.copy(devices = client.devices()) }
     }
 
-    fun decide(approvalId: String, approve: Boolean) = action(if (approve) "Allowed once" else "Denied") { client.decide(approvalId, approve) }
-    fun cancel(id: String) = action("Stopping") { client.cancel(id) }
-    fun reverify(id: String) = action("Checked again") { client.reverify(id) }
-    fun confirm(id: String) = action("Marked as checked by you") { client.confirm(id) }
+    fun decide(approvalId: String, approve: Boolean) = action(null) { client.decide(approvalId, approve) }
+    fun cancel(id: String) = action("멈췄어요") { client.cancel(id) }
+    fun reverify(id: String) = action("다시 확인했어요") { client.reverify(id) }
+    fun confirm(id: String) = action("확인했어요") { client.confirm(id) }
 
     fun loadSettings() {
         action(null) {
@@ -780,25 +780,25 @@ class AppModel(
 
     fun saveDraft() {
         val d = _state.value.draft ?: return
-        action("Saved") {
+        action("저장했어요") {
             val saved = client.saveConfig(d)
             _state.update { it.copy(config = saved, draft = saved) }
         }
     }
 
-    fun setSecret(name: String, value: String) = action("Key saved") {
+    fun setSecret(name: String, value: String) = action("키를 저장했어요") {
         client.setSecret(name, value)
         val sec = client.secretNames()
         _state.update { it.copy(secretNames = sec.names, secretsBackend = sec.backend) }
     }
 
-    fun deleteSecret(name: String) = action("Key removed") {
+    fun deleteSecret(name: String) = action("키를 지웠어요") {
         client.deleteSecret(name)
         val sec = client.secretNames()
         _state.update { it.copy(secretNames = sec.names) }
     }
 
-    fun revokeDevice(id: String) = action("Device removed") {
+    fun revokeDevice(id: String) = action("기기를 끊었어요") {
         client.revokeDevice(id)
         _state.update { it.copy(devices = client.devices()) }
     }
@@ -945,7 +945,7 @@ class AppModel(
     }
 
     /** Saves a remote server into the settings. The server refuses this from a device that may not change settings. */
-    fun addConnection(c: ConnectionItem) = action("추가했습니다") {
+    fun addConnection(c: ConnectionItem) = action("추가했어요") {
         val url = c.remoteUrl ?: throw IllegalStateException("원격 주소가 없는 항목은 아직 추가할 수 없습니다.")
         val name = c.id.removePrefix("mcp:")
         val cfg = client.config()
@@ -955,7 +955,7 @@ class AppModel(
         loadExplore()
     }
 
-    fun removeConnection(c: ConnectionItem) = action("연결을 해제했습니다") {
+    fun removeConnection(c: ConnectionItem) = action("삭제했어요") {
         val name = c.id.removePrefix("mcp:")
         val cfg = client.config()
         client.saveConfig(cfg.copy(mcpServers = (cfg.mcpServers ?: emptyList()).filter { it.name != name }))

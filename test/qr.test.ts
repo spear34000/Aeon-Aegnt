@@ -67,9 +67,10 @@ describe("Pairing link", () => {
     assert.ok(encodeQr(link).version <= 6, "fits a small QR code");
   });
 
-  it("keeps at most three addresses and drops anything that is not a plain http(s) origin", () => {
-    const link = buildPairLink(["http://a:1", "javascript:alert(1)", "http://u:p@evil:1", "http://b:2", "http://c:3", "http://d:4", "http://e:5/path"], "75KFXQWOXQGQ7VLQ");
-    assert.deepEqual(parsePairLink(link)!.addresses, ["http://a:1", "http://b:2", "http://c:3"]);
+  it("keeps at most four addresses and drops anything that is not a plain http(s) origin", () => {
+    const link = buildPairLink(["http://a:1", "javascript:alert(1)", "http://u:p@evil:1", "http://b:2", "http://c:3", "http://d:4", "http://e:5", "http://f:6/path"], "75KFXQWOXQGQ7VLQ");
+    assert.deepEqual(parsePairLink(link)!.addresses, ["http://a:1", "http://b:2", "http://c:3", "http://d:4"]);
+    assert.ok(encodeQr(buildPairLink(["http://192.168.100.200:65535", "http://192.168.100.201:65535", "http://192.168.100.202:65535", "http://192.168.100.203:65535"], "75KFXQWOXQGQ7VLQ")).version <= 10, "four long addresses still fit");
     assert.throws(() => buildPairLink([], "short"));
   });
 

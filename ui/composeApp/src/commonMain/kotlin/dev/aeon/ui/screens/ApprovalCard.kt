@@ -66,6 +66,7 @@ fun ApprovalCard(a: Approval, seenAt: Long?, sourceLabel: String, onDecide: (Boo
     val now = nowMillis()
     val info = riskInfo(a)
     val high = info.level == 3 || a.irreversible
+    val isFileAction = a.risk == "read" || a.risk == "write" || a.risk == "delete"
     val leftMs = a.expiresAt - now
     var allowReady by remember(a.id) { mutableStateOf(seenAt == null || now - seenAt >= 1000) }
     var showAll by remember(a.id) { mutableStateOf(false) }
@@ -93,9 +94,14 @@ fun ApprovalCard(a: Approval, seenAt: Long?, sourceLabel: String, onDecide: (Boo
         if (shown.isNotEmpty()) {
             Column(Modifier.fillMaxWidth().background(scheme.background, RoundedCornerShape(AeonShape.CONTROL.dp)).padding(horizontal = 14.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 shown.forEach { r ->
-                    Column {
-                        Text(fileName(r), style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        folderOf(r).takeIf { it.isNotEmpty() }?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                    if (isFileAction) {
+                        Column {
+                            Text(fileName(r), style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            folderOf(r).takeIf { it.isNotEmpty() }?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                        }
+                    } else {
+                        // Addresses and commands are shown whole: cutting a URL down to its last segment would hide the host.
+                        SelectionContainer { Text(r, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall) }
                     }
                 }
                 if (a.resources.size > 3) {
@@ -112,7 +118,7 @@ fun ApprovalCard(a: Approval, seenAt: Long?, sourceLabel: String, onDecide: (Boo
         if (always || details) {
             Column(Modifier.fillMaxWidth().background(scheme.surfaceVariant, RoundedCornerShape(AeonShape.CONTROL.dp)).padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(a.tool, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant)
-                if (!always) a.resources.forEach { SelectionContainer { Text(it, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall) } }
+                if (isFileAction) a.resources.forEach { SelectionContainer { Text(it, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall) } }
                 SelectionContainer { Text(a.summary, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall) }
             }
         }

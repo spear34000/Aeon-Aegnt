@@ -359,7 +359,7 @@ private fun ConnectionSheet(c: ConnectionItem, state: UiState, model: AppModel) 
             }
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Chip(kindLabel(c.kind), Tone.Accent)
-                                if (isAdded) Chip("추가됨", Tone.Ok)
+                if (isAdded) Chip("추가됨", Tone.Ok)
             }
             if (c.description.isNotBlank()) Text(c.description, style = MaterialTheme.typography.bodyLarge)
             Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(scheme.background).padding(horizontal = 14.dp, vertical = 8.dp)) {

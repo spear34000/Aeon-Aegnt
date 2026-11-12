@@ -89,8 +89,10 @@ private fun ProviderList(state: UiState, model: AppModel) {
     var query by remember { mutableStateOf("") }
     var all by remember { mutableStateOf(false) }
     AeonTextField(query, { query = it }, "제공자 찾기", placeholder = "OpenAI, Groq, Upstage…")
-    val ranked = m.providers.sortedWith(compareByDescending<ProviderRow> { it.id == m.current?.provider }.thenByDescending { it.hasKey || it.local }.thenBy { it.name.lowercase() })
-    val mine = ranked.filter { it.id == m.current?.provider || it.hasKey || it.local }
+    val ranked = m.providers.sortedWith(compareByDescending<ProviderRow> { it.id == m.current?.provider }.thenByDescending { it.hasKey && !it.local }.thenBy { it.name.lowercase() })
+    // Aeon's own providers (EXAONE, Ollama, llama.cpp), the one in use, and any with a saved key; the catalogue is behind the button.
+    val builtin = setOf("exaone", "ollama", "llamacpp")
+    val mine = ranked.filter { it.id == m.current?.provider || it.hasKey || it.id in builtin }
     val shown = when {
         query.isNotBlank() -> ranked.filter { it.name.contains(query, true) || it.id.contains(query, true) }
         all -> ranked
@@ -116,7 +118,7 @@ private fun ProviderRows(list: List<ProviderRow>, currentId: String?, model: App
                 Text(p.name, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, maxLines = 1)
                 when {
                     p.id == currentId -> Chip("사용 중", Tone.Accent)
-                    p.hasKey || p.local -> Chip("연결됨", Tone.Ok)
+                    p.hasKey && !p.local -> Chip("연결됨", Tone.Ok)
                 }
                 Icon(AeonIcons.Chevron, contentDescription = null, tint = scheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
             }

@@ -29,7 +29,9 @@ npm run test:live   # opt-in real-service tests, skipped unless enabled (see bel
 
 | Item | Evidence |
 |---|---|
-| `./gradlew :composeApp:desktopTest` | 8 tests pass: byte-exact signing/pairing vectors shared with the Node side, DPAPI key persistence (real Windows DPAPI), Kotlin client against the **real** `aeon serve` (pairing, signed requests, approval flow with real file deletion and verification, settings/secrets, revocation), hostile-server pairing attempt. Only the language model is faked |
+| `./gradlew :composeApp:desktopTest` | 21 tests pass (2026-11-13): byte-exact signing/pairing vectors shared with the Node side, DPAPI key persistence (real Windows DPAPI), Kotlin client against the **real** `aeon serve` (pairing, signed requests, approval flow with real file deletion and verification, settings/secrets, revocation), hostile-server pairing attempt; the first-run flow state machine (8 tests: order, back, resume after closing, store that cannot write, already-paired device, scanned link only pre-fills); the QR encoder and pairing link against the same SHA-256 vectors as `test/qr.test.ts` (4 tests). Only the language model is faked |
+| `npm test` | 220 tests, 219 pass, 1 skipped (2026-11-13), including `/v1/skills`, the profile reaching the model prompt, `onlineLookups`, QR vectors (also checked against python-qrcode and decoded again from a rendered image with OpenCV, test tools only) and pair-link parsing |
+| Android and web builds | `:androidApp:assembleDebug` and `:composeApp:compileKotlinWasmJs` succeed (2026-11-13) |
 | Windows app | launched on Windows 11; window opened. Screens not inspected by automation (they share composables with the web build, which was inspected) |
 | Web UI | exercised by hand in the built-in browser against the real server: real WebCrypto pairing, task creation, wide and narrow layouts. Not automated; no DOM accessibility tree to automate against |
 | Android | **not built, not tested** |

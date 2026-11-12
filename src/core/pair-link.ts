@@ -3,7 +3,7 @@
  * A phone's own camera app opens it, the Aeon app receives it, and fills in the address and code. It never pairs
  * by itself: the owner still taps 연결, and any app can send such a link, so everything in it is only a suggestion.
  */
-export const PAIR_LINK_MAX_ADDRESSES = 3;
+export const PAIR_LINK_MAX_ADDRESSES = 4;
 
 const CODE = /^[A-Z2-7]{16}$/;
 
