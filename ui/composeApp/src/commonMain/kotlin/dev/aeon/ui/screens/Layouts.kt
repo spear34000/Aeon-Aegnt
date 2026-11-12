@@ -24,6 +24,19 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import dev.aeon.ui.state.SetupStep
+import dev.aeon.ui.platform.PlatformBackHandler
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -39,19 +52,62 @@ import dev.aeon.ui.state.Section
 import dev.aeon.ui.state.SettingsPage
 import dev.aeon.ui.state.UiState
 
-/** Chooses between pairing and the paired app. Each platform only supplies the shell. */
+private enum class RootScreen { Splash, Intro, Welcome, Terms, Connect, Profile, Main }
+
+/**
+ * Decides what fills the window: the splash while state is restored, the first-run steps in order, the pairing
+ * screen whenever this device is not paired, and otherwise the app itself. Each platform only supplies the shell.
+ */
 @Composable
 fun AppRoot(model: AppModel, shell: @Composable (UiState, AppModel) -> Unit) {
     val state by model.state.collectAsState()
+    var splashDone by rememberSaveable { mutableStateOf(false) }
+    val coach = remember { CoachRegistry() }
     AeonTheme(dark = when (state.themeMode) {
         dev.aeon.ui.state.ThemeMode.System -> null
         dev.aeon.ui.state.ThemeMode.Light -> false
         dev.aeon.ui.state.ThemeMode.Dark -> true
     }) {
-        Surface(Modifier.fillMaxSize().safeDrawingPadding(), color = MaterialTheme.colorScheme.background) {
-            if (state.connection is Connection.Unpaired) ConnectScreen(state, model) else {
-                shell(state, model)
-                ModelSheetHost(state, model)
+        CompositionLocalProvider(LocalCoach provides coach) {
+            Surface(Modifier.fillMaxSize().safeDrawingPadding(), color = MaterialTheme.colorScheme.background) {
+                val setup = state.setup
+                val screen = when {
+                    !splashDone || !setup.loaded -> RootScreen.Splash
+                    setup.step == SetupStep.Intro -> RootScreen.Intro
+                    setup.step == SetupStep.Welcome -> RootScreen.Welcome
+                    setup.step == SetupStep.Terms -> RootScreen.Terms
+                    state.connection is Connection.Unpaired || (setup.step == SetupStep.Connect && state.connection !is Connection.Connected) -> RootScreen.Connect
+                    setup.step == SetupStep.Profile -> RootScreen.Profile
+                    else -> RootScreen.Main
+                }
+                val coaching = screen == RootScreen.Main && (setup.step == SetupStep.Coach || setup.replayCoach)
+                val canGoBack = when (screen) {
+                    RootScreen.Intro -> setup.introPage > 0
+                    RootScreen.Welcome, RootScreen.Terms, RootScreen.Profile -> true
+                    RootScreen.Connect -> setup.step == SetupStep.Connect
+                    RootScreen.Main -> coaching && setup.coachIndex > 0
+                    RootScreen.Splash -> false
+                }
+                PlatformBackHandler(enabled = canGoBack) { if (coaching) model.setCoachIndex(setup.coachIndex - 1) else model.setupBack() }
+                AnimatedContent(
+                    screen,
+                    transitionSpec = { (fadeIn(tween(280)) + slideInHorizontally(tween(280)) { it / 10 }) togetherWith fadeOut(tween(160)) },
+                    label = "root",
+                ) { which ->
+                    when (which) {
+                        RootScreen.Splash -> SplashScreen(ready = setup.loaded) { splashDone = true }
+                        RootScreen.Intro -> IntroScreen(state, model)
+                        RootScreen.Welcome -> WelcomeScreen(model)
+                        RootScreen.Terms -> TermsScreen(state, model)
+                        RootScreen.Connect -> ConnectScreen(state, model, onBack = if (setup.step == SetupStep.Connect) ({ model.setupBack() }) else null)
+                        RootScreen.Profile -> ProfileSetupScreen(state, model)
+                        RootScreen.Main -> Box(Modifier.fillMaxSize()) {
+                            shell(state, model)
+                            ModelSheetHost(state, model)
+                            if (coaching) CoachOverlay(setup.coachIndex, model::setCoachIndex, model::finishCoach)
+                        }
+                    }
+                }
             }
         }
     }

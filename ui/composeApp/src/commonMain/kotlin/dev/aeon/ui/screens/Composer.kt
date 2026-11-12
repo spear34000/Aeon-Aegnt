@@ -100,7 +100,7 @@ fun Composer(state: UiState, model: AppModel, enabled: Boolean, onSend: (String)
         Column(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(26.dp)).background(scheme.surface).border(1.dp, scheme.outlineVariant, RoundedCornerShape(26.dp)).padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 8.dp),
         ) {
-            Box(Modifier.fillMaxWidth().heightIn(min = 28.dp, max = 160.dp), contentAlignment = Alignment.CenterStart) {
+            Box(Modifier.coachTarget("composer.input").fillMaxWidth().heightIn(min = 28.dp, max = 160.dp), contentAlignment = Alignment.CenterStart) {
                 if (text.isEmpty()) Text("무엇을 맡길까요?", color = s.fg3, style = MaterialTheme.typography.bodyLarge)
                 BasicTextField(
                     value = text,
@@ -118,12 +118,12 @@ fun Composer(state: UiState, model: AppModel, enabled: Boolean, onSend: (String)
             }
             Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Box(
-                    Modifier.size(40.dp).clip(CircleShape).background(scheme.surfaceVariant).clickable(enabled = enabled && !state.uploading) { pick() }.semantics { contentDescription = "파일 올리기" },
+                    Modifier.coachTarget("composer.attach").size(40.dp).clip(CircleShape).background(scheme.surfaceVariant).clickable(enabled = enabled && !state.uploading) { pick() }.semantics { contentDescription = "파일 올리기" },
                     contentAlignment = Alignment.Center,
                 ) { Icon(AeonIcons.Plus, contentDescription = null, tint = scheme.onSurface, modifier = Modifier.size(20.dp)) }
                 Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
                 Row(
-                    Modifier.heightIn(min = 40.dp).clip(RoundedCornerShape(20.dp)).background(scheme.surfaceVariant)
+                    Modifier.coachTarget("composer.model").heightIn(min = 40.dp).clip(RoundedCornerShape(20.dp)).background(scheme.surfaceVariant)
                         .clickable { model.openModelSheet() }.padding(horizontal = 12.dp).semantics { contentDescription = "모델 바꾸기: $modelLabel" },
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),

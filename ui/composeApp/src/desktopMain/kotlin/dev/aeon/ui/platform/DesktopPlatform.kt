@@ -210,6 +210,26 @@ actual fun rememberFilePicker(onPicked: (PickedFile?, String?) -> Unit): () -> U
 
 actual fun createKeyValueStore(): KeyValueStore = FileKeyValueStore()
 
+/** Desktop windows have no system back gesture. */
+@androidx.compose.runtime.Composable
+actual fun PlatformBackHandler(enabled: Boolean, onBack: () -> Unit) {
+}
+
+private object NoPermissions : PermissionController {
+    override val items: List<PermissionItem> = emptyList()
+    override fun status(id: String) = PermissionStatus.Granted
+    override fun request(id: String) {}
+    override fun openSettings() {}
+}
+
+@androidx.compose.runtime.Composable
+actual fun rememberPermissionController(): PermissionController = NoPermissions
+
+actual val supportsBackgroundCheck: Boolean = false
+
+actual fun setBackgroundApprovalCheck(enabled: Boolean) {
+}
+
 actual fun nowMillis(): Long = System.currentTimeMillis()
 
 actual fun defaultDeviceName(): String = "${System.getProperty("user.name") ?: "user"}@${runCatching { java.net.InetAddress.getLocalHost().hostName }.getOrDefault("desktop")} (${if (isWindows) "Windows" else "Desktop"} app)".take(64)

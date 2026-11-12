@@ -58,13 +58,15 @@ fun PersonalPage(state: UiState, model: AppModel) {
         Choice("말투", listOf("polite" to "존댓말", "casual" to "반말"), draft.tone) { draft = draft.copy(tone = it) }
         Choice("답변 길이", listOf("brief" to "짧게", null to "기본", "detailed" to "자세히"), draft.detail) { draft = draft.copy(detail = it) }
         Choice("언어", listOf(null to "자동", "ko" to "한국어", "en" to "English"), draft.language) { draft = draft.copy(language = it) }
+        Text("관심사", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        InterestsEditor(draft.interests.orEmpty()) { draft = draft.copy(interests = it.ifEmpty { null }) }
         AeonTextField(
             draft.about.orEmpty(), { draft = draft.copy(about = it.replace('\n', ' ').take(1000)) }, "에이전트가 알아 둘 것", singleLine = false,
             placeholder = "예: 개발자입니다. 코드는 영어 주석으로 써 주세요.", help = "${draft.about.orEmpty().length}/1000 · 여기 적은 내용은 모델 제공자에게 전달됩니다.",
         )
         Column(Modifier.fillMaxWidth().padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text("미리보기", style = MaterialTheme.typography.labelLarge, color = scheme.onSurfaceVariant)
-            Text("${draft.agentName?.takeIf { it.isNotBlank() } ?: "Aeon"}: $preview", style = MaterialTheme.typography.bodyLarge)
+            Text("${draft.agentName?.takeIf { it.isNotBlank() } ?: "Aeon"}: ${profilePreview(draft)}", style = MaterialTheme.typography.bodyLarge)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             AeonButton("되돌리기", { draft = saved }, kind = ButtonKind.Secondary, enabled = draft != saved)

@@ -149,6 +149,26 @@ actual fun createDeviceCrypto(): DeviceCrypto = WebDeviceCrypto()
 
 actual fun createKeyValueStore(): KeyValueStore = WebKeyValueStore()
 
+/** The browser's own back button leaves the page; it is not intercepted. */
+@androidx.compose.runtime.Composable
+actual fun PlatformBackHandler(enabled: Boolean, onBack: () -> Unit) {
+}
+
+private object NoPermissions : PermissionController {
+    override val items: List<PermissionItem> = emptyList()
+    override fun status(id: String) = PermissionStatus.Granted
+    override fun request(id: String) {}
+    override fun openSettings() {}
+}
+
+@androidx.compose.runtime.Composable
+actual fun rememberPermissionController(): PermissionController = NoPermissions
+
+actual val supportsBackgroundCheck: Boolean = false
+
+actual fun setBackgroundApprovalCheck(enabled: Boolean) {
+}
+
 actual fun nowMillis(): Long = jsNow().toLong()
 
 actual fun defaultDeviceName(): String = "Web browser"

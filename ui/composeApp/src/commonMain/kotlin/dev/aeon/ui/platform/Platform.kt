@@ -47,6 +47,34 @@ const val MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 @androidx.compose.runtime.Composable
 expect fun rememberFilePicker(onPicked: (PickedFile?, String?) -> Unit): () -> Unit
 
+/** Calls [onBack] for the system back gesture or button while [enabled]. No effect where there is none. */
+@androidx.compose.runtime.Composable
+expect fun PlatformBackHandler(enabled: Boolean, onBack: () -> Unit)
+
+/** Granted, Denied (can be asked again) or Blocked (only the system settings can change it now). */
+enum class PermissionStatus { Granted, Denied, Blocked }
+
+/** One runtime permission this platform has, with the reason shown before it is requested. */
+class PermissionItem(val id: String, val title: String, val reason: String)
+
+/** The runtime permissions of this platform. [items] is empty where the app needs none (desktop, web). */
+interface PermissionController {
+    val items: List<PermissionItem>
+    fun status(id: String): PermissionStatus
+    fun request(id: String)
+    /** Opens the system page where a blocked permission can be turned on again. */
+    fun openSettings()
+}
+
+@androidx.compose.runtime.Composable
+expect fun rememberPermissionController(): PermissionController
+
+/** Whether this platform can check for waiting approvals while the app is closed (Android only). */
+expect val supportsBackgroundCheck: Boolean
+
+/** Turns the periodic background check for waiting approvals on or off. Safe to call repeatedly. */
+expect fun setBackgroundApprovalCheck(enabled: Boolean)
+
 /** Small persistent string store for non-secret client state (server URL, device id). */
 interface KeyValueStore {
     fun get(key: String): String?

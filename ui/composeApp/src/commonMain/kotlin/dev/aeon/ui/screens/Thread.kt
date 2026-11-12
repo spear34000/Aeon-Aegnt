@@ -67,7 +67,8 @@ fun ConversationScreen(state: UiState, model: AppModel, wide: Boolean, modifier:
     val listState = rememberLazyListState()
 
     Column(modifier.fillMaxSize()) {
-        ConversationHeader(summary?.goal, summary?.status, detail?.verificationDetail?.status, wide, onDetail = { state.selectedTaskId?.let { model.selectTask(it, asDetail = true) } }, hasTask = state.selectedTaskId != null)
+        // On the phone the top bar already says who this is; the title row appears only once a task is open.
+        if (wide || state.selectedTaskId != null) ConversationHeader(summary?.goal, summary?.status, detail?.verificationDetail?.status, wide, onDetail = { state.selectedTaskId?.let { model.selectTask(it, asDetail = true) } }, hasTask = state.selectedTaskId != null)
         if (offline) {
             Banner("서버 연결이 끊겼습니다. PC가 켜져 있고 Aeon 서버가 실행 중인지 확인하세요.", Tone.Danger, "⚠", null)
         }
@@ -84,9 +85,7 @@ fun ConversationScreen(state: UiState, model: AppModel, wide: Boolean, modifier:
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 16.dp),
             ) {
                 if (detail == null) {
-                    item(key = "welcome") {
-                        EmptyState("무엇을 도와드릴까요?", "목표를 말하면 Aeon이 계획을 세우고, 삭제나 명령 실행은 먼저 묻습니다.")
-                    }
+                    item(key = "welcome") { WelcomeBlock(state, model) }
                 } else {
                     item(key = "user-${detail.id}") { UserBubble(detail.goal) }
                     if (detail.plan.isNotEmpty()) {
@@ -98,15 +97,10 @@ fun ConversationScreen(state: UiState, model: AppModel, wide: Boolean, modifier:
                             }
                         }
                     }
-                    items(detail.steps.size, key = { "step-${detail.id}-${it}" }) { i ->
-                        val st = detail.steps[i]
-                        Row(Modifier.padding(start = 40.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Glyph(if (st.ok) "✓" else "✕", color = if (st.ok) LocalAeonStatus.current.ok else LocalAeonStatus.current.danger, style = MaterialTheme.typography.labelLarge)
-                            Spacer(Modifier.size(8.dp))
-                            Text(st.tool, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
                     val pending: Approval? = state.approvals.firstOrNull { it.id == detail.pendingApprovalId && it.status == "pending" }
+                    if (detail.steps.isNotEmpty() || pending != null) {
+                        item(key = "progress-${detail.id}") { ProgressCard(detail, waiting = pending != null) }
+                    }
                     if (pending != null) {
                         item(key = "approval-${pending.id}") {
                             Column(Modifier.padding(start = 40.dp)) {
@@ -180,10 +174,10 @@ fun UserBubble(text: String) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
         Box(
             Modifier.widthIn(max = 480.dp)
-                .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(AeonShape.BUBBLE.dp))
-                .padding(horizontal = 14.dp, vertical = 10.dp),
+                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 20.dp, bottomEnd = 6.dp))
+                .padding(horizontal = 15.dp, vertical = 11.dp),
         ) {
-            Text(text, color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.bodyLarge)
+            Text(text, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyLarge)
         }
     }
 }
@@ -192,7 +186,7 @@ fun UserBubble(text: String) {
 @Composable
 fun AgentMessage(text: String, body: (@Composable () -> Unit)? = null) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-        Text("Æ", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 2.dp).widthIn(min = 28.dp))
+        androidx.compose.material3.Icon(dev.aeon.ui.design.AeonIcons.Mark, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 2.dp, end = 8.dp).size(20.dp))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(text, style = MaterialTheme.typography.bodyLarge)
             if (body != null) body()
@@ -229,6 +223,81 @@ private fun QuotaCard(d: TaskDetail, model: AppModel) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             AeonButton("작업 정지", { model.cancel(d.id) }, kind = ButtonKind.Secondary)
             AeonButton("설정 바꾸기", { model.openSettings(dev.aeon.ui.state.SettingsPage.Models) }, kind = ButtonKind.Ghost)
+        }
+    }
+}
+
+
+private fun toolLabel(tool: String): String = when (tool) {
+    "fs.list" -> "폴더 목록 보기"
+    "fs.read" -> "파일 읽기"
+    "fs.write" -> "파일 쓰기"
+    "fs.delete" -> "파일 삭제"
+    "http.get" -> "웹 주소 읽기"
+    "http.post" -> "외부로 보내기"
+    "sandbox.exec" -> "격리된 명령 실행"
+    else -> tool
+}
+
+/** What the agent has done so far, one line per action, with the real tool name beside each. */
+@Composable
+private fun ProgressCard(d: TaskDetail, waiting: Boolean) {
+    val s = LocalAeonStatus.current
+    val scheme = MaterialTheme.colorScheme
+    Column(
+        Modifier.fillMaxWidth().background(scheme.surface, RoundedCornerShape(AeonShape.CARD.dp)).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("한 일 ${d.steps.size}", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+            TaskStatusChip(d.status)
+        }
+        d.steps.forEach { st ->
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Box(Modifier.size(20.dp).background(if (st.ok) s.okSoft else s.dangerSoft, CircleShape), contentAlignment = Alignment.Center) {
+                    androidx.compose.material3.Icon(if (st.ok) dev.aeon.ui.design.AeonIcons.Check else dev.aeon.ui.design.AeonIcons.Close, contentDescription = if (st.ok) "성공" else "실패", tint = if (st.ok) s.ok else s.danger, modifier = Modifier.size(12.dp))
+                }
+                Text(toolLabel(st.tool), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                Text(st.tool, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
+            }
+        }
+        if (waiting) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Box(Modifier.size(20.dp).background(s.warnSoft, CircleShape), contentAlignment = Alignment.Center) { Box(Modifier.size(7.dp).background(s.warn, CircleShape)) }
+                Text("승인을 기다리는 중", style = MaterialTheme.typography.labelLarge, color = s.warn)
+            }
+        }
+    }
+}
+
+private val SUGGESTIONS = listOf(
+    "다운로드 폴더에서 오래된 설치 파일을 찾아 목록으로 알려 줘",
+    "회의록 폴더의 파일을 읽고 요약 문서를 새로 만들어 줘",
+    "작업 폴더에서 내용이 같은 파일을 찾아 줘",
+)
+
+/** New conversation: greets the owner the way they asked to be addressed and offers a few things to start from. */
+@Composable
+private fun WelcomeBlock(state: UiState, model: AppModel) {
+    val p = state.profile
+    val name = p.userName?.trim()?.takeIf { it.isNotEmpty() }
+    val greeting = when {
+        p.language == "en" -> if (name != null) "What can I take care of, $name?" else "What can I take care of?"
+        p.tone == "casual" -> if (name != null) "$name, 뭘 맡길까?" else "뭘 맡길까?"
+        else -> if (name != null) "${name}님, 무엇을 맡길까요?" else "무엇을 맡길까요?"
+    }
+    Column(Modifier.fillMaxWidth().padding(top = 40.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        androidx.compose.material3.Icon(dev.aeon.ui.design.AeonIcons.Mark, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(44.dp))
+        Text(greeting, style = MaterialTheme.typography.headlineMedium)
+        Text("한 일은 기록으로 남기고, 되돌릴 수 없는 일은 먼저 묻습니다.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        ListSurface(Modifier.padding(top = 12.dp)) {
+            SUGGESTIONS.forEachIndexed { i, text ->
+                if (i > 0) RowDivider(16.dp)
+                Row(Modifier.fillMaxWidth().clickable { model.startWith(text) }.padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(text, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                    androidx.compose.material3.Icon(dev.aeon.ui.design.AeonIcons.Chevron, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                }
+            }
         }
     }
 }

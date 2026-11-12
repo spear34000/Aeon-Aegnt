@@ -101,7 +101,7 @@ fun TaskDetailPanel(state: UiState, model: AppModel, onBack: () -> Unit, modifie
     val summary = state.tasks.firstOrNull { it.id == state.selectedTaskId }
     val d = state.selectedTask?.takeIf { it.id == state.selectedTaskId }
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        AeonButton("← 대화", onBack, kind = ButtonKind.Ghost)
+        CircleButton(dev.aeon.ui.design.AeonIcons.Back, "뒤로", onBack)
         if (summary == null || d == null) {
             EmptyState("불러오는 중", "작업 정보를 가져오고 있습니다.")
             return@Column

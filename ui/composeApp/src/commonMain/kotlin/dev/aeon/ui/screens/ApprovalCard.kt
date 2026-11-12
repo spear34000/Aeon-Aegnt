@@ -75,7 +75,7 @@ fun ApprovalCard(a: Approval, seenAt: Long?, sourceLabel: String, onDecide: (Boo
         modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(AeonShape.BUBBLE.dp))
-            .border(1.dp, border, RoundedCornerShape(AeonShape.BUBBLE.dp))
+            .then(if (high) Modifier.border(1.5.dp, border, RoundedCornerShape(AeonShape.BUBBLE.dp)) else Modifier)
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -128,7 +128,7 @@ fun ApprovalCard(a: Approval, seenAt: Long?, sourceLabel: String, onDecide: (Boo
             AeonButton(
                 "거부",
                 onClick = { onDecide(false) },
-                kind = ButtonKind.Secondary,
+                kind = ButtonKind.Strong,
                 modifier = Modifier.weight(1f).focusRequester(denyFocus),
             )
             AeonButton(

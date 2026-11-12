@@ -123,6 +123,8 @@ data class AeonConfig(
     val endpoints: List<Endpoint>? = null,
     val exaoneReasoning: String? = null,
     val profile: Profile? = null,
+    /** false = the owner declined internet lookups for lists and logos. Absent means allowed. */
+    val onlineLookups: Boolean? = null,
 )
 
 @Serializable
@@ -137,6 +139,7 @@ data class Profile(
     val detail: String? = null,
     val language: String? = null,
     val about: String? = null,
+    val interests: List<String>? = null,
 )
 
 @Serializable
@@ -214,12 +217,12 @@ data class UsageRecord(
 @Serializable data class DevicesResponse(val devices: List<DeviceInfo>)
 @Serializable data class UsageResponse(val usage: List<UsageRecord>)
 @Serializable data class ConnectionsResponse(val connections: List<ConnectionItem> = emptyList(), val skillsDir: String = "", val canEdit: Boolean = false)
-@Serializable data class CatalogResponse(val connections: List<ConnectionItem> = emptyList(), val nextCursor: String? = null)
+@Serializable data class CatalogResponse(val connections: List<ConnectionItem> = emptyList(), val nextCursor: String? = null, val disabled: Boolean = false)
 @Serializable data class CollectionsResponse(val collections: List<CatalogCollection> = emptyList())
 @Serializable data class IconResponse(val icon: IconPayload)
 @Serializable data class HelloResponse(val name: String = "Aeon", val api: Int = 1, val pairingRequired: Boolean = true)
 @Serializable data class PairResponse(val deviceId: String, val serverProof: String, val serverName: String = "Aeon", val admin: Boolean = true, val serverKey: String? = null, val serverKeyProof: String? = null)
-@Serializable data class ProvidersResponse(val providers: List<ProviderRow> = emptyList(), val current: CurrentModel? = null, val catalogError: String? = null)
+@Serializable data class ProvidersResponse(val providers: List<ProviderRow> = emptyList(), val current: CurrentModel? = null, val catalogError: String? = null, val online: Boolean = true)
 @Serializable data class ProviderModelsResponse(val provider: String = "", val models: List<CatalogModel> = emptyList())
 @Serializable data class SelectModelResponse(val config: AeonConfig, val current: CurrentModel? = null, val setupProblem: String? = null)
 @Serializable data class UploadResponse(val path: String, val size: Long = 0)

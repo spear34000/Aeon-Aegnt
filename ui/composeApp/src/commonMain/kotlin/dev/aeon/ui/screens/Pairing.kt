@@ -67,7 +67,7 @@ fun formatPairCode(raw: String): String {
  * and step 3 (model key) is handled by the setup banner after pairing.
  */
 @Composable
-fun ConnectScreen(state: UiState, model: AppModel, modifier: Modifier = Modifier) {
+fun ConnectScreen(state: UiState, model: AppModel, modifier: Modifier = Modifier, onBack: (() -> Unit)? = null) {
     if (!pageAllowsSigning()) {
         WebBlocked(modifier)
         return
@@ -85,10 +85,10 @@ fun ConnectScreen(state: UiState, model: AppModel, modifier: Modifier = Modifier
         horizontalAlignment = Alignment.Start,
     ) {
         Column(Modifier.widthIn(max = 440.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Text("2 / 3 · PC에 연결", style = MaterialTheme.typography.labelMedium, color = s.fg3)
-            Text("PC의 Aeon 서버에 연결", style = MaterialTheme.typography.displaySmall)
+            if (onBack != null) CircleButton(dev.aeon.ui.design.AeonIcons.Back, "이전", onBack)
+            Text("Aeon 서버에 연결", style = MaterialTheme.typography.headlineMedium)
             Text(
-                "PC에서 서버를 켜세요: node src/node/cli.ts serve. 서버 창에 보이는 주소와 코드를 입력하세요.",
+                "Aeon을 실행할 컴퓨터(Windows, Linux)에서 서버를 켜세요: node src/node/cli.ts serve --host 0.0.0.0. 서버 창에 보이는 주소와 코드를 입력하세요. 이미 연결한 기기가 있으면 내 에이전트 › 기기에서 코드를 만들 수 있습니다.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -97,7 +97,7 @@ fun ConnectScreen(state: UiState, model: AppModel, modifier: Modifier = Modifier
                 onValueChange = { url = it },
                 label = "서버 주소",
                 placeholder = "http://192.168.0.12:7421",
-                help = "PC 화면의 Aeon 서버 창에 표시됩니다.",
+                help = "서버 창에 표시됩니다. 예: http://192.168.0.12:7421",
                 error = if (url.isNotBlank() && !url.startsWith("http")) "주소 앞에 http:// 를 붙여 주세요." else null,
                 enabled = state.connection !is Connection.Connecting,
             )

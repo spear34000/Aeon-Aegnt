@@ -44,7 +44,7 @@ sealed interface Connection {
 /** Which main area is visible. The conversation is the default place (design: chat-first). */
 enum class Section { Chat, Feed, Explore, Tasks, Agent, Approvals, Settings }
 
-enum class SettingsPage { Personal, Models, Keys, Devices, Usage, About }
+enum class SettingsPage { Personal, Models, Keys, Devices, Usage, Legal, About }
 
 enum class ThemeMode(val label: String) { System("시스템 설정"), Light("라이트"), Dark("다크") }
 
@@ -122,6 +122,7 @@ data class UiState(
     val newDevice: NewDevice? = null,
     /** False for a pairing made before the server had a sealing key: keys cannot be sent from this device until it pairs again. */
     val canSeal: Boolean = false,
+    val setup: SetupState = SetupState(),
 ) {
     /** This device may change settings, keys, connections and devices. */
     val isAdmin: Boolean get() = status?.admin == true
@@ -161,6 +162,7 @@ class AppModel(
 
     /** Restores a previous pairing, if any, and starts polling. */
     fun start() {
+        if (!_state.value.setup.loaded) loadSetup()
         store.get(KEY_THEME)?.let { saved -> ThemeMode.entries.firstOrNull { it.name == saved }?.let { m -> _state.update { it.copy(themeMode = m) } } }
         val url = store.get(KEY_URL)
         val id = store.get(KEY_DEVICE)
@@ -219,6 +221,7 @@ class AppModel(
                 store.put(KEY_DEVICE, res.deviceId)
                 if (client.serverKey.isNotEmpty()) store.put(KEY_SERVER_KEY, client.serverKey) else store.remove(KEY_SERVER_KEY)
                 _state.update { it.copy(serverUrl = client.baseUrl, connection = Connection.Connected(res.serverName), busy = false, canSeal = client.serverKey.isNotEmpty()) }
+                if (_state.value.setup.step == SetupStep.Connect) goStep(SetupStep.Coach)
                 startPolling()
             } catch (e: Exception) {
                 client.baseUrl = previousUrl
@@ -247,7 +250,8 @@ class AppModel(
             client.deviceId = ""
             client.serverKey = ""
             crypto.reset()
-            _state.update { UiState(serverUrl = it.serverUrl) }
+            runCatching { dev.aeon.ui.platform.setBackgroundApprovalCheck(false) }
+            _state.update { UiState(serverUrl = it.serverUrl, setup = it.setup, themeMode = it.themeMode) }
         }
     }
 
@@ -283,6 +287,8 @@ class AppModel(
                     approvalSeenAt = seen,
                 )
             }
+            if (_state.value.setup.step == SetupStep.Connect) goStep(SetupStep.Coach)
+            syncSetup(status.admin)
         } catch (e: AeonException) {
             if (e.status == 401) {
                 // Revoked or clock skew: stop hammering the server and ask the user to pair again.
@@ -411,18 +417,241 @@ class AppModel(
         else -> describe(e)
     }
 
+    // ---------------------------------------------------------------- 최초 설정
+
+    private fun setup(change: (SetupState) -> SetupState) = _state.update { it.copy(setup = change(it.setup)) }
+
+    /** Writes to this device's store. A failure never stops the flow: progress stays in memory and the UI says so. */
+    private fun save(key: String, value: String?) {
+        try {
+            if (value == null) store.remove(key) else store.put(key, value)
+        } catch (e: Exception) {
+            setup { it.copy(storageError = true) }
+        }
+    }
+
+    private fun read(key: String): String? = try {
+        store.get(key)
+    } catch (e: Exception) {
+        null
+    }
+
+    /** Restores where the owner left off. A device that was paired before this flow existed is treated as done. */
+    private fun loadSetup() {
+        val saved = SetupStep.entries.firstOrNull { it.name == read(KEY_SETUP_STEP) }
+        val step = saved ?: if (read(KEY_DEVICE) != null) SetupStep.Done else SetupStep.Intro
+        val draft = try {
+            read(KEY_SETUP_PROFILE)?.let { dev.aeon.ui.api.ApiJson.decodeFromString(Profile.serializer(), it) }
+        } catch (e: Exception) {
+            null
+        }
+        val consents = Consents.decode(read(KEY_SETUP_CONSENTS))
+        setup {
+            SetupState(
+                loaded = true,
+                step = step,
+                introPage = read(KEY_SETUP_INTRO)?.toIntOrNull()?.coerceIn(0, INTRO_PAGES - 1) ?: 0,
+                consents = consents,
+                profileDraft = draft ?: Profile(),
+                profilePage = read(KEY_SETUP_PROFILE_PAGE)?.toIntOrNull()?.coerceIn(0, PROFILE_PAGES - 1) ?: 0,
+                profilePending = read(KEY_SETUP_PENDING) == "1",
+                onlinePending = read(KEY_SETUP_ONLINE_PENDING) == "1",
+            )
+        }
+        if (saved == null) save(KEY_SETUP_STEP, step.name)
+        if (dev.aeon.ui.platform.supportsBackgroundCheck) runCatching { dev.aeon.ui.platform.setBackgroundApprovalCheck(consents.background && read(KEY_DEVICE) != null) }
+    }
+
+    private fun goStep(step: SetupStep) {
+        save(KEY_SETUP_STEP, step.name)
+        setup { it.copy(step = step, error = null, saving = false) }
+        if (step == SetupStep.Coach) _state.update { it.copy(section = Section.Chat, selectedTaskId = null, selectedTask = null, showDetail = false, drawerOpen = false) }
+    }
+
+    fun setIntroPage(page: Int) {
+        val p = page.coerceIn(0, INTRO_PAGES - 1)
+        if (!_state.value.setup.replayIntro) save(KEY_SETUP_INTRO, p.toString())
+        setup { it.copy(introPage = p) }
+    }
+
+    /** Leaves the intro, whether it was read to the end or skipped. */
+    fun finishIntro() {
+        if (_state.value.setup.replayIntro) setup { it.copy(replayIntro = false, step = SetupStep.entries.firstOrNull { s -> s.name == read(KEY_SETUP_STEP) } ?: SetupStep.Done) }
+        else goStep(SetupStep.Welcome)
+    }
+
+    /** Shows the intro again. From the settings it returns to where the owner was; nothing saved is changed. */
+    fun replayIntro() {
+        val s = _state.value.setup
+        if (s.done) setup { it.copy(replayIntro = true, step = SetupStep.Intro, introPage = 0) }
+        else {
+            setIntroPage(0)
+            goStep(SetupStep.Intro)
+        }
+    }
+
+    fun beginSetup() = goStep(SetupStep.Terms)
+
+    fun setConsents(c: Consents) {
+        save(KEY_SETUP_CONSENTS, c.encode())
+        setup { it.copy(consents = c) }
+    }
+
+    /** Records the agreement and moves on. Only possible with both required items agreed. */
+    fun acceptTerms() {
+        val c = _state.value.setup.consents
+        if (!c.requiredOk) return
+        setConsents(c.copy(acceptedAt = dev.aeon.ui.platform.nowMillis()))
+        save(KEY_SETUP_ONLINE_PENDING, "1")
+        setup { it.copy(onlinePending = true) }
+        goStep(if (_state.value.connection is Connection.Unpaired) SetupStep.Connect else SetupStep.Coach)
+    }
+
+    /** Taking back a required agreement returns the app to the terms; nothing else is deleted. */
+    fun withdrawTerms() {
+        val c = _state.value.setup.consents
+        setConsents(c.copy(service = false, data = false, acceptedAt = 0))
+        goStep(SetupStep.Terms)
+    }
+
+    /** Per-device choice: check for waiting approvals while the app is closed. */
+    fun setBackgroundConsent(on: Boolean) {
+        setConsents(_state.value.setup.consents.copy(background = on))
+        if (dev.aeon.ui.platform.supportsBackgroundCheck) runCatching { dev.aeon.ui.platform.setBackgroundApprovalCheck(on && client.deviceId.isNotEmpty()) }
+    }
+
+    /** Server-wide choice: may the server machine look up lists and logos on the internet. Needs the right to change settings. */
+    fun setOnlineLookups(on: Boolean) = action(null) {
+        val cfg = client.config()
+        val saved = client.saveConfig(cfg.copy(onlineLookups = if (on) null else false))
+        setConsents(_state.value.setup.consents.copy(online = on))
+        _state.update { it.copy(config = saved, draft = saved) }
+    }
+
+    /** One step back inside the first-run flow. Returns false when there is nothing to go back to. */
+    fun setupBack(): Boolean {
+        val s = _state.value.setup
+        when (s.step) {
+            SetupStep.Intro -> if (s.introPage > 0) setIntroPage(s.introPage - 1) else return false
+            SetupStep.Welcome -> {
+                setIntroPage(INTRO_PAGES - 1)
+                goStep(SetupStep.Intro)
+            }
+            SetupStep.Terms -> goStep(SetupStep.Welcome)
+            SetupStep.Connect -> goStep(SetupStep.Terms)
+            SetupStep.Coach -> if (s.coachIndex > 0) setup { it.copy(coachIndex = it.coachIndex - 1) } else return false
+            SetupStep.Profile -> if (s.profilePage > 0) setProfilePage(s.profilePage - 1) else goStep(SetupStep.Coach)
+            SetupStep.Done -> return false
+        }
+        return true
+    }
+
+    fun setCoachIndex(i: Int) = setup { it.copy(coachIndex = i.coerceAtLeast(0)) }
+
+    /** Ends the coach marks (finished or skipped). */
+    fun finishCoach() {
+        if (_state.value.setup.replayCoach) setup { it.copy(replayCoach = false, coachIndex = 0) }
+        else {
+            setup { it.copy(coachIndex = 0) }
+            goStep(SetupStep.Profile)
+        }
+    }
+
+    fun replayCoach() {
+        _state.update { it.copy(section = Section.Chat, selectedTaskId = null, selectedTask = null, showDetail = false, drawerOpen = false) }
+        setup { it.copy(replayCoach = true, coachIndex = 0) }
+    }
+
+    /** Keeps the profile being typed on this device, so closing the app loses nothing. */
+    fun editSetupProfile(p: Profile) {
+        save(KEY_SETUP_PROFILE, try { dev.aeon.ui.api.ApiJson.encodeToString(Profile.serializer(), p) } catch (e: Exception) { null })
+        setup { it.copy(profileDraft = p, error = null) }
+    }
+
+    fun setProfilePage(page: Int) {
+        val p = page.coerceIn(0, PROFILE_PAGES - 1)
+        save(KEY_SETUP_PROFILE_PAGE, p.toString())
+        setup { it.copy(profilePage = p) }
+    }
+
+    /** Starts from what the server already knows, when nothing was typed here yet. */
+    fun prefillSetupProfile() {
+        scope.launch {
+            val cfg = _state.value.config ?: runCatching { client.config() }.getOrNull() ?: return@launch
+            _state.update { it.copy(config = cfg) }
+            val server = cfg.profile ?: return@launch
+            if (_state.value.setup.profileDraft == Profile()) editSetupProfile(server)
+        }
+    }
+
+    private fun cleanProfile(p: Profile): Profile = p.copy(
+        userName = p.userName?.trim()?.ifEmpty { null },
+        agentName = p.agentName?.trim()?.ifEmpty { null },
+        about = p.about?.trim()?.ifEmpty { null },
+        interests = p.interests?.map { it.trim() }?.filter { it.isNotEmpty() }?.distinct()?.take(12)?.ifEmpty { null },
+    )
+
+    private suspend fun pushProfile(p: Profile) {
+        val cfg = client.config()
+        val saved = client.saveConfig(cfg.copy(profile = cleanProfile(p)))
+        _state.update { it.copy(config = saved, draft = saved) }
+        save(KEY_SETUP_PENDING, null)
+        setup { it.copy(profilePending = false) }
+    }
+
+    /** Sends the profile to the server so the agent uses it, then opens the main screen. On failure the owner chooses. */
+    fun finishProfile() {
+        val draft = cleanProfile(_state.value.setup.profileDraft)
+        if (draft == Profile()) return goStep(SetupStep.Done)
+        scope.launch {
+            setup { it.copy(saving = true, error = null) }
+            try {
+                pushProfile(draft)
+                goStep(SetupStep.Done)
+            } catch (e: Exception) {
+                setup { it.copy(saving = false, error = "서버에 저장하지 못했습니다. ${describe(e)}") }
+            }
+        }
+    }
+
+    /** Continues without waiting for the server: the profile stays on this device and is sent when the server answers. */
+    fun finishProfileLater() {
+        save(KEY_SETUP_PENDING, "1")
+        setup { it.copy(profilePending = true) }
+        goStep(SetupStep.Done)
+    }
+
+    /** Leaves the profile for later. What was typed stays on this device and can be finished in the settings. */
+    fun skipProfile() = goStep(SetupStep.Done)
+
+    /** Runs after each successful poll: sends what could not be sent during setup. */
+    private suspend fun syncSetup(admin: Boolean) {
+        val s = _state.value.setup
+        if (s.profilePending) runCatching { pushProfile(s.profileDraft) }
+        if (s.onlinePending && s.consents.acceptedAt > 0) {
+            // The owner's choice is applied once. A device that may not change settings leaves the server as it is.
+            if (admin) {
+                val ok = runCatching {
+                    val cfg = client.config()
+                    val wanted = if (s.consents.online) null else false
+                    val saved = if (cfg.onlineLookups != wanted) client.saveConfig(cfg.copy(onlineLookups = wanted)) else cfg
+                    _state.update { it.copy(config = saved) }
+                }.isSuccess
+                if (!ok) return
+            }
+            save(KEY_SETUP_ONLINE_PENDING, null)
+            setup { it.copy(onlinePending = false) }
+        }
+    }
+
     // ---------------------------------------------------------------- 개인화
 
     /** Saves how the agent addresses the owner. Allowed from every paired device. */
     fun saveProfile(profile: Profile) = action("저장했습니다") {
         val cfg = client.config()
-        val clean = profile.copy(
-            userName = profile.userName?.trim()?.ifEmpty { null },
-            agentName = profile.agentName?.trim()?.ifEmpty { null },
-            about = profile.about?.trim()?.ifEmpty { null },
-        )
-        val saved = client.saveConfig(cfg.copy(profile = clean))
+        val saved = client.saveConfig(cfg.copy(profile = cleanProfile(profile)))
         _state.update { it.copy(config = saved, draft = saved) }
+        editSetupProfile(saved.profile ?: Profile())
     }
 
     // ---------------------------------------------------------------- 기기
@@ -623,5 +852,12 @@ class AppModel(
         const val KEY_DEVICE = "deviceId"
         const val KEY_THEME = "themeMode"
         const val KEY_SERVER_KEY = "serverKey"
+        const val KEY_SETUP_STEP = "setup.step"
+        const val KEY_SETUP_INTRO = "setup.introPage"
+        const val KEY_SETUP_CONSENTS = "setup.consents"
+        const val KEY_SETUP_PROFILE = "setup.profile"
+        const val KEY_SETUP_PROFILE_PAGE = "setup.profilePage"
+        const val KEY_SETUP_PENDING = "setup.profilePending"
+        const val KEY_SETUP_ONLINE_PENDING = "setup.onlinePending"
     }
 }

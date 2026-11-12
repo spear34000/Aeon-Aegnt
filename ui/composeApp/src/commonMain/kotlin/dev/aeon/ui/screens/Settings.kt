@@ -73,6 +73,7 @@ fun SettingsScreen(state: UiState, model: AppModel, modifier: Modifier = Modifie
                     SettingsPage.Keys -> "API 키"
                     SettingsPage.Devices -> "기기"
                     SettingsPage.Usage -> "사용량"
+                    SettingsPage.Legal -> "약관·권한"
                     SettingsPage.About -> "정보"
                 }
                 AeonButton(label, { model.openSettings(p) }, Modifier.widthIn(min = 64.dp), kind = if (p == state.settingsPage) ButtonKind.Primary else ButtonKind.Ghost, wide = true)
@@ -84,6 +85,7 @@ fun SettingsScreen(state: UiState, model: AppModel, modifier: Modifier = Modifie
             SettingsPage.Keys -> KeysPage(state, model)
             SettingsPage.Devices -> DevicesPage(state, model)
             SettingsPage.Usage -> UsagePage(state)
+            SettingsPage.Legal -> LegalPage(state, model)
             SettingsPage.About -> AboutPage(state, model)
         }
     }

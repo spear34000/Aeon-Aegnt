@@ -104,7 +104,7 @@ fun PhoneLayout(state: UiState, model: AppModel) {
                     current == Section.Chat -> ConversationScreen(state, model, wide = false, modifier = Modifier.fillMaxSize())
                     current == Section.Feed -> FeedScreen(state, model, Modifier.fillMaxSize())
                     current == Section.Explore -> ExploreScreen(state, model, Modifier.fillMaxSize())
-                    current == Section.Tasks -> TaskList(state, model, Modifier.fillMaxSize(), showHeader = false)
+                    current == Section.Tasks -> TasksScreen(state, model, Modifier.fillMaxSize())
                     else -> AgentHubScreen(state, model, Modifier.fillMaxSize())
                 }
             }
@@ -187,7 +187,7 @@ private fun PhoneBottomBar(current: Section, pending: Int, onSelect: (Section) -
             TABS.forEach { t ->
                 val selected = t.section == current
                 Box(
-                    Modifier.weight(1f).height(48.dp)
+                    Modifier.weight(1f).height(48.dp).coachTarget("nav.${t.section.name.lowercase()}")
                         .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onSelect(t.section) }
                         .semantics { contentDescription = t.label },
                     contentAlignment = Alignment.Center,
@@ -404,6 +404,8 @@ fun AgentHubScreen(state: UiState, model: AppModel, modifier: Modifier = Modifie
             RowDivider(64.dp)
             SettingRow(AeonIcons.Moon, "화면 테마", state.themeMode.label) { model.cycleTheme() }
             RowDivider(64.dp)
+            SettingRow(AeonIcons.Shield, "약관 · 권한", "") { open(SettingsPage.Legal) }
+            RowDivider(64.dp)
             SettingRow(AeonIcons.Info, "정보 · 연결 해제", "") { open(SettingsPage.About) }
         }
         Spacer(Modifier.height(12.dp))
@@ -411,5 +413,61 @@ fun AgentHubScreen(state: UiState, model: AppModel, modifier: Modifier = Modifie
             "키는 ${state.status?.secretsBackend ?: "이 PC의 보안 저장소"}에만 둡니다. 앱 패키지와 저장소에는 들어 있지 않습니다.",
             Modifier.padding(horizontal = 4.dp), style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant,
         )
+    }
+}
+
+
+@Composable
+private fun TaskTile(t: TaskSummary) {
+    val s = LocalAeonStatus.current
+    val scheme = MaterialTheme.colorScheme
+    val (icon, bg, fg) = when {
+        t.status == "COMPLETED" && (t.verification?.status == "verified" || t.verification?.status == "user_confirmed") -> Triple(AeonIcons.Check, s.okSoft, s.ok)
+        t.status == "FAILED" || (t.status == "COMPLETED" && t.verification?.status == "failed") -> Triple(AeonIcons.Close, s.dangerSoft, s.danger)
+        t.status.startsWith("WAITING") || t.status == "RETRY_WAIT" -> Triple(AeonIcons.Pause, s.warnSoft, s.warn)
+        t.status == "PENDING" && t.runAfter > dev.aeon.ui.platform.nowMillis() -> Triple(AeonIcons.Clock, scheme.surfaceVariant, scheme.onSurface)
+        t.status == "RUNNING" || t.status == "PENDING" -> Triple(AeonIcons.Send, s.accentSoft, s.onAccentSoft)
+        else -> Triple(AeonIcons.Dash, scheme.surfaceVariant, scheme.onSurfaceVariant)
+    }
+    Box(Modifier.size(44.dp).background(bg, RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
+        Icon(icon, contentDescription = null, tint = fg, modifier = Modifier.size(22.dp))
+    }
+}
+
+/** 작업: what is running or waiting first, then what is scheduled, then what is finished. Each row says its state in words. */
+@Composable
+fun TasksScreen(state: UiState, model: AppModel, modifier: Modifier = Modifier) {
+    val scheme = MaterialTheme.colorScheme
+    val now = dev.aeon.ui.platform.nowMillis()
+    val done = setOf("COMPLETED", "FAILED", "CANCELLED")
+    val finished = state.tasks.filter { it.status in done }
+    val scheduled = state.tasks.filter { it.status == "PENDING" && it.runAfter > now }
+    val active = state.tasks.filter { it.status !in done && it !in scheduled }
+    Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, bottom = 24.dp)) {
+        if (state.tasks.isEmpty()) EmptyState("아직 작업이 없습니다", "대화에서 일을 맡기면 여기에 쌓입니다.")
+        listOf("진행 중" to active, "예약됨" to scheduled, "끝난 작업" to finished).forEach { (title, list) ->
+            if (list.isEmpty()) return@forEach
+            GroupHeader(title, list.size.toString())
+            ListSurface {
+                list.forEachIndexed { i, t ->
+                    if (i > 0) RowDivider()
+                    val (dot, text) = taskStatusLine(t)
+                    Row(
+                        Modifier.fillMaxWidth().defaultMinSize(minHeight = 64.dp).clickable { model.selectTask(t.id, asDetail = t.status in done) }.padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        TaskTile(t)
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(t.goal, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                StatusDot(dot)
+                                Text(if (t in scheduled) "${koreanClock(t.runAfter)}에 시작" else text, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant, maxLines = 1)
+                            }
+                        }
+                        Text(koreanClock(t.updatedAt), style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
+                    }
+                }
+            }
+        }
     }
 }
