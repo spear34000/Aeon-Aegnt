@@ -13,8 +13,11 @@ import { openAiCompatible } from "../src/core/models/providers.ts";
 import { MemorySecretStore } from "../src/core/secrets.ts";
 import { loadConfig } from "../src/node/config-file.ts";
 import { ConnectionService, type Fetched } from "../src/node/connections.ts";
-import { FeedService, type FeedFetch } from "../src/node/feed.ts";
-import { ImageStore, type ImageFinder } from "../src/node/feed-images.ts";
+import type { FeedFetch } from "../src/node/feed.ts";
+import { FeedPipeline } from "../src/node/feed-pipeline.ts";
+import { GoogleNewsAdapter } from "../src/node/feed-sources.ts";
+import { FeedStore } from "../src/node/feed-store.ts";
+import { ImageStore, type ArticleFetcher } from "../src/node/feed-images.ts";
 import { ProviderCatalog } from "../src/node/provider-catalog.ts";
 import { SkillStore } from "../src/node/skills.ts";
 import { buildProviders, createRuntime } from "../src/node/runtime.ts";
@@ -315,12 +318,12 @@ class Client {
   }
 }
 
-async function boot(opts: { local?: boolean; maxUploadBytes?: number; feedFetch?: FeedFetch; feedImages?: ImageFinder } = {}) {
+async function boot(opts: { local?: boolean; maxUploadBytes?: number; feedFetch?: FeedFetch; feedArticles?: ArticleFetcher; modelReplies?: string[] } = {}) {
   const { dir, cleanup } = tempDir();
   const clock = new ManualClock(Date.parse("2026-11-11T03:04:05Z"));
   const workspace = join(dir, "ws");
   mkdirSync(workspace);
-  const rt = createRuntime({ workspace, providers: ["m"], providerOverrides: [new MockProvider("m", [])], fallbackAllowed: false, dataConsent: [], store: new MemoryStore(), clock, skillsDir: join(dir, "cfg", "skills"), skillsLockFile: join(dir, "cfg", "skills-lock.json"), memoryFile: join(dir, "cfg", "memory.json") });
+  const rt = createRuntime({ workspace, providers: ["m"], providerOverrides: [new MockProvider("m", opts.modelReplies ?? [])], fallbackAllowed: false, dataConsent: [], store: new MemoryStore(), clock, skillsDir: join(dir, "cfg", "skills"), skillsLockFile: join(dir, "cfg", "skills-lock.json"), memoryFile: join(dir, "cfg", "memory.json") });
   const registry = new DeviceRegistry(null);
   const pairing = new PairingManager(registry);
   const secrets = new MemorySecretStore();
@@ -336,14 +339,14 @@ async function boot(opts: { local?: boolean; maxUploadBytes?: number; feedFetch?
     connections: new ConnectionService({ configDir: join(dir, "cfg"), fetcher }),
     addresses: () => ["http://192.168.0.12:7421"],
     isLocalRequest: () => opts.local === true,
-    ...(opts.feedFetch ? { feed: new FeedService({ file: join(dir, "cfg", "feed.json"), fetchImpl: opts.feedFetch, now: () => clock.now(), ...(opts.feedImages ? { images: { store: new ImageStore(join(dir, "cfg", "feed-images")), finder: opts.feedImages } } : {}) }) } : {}),
+    ...(opts.feedFetch ? { feed: new FeedPipeline({ store: new FeedStore(join(dir, "cfg", "feed-posts.json")), adapters: [new GoogleNewsAdapter({ fetchImpl: opts.feedFetch, ...(opts.feedArticles ? { articles: opts.feedArticles } : {}) })], images: new ImageStore(join(dir, "cfg", "feed-images")), now: () => clock.now() }) } : {}),
     onConfigChanged: () => void changed++,
     ...(opts.maxUploadBytes ? { maxUploadBytes: opts.maxUploadBytes } : {}),
   });
   const base = `http://127.0.0.1:${(await server.listen(0)).port}`;
   const owner = new Client("owner-phone");
   assert.equal((await owner.pair(base, pairing.newCode(clock.now()).code)).status, 201);
-  return { rt, base, clock, dir, workspace, registry, pairing, secrets, identity, owner, changed: () => changed, cfgDir: join(dir, "cfg"), close: async () => (await server.close(), cleanup()) };
+  return { server, rt, base, clock, dir, workspace, registry, pairing, secrets, identity, owner, changed: () => changed, cfgDir: join(dir, "cfg"), close: async () => (await server.close(), cleanup()) };
 }
 
 describe("Setting things up from any paired device", () => {
@@ -531,43 +534,80 @@ describe("Setting things up from any paired device", () => {
     await t.close();
   });
 
-  it("the feed follows the owner's interests, refreshes on request, and respects the internet switch", async () => {
+  it("the feed makes posts from the owner's interests on request, within its daily limits, and only an admin device changes the brief", async () => {
     const hour = new Date(Date.parse("2026-11-11T02:00:00Z")).toUTCString();
     const body = "<rss><channel><item><title>반도체 수출 두 달 연속 증가 - E경제</title><link>https://news.google.com/rss/articles/abc</link><pubDate>" + hour + "</pubDate><source url=\"https://e.example\">E경제</source></item></channel></rss>";
-    let asked = 0;
     const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(3000, 9)]);
+    let asked = 0;
     let looked = 0;
-    const t = await boot({ feedFetch: async () => { asked++; return new Response(body, { status: 200 }); }, feedImages: async () => { looked++; return { bytes: jpeg, type: "image/jpeg" }; } });
+    const articles: ArticleFetcher = async (_link, o) => (looked++, { text: "반도체 수출이 두 달 연속 늘었다는 집계가 나왔습니다.", image: o.image ? { bytes: jpeg, type: "image/jpeg" } : null });
+    const t = await boot({ feedFetch: async () => { asked++; return new Response(body, { status: 200 }); }, feedArticles: articles });
     const call = (m: string, p: string, b?: Record<string, unknown>) => t.owner.call(t.base, t.clock, m, p, b);
-    assert.deepEqual([(await call("GET", "/v1/feed")).body.feed, (await call("GET", "/v1/feed")).body.interests], [null, []], "nothing yet, and no interests");
-    assert.equal((await call("POST", "/v1/feed/refresh")).status, 400, "pick interests first");
+    const empty = (await call("GET", "/v1/feed")).body;
+    assert.deepEqual([empty.posts, empty.interests, empty.online, empty.settings.auto, empty.settings.dailyRuns, empty.status.nextRunAt], [[], [], true, true, 4, null], "nothing yet, and no interests");
+    const none = await call("POST", "/v1/feed/generate");
+    assert.deepEqual([none.status, none.body.report.status, none.body.report.reason], [200, "skipped", "no_interests"]);
 
     const cfg = (await call("GET", "/v1/config")).body.config;
     assert.equal((await call("PUT", "/v1/config", { ...cfg, profile: { interests: ["AI", "여행"] } })).status, 200);
-    const first = await call("POST", "/v1/feed/refresh");
+    const first = await call("POST", "/v1/feed/generate");
     assert.equal(first.status, 200);
-    assert.deepEqual(first.body.feed.sections.map((s: { interest: string; items: unknown[] }) => [s.interest, s.items.length]), [["AI", 1], ["여행", 1]]);
-    assert.equal(first.body.feed.sections[0].items[0].url, "https://news.google.com/rss/articles/abc");
+    // The Mock model has nothing scripted, so it cannot write: plain headlines, labelled, one per distinct story.
+    assert.deepEqual([first.body.report.status, first.body.report.mode, first.body.report.made], ["made", "headlines", 1]);
+    const post = first.body.posts[0];
+    assert.deepEqual([post.written, post.body, post.title, post.sources[0].url, post.image], [false, "", "반도체 수출 두 달 연속 증가", "https://news.google.com/rss/articles/abc", true]);
     assert.equal(asked, 2);
-    const item = first.body.feed.sections[0].items[0];
-    assert.equal(item.image, true, "an article image was found for the first item");
-    const img = await t.owner.callBytes(t.base, t.clock, `/v1/feed/image/${item.id}`);
-    assert.deepEqual([img.status, img.type, img.bytes.length], [200, "image/jpeg", jpeg.length], "the phone gets the image from the server, never from the publisher");
+    const img = await t.owner.callBytes(t.base, t.clock, `/v1/feed/image/${post.id}`);
+    assert.deepEqual([img.status, img.type, img.bytes.length], [200, "image/jpeg", jpeg.length], "the phone gets the picture from the server, never from the publisher");
     assert.equal((await t.owner.callBytes(t.base, t.clock, "/v1/feed/image/000000000000")).status, 404);
     assert.ok([400, 404].includes((await t.owner.callBytes(t.base, t.clock, "/v1/feed/image/..%2F..%2Fconfig")).status), "a path that is not an image id is refused");
-    await call("POST", "/v1/feed/refresh");
-    assert.equal(asked, 2, "a second refresh right away is answered from what is stored");
+    const again = await call("POST", "/v1/feed/generate");
+    assert.deepEqual([again.body.report.status, again.body.report.reason, asked], ["skipped", "gap", 2], "a second run right away is refused without asking the source");
     const got = (await call("GET", "/v1/feed")).body;
-    assert.deepEqual([got.stale, got.online, got.feed.mode], [false, true, "rules"]);
+    assert.deepEqual([got.status.today.runs, got.status.today.posts, got.status.caps, got.queries[0]], [1, 1, { runs: 4, posts: 8 }, { interest: "AI", query: "인공지능" }], "what is searched is shown: only the interest labels");
+    assert.ok(got.status.nextRunAt > 0, "the timer's next run is known");
 
+    // The brief and the limits: any device reads them, the machine or an admin device changes them.
+    const ex = clientExchange(t.owner.serverKey);
+    const code = ex.open((await call("POST", "/v1/pairing-codes", { epk: ex.epk, admin: false })).body.sealed, `pairing-code|${t.owner.id}`);
+    const tablet = new Client("tablet");
+    await tablet.pair(t.base, code);
+    assert.equal((await tablet.call(t.base, t.clock, "GET", "/v1/feed")).body.settings.brief.length > 5, true);
+    assert.equal((await tablet.call(t.base, t.clock, "PUT", "/v1/feed/settings", { brief: "내 마음대로" })).status, 403);
+    const put = await call("PUT", "/v1/feed/settings", { brief: "  경제 소식만\n짧게  ", dailyRuns: 2, auto: false });
+    assert.deepEqual([put.status, put.body.settings.brief, put.body.settings.dailyRuns, put.body.settings.auto], [200, "경제 소식만 짧게", 2, false]);
+    for (const bad of [{ dailyRuns: 99 }, { auto: "yes" }, { intervalMinutes: 5 }]) assert.equal((await call("PUT", "/v1/feed/settings", bad)).status, 400, JSON.stringify(bad));
+    assert.equal((await call("GET", "/v1/feed")).body.status.nextRunAt, null, "automatic runs off: no next run");
+
+    // Switching the internet off stops runs and the timer's plan.
+    t.clock.advance(10 * 60_000);
     const before = looked;
-    assert.equal((await call("PUT", "/v1/config", { ...cfg, profile: { interests: ["AI"] }, feedImages: false })).status, 200);
-    const noImg = await call("POST", "/v1/feed/refresh");
-    assert.deepEqual([noImg.body.feed.sections[0].items.some((i: { image: boolean }) => i.image), looked], [false, before], "with images switched off none is looked for");
-    assert.equal((await t.owner.callBytes(t.base, t.clock, `/v1/feed/image/${item.id}`)).status, 404, "and the kept copies are gone");
     assert.equal((await call("PUT", "/v1/config", { ...cfg, profile: { interests: ["AI"] }, onlineLookups: false })).status, 200);
-    assert.equal((await call("POST", "/v1/feed/refresh")).status, 403, "internet lookups off: nothing is fetched");
-    assert.equal((await call("GET", "/v1/feed")).body.online, false);
+    const off = await call("POST", "/v1/feed/generate");
+    assert.deepEqual([off.body.report.reason, looked, off.body.online], ["offline", before, false]);
+    await t.close();
+  });
+
+  it("the feed's own timer makes posts when they are due, on its own and without any notification, and obeys the owner's switch", async () => {
+    const hour = new Date(Date.parse("2026-11-11T02:00:00Z")).toUTCString();
+    const body = "<rss><channel><item><title>반도체 수출 두 달 연속 증가 - E경제</title><link>https://news.google.com/rss/articles/abc</link><pubDate>" + hour + "</pubDate><source url=\"https://e.example\">E경제</source></item></channel></rss>";
+    const t = await boot({ feedFetch: async () => new Response(body, { status: 200 }) });
+    const call = (m: string, p: string, b?: Record<string, unknown>) => t.owner.call(t.base, t.clock, m, p, b);
+    const cfg = (await call("GET", "/v1/config")).body.config;
+    assert.equal((await call("PUT", "/v1/config", { ...cfg, profile: { interests: ["AI"] } })).status, 200);
+    await t.server.feedTick();
+    const posts = (await call("GET", "/v1/feed")).body.posts;
+    assert.equal(posts.length, 1, "nobody asked: the timer made it");
+    assert.equal((await call("GET", "/v1/tasks")).body.tasks.length, 0, "it is not a task and does not appear among them");
+    assert.equal((await call("GET", "/v1/approvals?status=pending")).body.approvals.length, 0);
+    await t.server.feedTick();
+    t.clock.advance(7 * 3_600_000);
+    await call("PUT", "/v1/feed/settings", { auto: false });
+    await t.server.feedTick();
+    assert.equal((await call("GET", "/v1/feed")).body.status.today.runs, 1, "the interval had passed, but automatic runs are off");
+    await call("PUT", "/v1/feed/settings", { auto: true });
+    await t.server.feedTick();
+    assert.equal((await call("GET", "/v1/feed")).body.status.today.runs, 2, "on again and the interval is over: one more run");
     await t.close();
   });
 

@@ -10,9 +10,13 @@ import { parseCriterion } from "../../core/verify.ts";
 import { loadConfig, saveConfig } from "../config-file.ts";
 import type { ConnectionService } from "../connections.ts";
 import { SkillError } from "../skills.ts";
-import { FeedService, FEED_MIN_GAP_MS } from "../feed.ts";
+import { FeedPipeline } from "../feed-pipeline.ts";
+import { GoogleNewsAdapter } from "../feed-sources.ts";
+import { FeedStore, mergeSettings } from "../feed-store.ts";
+import { feedState } from "../feed-view.ts";
+import type { FeedChat } from "../feed.ts";
 import { MemoryService, MEMORY_MAX_ITEMS, MEMORY_TEXT_MAX } from "../memory.ts";
-import { articleImageFinder, ImageStore } from "../feed-images.ts";
+import { articleFetcher, ImageStore } from "../feed-images.ts";
 import type { ProviderCatalog } from "../provider-catalog.ts";
 import { isSealedBox, type ServerIdentity } from "./seal.ts";
 import type { createRuntime } from "../runtime.ts";
@@ -31,8 +35,10 @@ export interface AeonServerOptions {
   connections?: ConnectionService;
   /** Provider and model catalogue. Without it only the built-in providers are listed. */
   providers?: ProviderCatalog;
-  /** The interest feed. Defaults to one that keeps its result in the config folder and fetches Google News. */
-  feed?: FeedService;
+  /** The feed pipeline. Defaults to one that keeps its posts in the config folder and reads Google News. */
+  feed?: FeedPipeline;
+  /** How often the feed timer looks whether a run is due; 0 switches it off. Default: a minute, or off when tickIntervalMs is 0. */
+  feedTickMs?: number;
   /** Sealing key. With it, paired devices can send keys and receive pairing codes encrypted. */
   identity?: ServerIdentity;
   /** Addresses other devices can use to reach this server (shown when pairing a new device). */
@@ -102,7 +108,8 @@ const STANDING_TOOLS = new Set(["memory.save", "skill.create", "skill.update"]);
 export class AeonServer {
   private readonly o: AeonServerOptions;
   private readonly clock: Clock;
-  private feedService: FeedService | null = null;
+  private feedService: FeedPipeline | null = null;
+  private feedTimer: ReturnType<typeof setInterval> | null = null;
   private memoryFallback: MemoryService | null = null;
   private readonly nonces = new NonceCache(FRESHNESS_MS * 2);
   private server: Server | null = null;
@@ -143,12 +150,19 @@ export class AeonServer {
     await new Promise<void>((r) => this.server!.listen(port, host, r));
     const interval = this.o.tickIntervalMs ?? 2000;
     if (interval > 0) this.timer = setInterval(() => void this.tick(), interval);
+    // The feed makes its posts on its own timer, apart from tasks and chat. It sends no notification: the posts are there when the tab is opened.
+    const feedTick = this.o.feedTickMs ?? (this.o.tickIntervalMs === 0 ? 0 : 60_000);
+    if (feedTick > 0) {
+      this.feedTimer = setInterval(() => void this.feedTick(), feedTick);
+      this.feedTimer.unref?.();
+    }
     const addr = this.server.address() as { port: number };
     return { port: addr.port, host };
   }
 
   async close(): Promise<void> {
     if (this.timer) clearInterval(this.timer);
+    if (this.feedTimer) clearInterval(this.feedTimer);
     for (const c of this.sseClients) c.destroy();
     this.sseClients.clear();
     const s = this.server;
@@ -156,6 +170,37 @@ export class AeonServer {
     const closed = new Promise<void>((r) => s.close(() => r()));
     s.closeAllConnections();
     await closed;
+  }
+
+  private feedPipeline(): FeedPipeline {
+    return (this.feedService ??= this.o.feed ?? new FeedPipeline({
+      store: new FeedStore(join(this.o.configDir, "feed-posts.json")),
+      adapters: [new GoogleNewsAdapter({ articles: articleFetcher() })],
+      images: new ImageStore(join(this.o.configDir, "feed-images")),
+      now: () => this.clock.now(),
+    }));
+  }
+
+  /** Asks the model the owner has set up, with nothing from the chat: the feed sends public article text and the owner's brief. Undefined when no model may be used. */
+  private feedChat(rt: Runtime): FeedChat | undefined {
+    if (rt.router.candidates().length === 0) return undefined;
+    return async (system, user) => (await rt.router.chat({ messages: [{ role: "system", content: system }, { role: "user", content: user }], maxTokens: 3000, temperature: 0.3 }, { taskId: null })).content;
+  }
+
+  private feedBusy = false;
+
+  /** The feed's own timer: makes posts when the owner's interval is over and no daily limit is reached. Never throws. */
+  async feedTick(): Promise<void> {
+    if (this.feedBusy) return;
+    this.feedBusy = true;
+    try {
+      const cfg = loadConfig(this.o.configDir);
+      await this.feedPipeline().runIfDue({ interests: cfg.profile?.interests ?? [], chat: this.feedChat(this.o.getRuntime()), images: cfg.feedImages !== false, online: this.online() });
+    } catch {
+      /* a failing run must not kill the timer; the run report keeps what happened */
+    } finally {
+      this.feedBusy = false;
+    }
   }
 
   /** One scheduler pass (also called by the background loop). */
@@ -532,10 +577,12 @@ export class AeonServer {
     }
 
     const conn = this.o.connections;
-    // The feed of the owner's interests: cached headlines, refreshed on request (internet lookups must be on).
-    if (path === "/v1/feed" || path === "/v1/feed/refresh" || path.startsWith("/v1/feed/image/")) {
-      const feed = (this.feedService ??= this.o.feed ?? new FeedService({ file: join(this.o.configDir, "feed.json"), images: { store: new ImageStore(join(this.o.configDir, "feed-images")), finder: articleImageFinder() }, now: () => this.clock.now() }));
+    // The feed (D25): posts written from the owner's interests by a pipeline that runs beside the chat agent. Anyone paired reads
+    // and reacts; the brief and the limits are changed by the machine or an admin device. A manual run counts against the day's limits.
+    if (path === "/v1/feed" || path.startsWith("/v1/feed/")) {
+      const feed = this.feedPipeline();
       const interests = loadConfig(this.o.configDir).profile?.interests ?? [];
+      const state = () => feedState(feed, interests, this.online(), this.clock.now());
       const imageMatch = /^\/v1\/feed\/image\/([a-f0-9]{12})$/.exec(path);
       if (imageMatch && method === "GET") {
         const img = feed.image(imageMatch[1]!);
@@ -544,19 +591,23 @@ export class AeonServer {
         res.end(img.bytes);
         return;
       }
-      if (path === "/v1/feed" && method === "GET") return this.json(res, 200, { feed: feed.get(), interests, stale: feed.stale(interests), online: this.online() });
-      if (path === "/v1/feed/refresh" && method === "POST") {
-        if (!this.online()) throw new HttpError(403, "internet lookups are off in the settings");
-        if (interests.length === 0) throw new HttpError(400, "pick interests first");
-        const cached = feed.get();
-        // Switching pictures on or off is worth a refresh at once; otherwise the five-minute gap applies.
-        const wantPictures = loadConfig(this.o.configDir).feedImages !== false;
-        const havePictures = cached?.sections.some((sec) => sec.items.some((i) => i.image)) ?? false;
-        if (cached && !(!wantPictures && havePictures) && cached.interests.join("\u0000") === interests.join("\u0000") && this.clock.now() - cached.updatedAt < FEED_MIN_GAP_MS) return this.json(res, 200, { feed: cached, interests, stale: false, online: true });
-        // A model rewrites the headlines when one may be used; the headlines are public, and a failure keeps the originals.
-        const chat = rt.router.candidates().length === 0 ? undefined : async (system: string, user: string) => (await rt.router.chat({ messages: [{ role: "system", content: system }, { role: "user", content: user }], maxTokens: 4000, temperature: 0.2 }, { taskId: null })).content;
-        const data = await feed.refresh(interests, chat, { images: loadConfig(this.o.configDir).feedImages !== false });
-        return this.json(res, 200, { feed: data, interests, stale: false, online: true });
+      if (path === "/v1/feed" && method === "GET") return this.json(res, 200, state());
+      if (path === "/v1/feed/generate" && method === "POST") {
+        const report = await feed.generate({ interests, chat: this.feedChat(rt), images: loadConfig(this.o.configDir).feedImages !== false, manual: true, online: this.online() });
+        return this.json(res, 200, { report, ...state() });
+      }
+      if (path === "/v1/feed/settings" && method === "PUT") {
+        if (!this.canAdmin(req, deviceId)) throw new HttpError(403, "this device is not allowed to change the feed settings");
+        try {
+          const next = mergeSettings(feed.store.read().settings, this.parseJson(raw));
+          feed.store.update((f) => {
+            f.settings = next;
+          });
+        } catch (e) {
+          if (e instanceof HttpError) throw e;
+          throw new HttpError(400, (e as Error).message);
+        }
+        return this.json(res, 200, state());
       }
     }
 

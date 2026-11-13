@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { safeFetch } from "./net-guard.ts";
+import { decodeHtml, extractArticleText } from "./feed-text.ts";
 
 /**
  * Article images for the feed. Google News RSS has none, so for the few items that get one the server does what a browser
@@ -23,8 +24,14 @@ export interface StoredImage {
   type: "image/jpeg" | "image/png" | "image/webp";
 }
 
-/** What a feed item's image is, as far as the pipeline is concerned. Null: this item has none (and none is tried again for a day). */
-export type ImageFinder = (googleLink: string) => Promise<StoredImage | null>;
+/** What one visit to an article gives the pipeline: its text (may be empty) and, when asked for, its picture. */
+export interface ArticleInfo {
+  text: string;
+  image: StoredImage | null;
+}
+
+/** Visits the article behind a Google News link. Null: the page could not be had at all. */
+export type ArticleFetcher = (googleLink: string, opts: { image: boolean }) => Promise<ArticleInfo | null>;
 
 /** JPEG, PNG or WebP by their first bytes, never by what the server claims. */
 export function sniffImage(b: Buffer): StoredImage["type"] | null {
@@ -94,21 +101,35 @@ export function findImageUrl(html: string, base: string): string | null {
   }
 }
 
-/** The whole pipeline for one Google News link. Never throws: any failure is "no image". */
-export function articleImageFinder(fetchGoogle: Fetcher = fetch as unknown as Fetcher): ImageFinder {
-  return async (googleLink) => {
+/**
+ * The whole visit for one Google News link: find the article, read its page (in the character set the page declares), take its
+ * text and, if wanted, fetch its picture. One download of Google's page serves both. Never throws: any failure is null (or, for
+ * the picture alone, "no picture").
+ */
+export function articleFetcher(fetchGoogle: Fetcher = fetch as unknown as Fetcher): ArticleFetcher {
+  return async (googleLink, opts) => {
     try {
       const article = await resolveArticleUrl(googleLink, fetchGoogle);
       if (!article) return null;
       const page = await safeFetch(article, { timeoutMs: 8_000, maxBytes: 400_000 });
       if (page.status !== 200 || !/html/i.test(page.contentType)) return null;
-      const imageUrl = findImageUrl(page.text, article);
-      if (!imageUrl) return null;
-      const img = await safeFetch(imageUrl, { timeoutMs: 8_000, maxBytes: IMAGE_MAX_BYTES });
-      if (img.status !== 200 || img.truncated) return null;
-      const bytes = Buffer.from(img.bytes);
-      const type = sniffImage(bytes);
-      return type && bytes.length >= 2_000 ? { bytes, type } : null;
+      const html = decodeHtml(page.bytes, page.contentType);
+      const text = html ? extractArticleText(html) : "";
+      let image: StoredImage | null = null;
+      if (opts.image && html) {
+        const imageUrl = findImageUrl(html, article);
+        if (imageUrl) {
+          try {
+            const img = await safeFetch(imageUrl, { timeoutMs: 8_000, maxBytes: IMAGE_MAX_BYTES });
+            const bytes = Buffer.from(img.bytes);
+            const type = img.status === 200 && !img.truncated ? sniffImage(bytes) : null;
+            if (type && bytes.length >= 2_000) image = { bytes, type };
+          } catch {
+            image = null;
+          }
+        }
+      }
+      return { text, image };
     } catch {
       return null;
     }
