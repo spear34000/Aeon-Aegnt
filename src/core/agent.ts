@@ -115,6 +115,8 @@ const MAX_STALL_NOTICES = 3;
  */
 export class Agent implements TaskRunner {
   private readonly cfg: AgentConfig;
+  /** Runs whose model has been shown facts about the owner (the saved mark covers restarts; this covers the rest of the run, whatever the stale copy of the task says). */
+  private readonly factsSeen = new WeakMap<RunContext, boolean>();
   constructor(cfg: AgentConfig) {
     this.cfg = cfg;
   }
@@ -126,8 +128,6 @@ export class Agent implements TaskRunner {
         // A new task: what is remembered and fits this goal is about to be shown to it (counted once per task).
         const shown = this.cfg.memory?.relevant(current.goal) ?? [];
         if (shown.length > 0) this.cfg.memory?.markUsed?.(shown.map((m) => m.id));
-        // Facts about the owner go to the model from the first call, so the task is marked at once and stays marked (see handlePending).
-        if (shown.some((m) => m.kind === "fact") && !current.sawOwnerFacts) current = await ctx.checkpoint({ sawOwnerFacts: true });
         const planned = await this.plan(current, ctx);
         if (planned.kind === "outcome") return planned.outcome;
         current = planned.task;
@@ -170,7 +170,19 @@ export class Agent implements TaskRunner {
     }
   }
 
-  private systemPrompt(goal: string): string {
+  /**
+   * The system message of one model call. What is remembered is read ONCE here and the same snapshot is used both for the
+   * prompt and for the mark: if it holds facts about the owner the task is marked first (saved on the task, and noted for this
+   * run), so the mark exists before the model sees them and no later change of the memory can undo it.
+   */
+  private async systemMessage(task: Task, ctx: RunContext): Promise<ChatMessage> {
+    const items = this.cfg.memory?.relevant(task.goal) ?? [];
+    if (items.some((m) => m.kind === "fact") && !task.sawOwnerFacts && this.factsSeen.get(ctx) !== true) await ctx.checkpoint({ sawOwnerFacts: true });
+    if (items.some((m) => m.kind === "fact")) this.factsSeen.set(ctx, true);
+    return { role: "system", content: this.systemPrompt(items) };
+  }
+
+  private systemPrompt(memory: MemoryLine[]): string {
     const toolLines = this.cfg.tools
       .list()
       .map((t) => `- ${t.name} ${t.argsHint}: ${t.description}`)
@@ -187,7 +199,7 @@ export class Agent implements TaskRunner {
       toolLines || "(none)",
       ...skillCatalogLines(this.cfg.skills?.() ?? []),
       ...profileLines(this.cfg.profile),
-      ...memoryLines(this.cfg.memory?.relevant(goal) ?? []),
+      ...memoryLines(memory),
     ].join("\n");
   }
 
@@ -202,7 +214,7 @@ export class Agent implements TaskRunner {
     ].join("\n");
     const res = await this.callModel(
       [
-        { role: "system", content: this.systemPrompt(task.goal) },
+        await this.systemMessage(task, ctx),
         { role: "user", content: prompt },
       ],
       task,
@@ -240,7 +252,7 @@ export class Agent implements TaskRunner {
 
       if (!pending) {
         // Ask the model what to do next.
-        const res = await this.callModel(this.buildMessages(task, steps), task, ctx);
+        const res = await this.callModel(this.buildMessages(task, steps, await this.systemMessage(task, ctx)), task, ctx);
         const action = extractJsonObject(res.content) as Record<string, unknown> | null;
 
         // A note is for the agent itself: something it must still know many steps from now (Anthropic: structured note-taking).
@@ -385,10 +397,8 @@ export class Agent implements TaskRunner {
     // read still shows workspace-derived text to the model.
     // `executed` is missing on steps persisted before the field existed: unknown counts as executed (fail closed).
     // The same holds when remembered facts about the owner were put in the prompt of this task (preferences about style are not private).
-    // That is recorded on the task and never undone: deleting the memory later does not make the model forget what it saw. Facts that became relevant after the start count from now on.
-    const factsNow = this.cfg.memory?.relevant(task.goal).some((m) => m.kind === "fact") ?? false;
-    if (factsNow && !task.sawOwnerFacts) await ctx.checkpoint({ sawOwnerFacts: true });
-    const tainted = steps.some((s) => s.executed !== false && this.cfg.tools.get(s.tool)?.exposesWorkspaceData === true) || task.sawOwnerFacts === true || factsNow;
+    // The mark is made where the prompt is built (systemMessage), saved on the task and noted for this run, and never undone: deleting the memory later does not make the model forget what it saw.
+    const tainted = steps.some((s) => s.executed !== false && this.cfg.tools.get(s.tool)?.exposesWorkspaceData === true) || task.sawOwnerFacts === true || this.factsSeen.get(ctx) === true;
     const decision = this.cfg.policy.evaluate({ tool: tool.name, assessment, tainted });
     await ctx.audit("tool_requested", {
       tool: tool.name,
@@ -486,7 +496,7 @@ export class Agent implements TaskRunner {
    * whole. Tool results are the bulk: the most recent ones stay in full, older ones shrink to a line (clearing old tool
    * results is the lightest compaction there is), and the history as a whole is held to a budget.
    */
-  private buildMessages(task: Task, steps: StepRecord[]): ChatMessage[] {
+  private buildMessages(task: Task, steps: StepRecord[], system: ChatMessage): ChatMessage[] {
     const notes = steps.filter((s) => s.tool === NOTE).slice(-MAX_NOTES).map((s) => `- ${s.output}`);
     const reflections = steps.filter((s) => s.tool === REFLECT).slice(-MAX_REFLECTIONS_SHOWN).map((s) => `- ${s.output}`);
     const full = this.cfg.historyFullSteps ?? 6;
@@ -522,7 +532,7 @@ export class Agent implements TaskRunner {
       "Only claim what the history proves. Do not repeat an action that already failed or gave the same result.",
     ].join("\n");
     return [
-      { role: "system", content: this.systemPrompt(task.goal) },
+      system,
       { role: "user", content: user },
     ];
   }
@@ -533,7 +543,7 @@ export class Agent implements TaskRunner {
     try {
       const res = await this.callModel(
         [
-          { role: "system", content: this.systemPrompt(task.goal) },
+          await this.systemMessage(task, ctx),
           {
             role: "user",
             content: [

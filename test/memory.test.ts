@@ -307,4 +307,32 @@ describe("what is remembered is private: it taints a task like a file that was r
     h.cleanup();
     t.cleanup();
   });
+
+  it("a fact that becomes relevant after the start is marked before the model sees it, and the mark stays when it is deleted again", async () => {
+    const t = tempDir();
+    const memoryFile = join(t.dir, "memory.json");
+    const svc = new MemoryService(memoryFile);
+    const m = new MockProvider("m", [planReply(["send"], []), getUrl, finishReply("done")]);
+    const h = harness({ providers: [m], memoryFile });
+    const task = await h.engine.submit({ goal: "write to my sister Mina" });
+    const realChat = h.router.chat.bind(h.router);
+    let calls = 0;
+    let added = "";
+    h.router.chat = (async (...args: Parameters<typeof realChat>) => {
+      const system = args[0].messages.find((x) => x.role === "system")!.content;
+      if (calls === 1) assert.match(system, /My sister Mina lives in Busan/, "the fact added after the plan is in the prompt of the next call");
+      const r = await realChat(...args);
+      calls++;
+      if (calls === 1) added = svc.add("My sister Mina lives in Busan", "fact", owner).id; // the owner adds it while the plan is being made
+      if (calls === 2) svc.remove(added); // and deletes it again right after the model has seen it
+      return r;
+    }) as typeof h.router.chat;
+    await h.engine.runTask(task.id);
+    const saved = (await h.store.getTask(task.id))!;
+    assert.equal(svc.list().length, 0);
+    assert.equal(saved.sawOwnerFacts, true);
+    assert.equal(saved.status, "WAITING_FOR_APPROVAL");
+    h.cleanup();
+    t.cleanup();
+  });
 });
