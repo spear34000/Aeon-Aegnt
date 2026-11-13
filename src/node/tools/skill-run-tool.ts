@@ -65,7 +65,7 @@ function isolationText(p: Parsed, hostAllowed: boolean): string {
   if (p.isolation === "docker") return `Isolation: Docker container (${DOCKER[p.kind].image}). No network, read-only root, 256 MB, 1 CPU. Sees only the skill (read-only) and a scratch folder.`;
   const limits = `60 s limit, output capped, environment emptied (none of your keys or variables), runs in a scratch folder, started without a shell.`;
   if (!hostAllowed) return "";
-  if (p.kind === "node") return `Isolation: Node.js permission model on THIS computer. It can read only a copy of the skill and the scratch folder, write only the scratch folder, and cannot start other programs. The network is NOT blocked. ${limits}`;
+  if (p.kind === "node") return `Isolation: Node.js permission model on THIS computer. It is set to let the script read only a copy of the skill and the scratch folder, write only the scratch folder and not start other programs. That is a safety net against mistakes, NOT a guarantee against hostile code (Node itself says so); the network is NOT blocked. Docker is the stronger choice. ${limits}`;
   return `Isolation: NONE besides the limits below. This ${p.kind === "python" ? "Python" : "shell"} script runs as you on THIS computer and can do anything you can, including network access and reading your files. ${limits}`;
 }
 

@@ -37,7 +37,7 @@ describe("running a script on this computer (D21)", () => {
     const tool = skillRunTool(lib, new WorkspaceGuard(ws), noDocker, DEFAULT_SANDBOX, nodeHostRunner);
     const js = tool.assess({ skill: "tools-skill", script: "scripts/probe.js", isolation: "host", args: ["a b"] });
     assert.match(js.summary, /on this computer \(Node permission model\)/);
-    assert.ok(js.detail!.includes("NOT blocked") && js.detail!.includes("cannot start other programs"));
+    assert.ok(js.detail!.includes("NOT blocked") && js.detail!.includes("safety net") && js.detail!.includes("NOT a guarantee against hostile code"));
     assert.ok(js.detail!.includes('node scripts/probe.js "a b"'), "arguments are quoted");
     for (const f of ["tidy.py", "go.sh"]) {
       const a = tool.assess({ skill: "tools-skill", script: `scripts/${f}`, isolation: "host" });
