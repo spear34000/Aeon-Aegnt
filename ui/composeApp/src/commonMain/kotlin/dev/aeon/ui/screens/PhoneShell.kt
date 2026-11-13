@@ -213,7 +213,7 @@ private fun PhoneBottomBar(current: Section, pending: Int, onSelect: (Section) -
                     Box(Modifier.size(width = 60.dp, height = 40.dp).background(if (selected) scheme.surfaceVariant else Color.Transparent, RoundedCornerShape(20.dp)), contentAlignment = Alignment.Center) {
                         Icon(t.icon, contentDescription = null, tint = if (selected) scheme.onSurface else scheme.onSurfaceVariant, modifier = Modifier.size(24.dp))
                     }
-                    if (t.section == Section.Feed && pending > 0 && !selected) {
+                    if (t.section == Section.Tasks && pending > 0 && !selected) {
                         Box(Modifier.align(Alignment.Center).padding(start = 22.dp, bottom = 20.dp).size(9.dp).background(s.danger, CircleShape))
                     }
                 }
@@ -282,54 +282,6 @@ private fun ChatDrawer(state: UiState, model: AppModel, modifier: Modifier) {
             Column {
                 Text(if (connected) (if (state.thisDevice) "이 기기에서 실행 중" else "내 에이전트와 연결됨") else "연결되지 않음", style = MaterialTheme.typography.labelLarge)
                 if (!state.thisDevice) Text(state.serverUrl.removePrefix("http://").removePrefix("https://"), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
-            }
-        }
-    }
-}
-
-/** 피드: what is waiting for your answer first, then recent activity, newest first. */
-@Composable
-fun FeedScreen(state: UiState, model: AppModel, modifier: Modifier = Modifier) {
-    val scheme = MaterialTheme.colorScheme
-    Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, bottom = 24.dp)) {
-        if (state.approvals.isNotEmpty()) {
-            GroupHeader("승인 대기", state.approvals.size.toString())
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                state.approvals.forEach { a ->
-                    val goal = state.tasks.firstOrNull { it.id == a.taskId }?.goal ?: "작업"
-                    ApprovalCard(a, state.approvalSeenAt[a.id], goal, { model.decide(a.id, it) })
-                }
-            }
-        }
-        if (state.tasks.isEmpty()) {
-            GroupHeader("활동")
-            EmptyState("아직 활동이 없습니다", "새 대화에서 목표를 말하면 여기에 쌓입니다.")
-        } else {
-            // Newest first, in the groups the mockup uses: 오늘, 어제, 이전.
-            val now = dev.aeon.ui.platform.nowMillis()
-            val byDay = state.tasks.sortedByDescending { it.updatedAt }.groupBy { dev.aeon.ui.platform.dayBucket(it.updatedAt, now) }
-            listOf("오늘", "어제", "이전").forEach { day ->
-                val rows = byDay[day] ?: return@forEach
-                GroupHeader(day)
-                ListSurface {
-                    rows.forEachIndexed { i, t ->
-                        if (i > 0) RowDivider(88.dp)
-                        val (dot, text) = taskStatusLine(t)
-                        Row(
-                            Modifier.fillMaxWidth().defaultMinSize(minHeight = 64.dp).clickable { model.selectTask(t.id) }.padding(horizontal = 16.dp, vertical = 12.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            Text(koreanClock(t.updatedAt), Modifier.width(60.dp).padding(top = 2.dp), style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
-                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                                Text(t.goal, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    StatusDot(dot)
-                                    Text(text, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
-                                }
-                            }
-                        }
-                    }
-                }
             }
         }
     }
@@ -466,8 +418,18 @@ fun TasksScreen(state: UiState, model: AppModel, modifier: Modifier = Modifier) 
     val finished = state.tasks.filter { it.status in past }
     val active = state.tasks.filter { it.status !in past && it !in waiting && it !in scheduled }
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, bottom = 24.dp)) {
-        if (state.tasks.isEmpty()) EmptyState("아직 작업이 없습니다", "대화에서 일을 맡기면 여기에 쌓입니다.")
-        listOf("승인 대기" to waiting, "진행 중" to active, "예약됨" to scheduled, "지난 작업" to finished).forEach { (title, list) ->
+        if (state.approvals.isNotEmpty()) {
+            GroupHeader("승인 대기", state.approvals.size.toString())
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                state.approvals.forEach { a ->
+                    val goal = state.tasks.firstOrNull { it.id == a.taskId }?.goal ?: "작업"
+                    ApprovalCard(a, state.approvalSeenAt[a.id], goal, { model.decide(a.id, it) })
+                }
+            }
+        }
+        if (state.tasks.isEmpty() && state.approvals.isEmpty()) EmptyState("아직 작업이 없습니다", "대화에서 일을 맡기면 여기에 쌓입니다.")
+        // The approvals above are the same tasks as the waiting ones: they are not listed twice.
+        listOf("승인을 기다리는 작업" to (if (state.approvals.isEmpty()) waiting else emptyList()), "진행 중" to active, "예약됨" to scheduled, "지난 작업" to finished).forEach { (title, list) ->
             if (list.isEmpty()) return@forEach
             GroupHeader(title, list.size.toString())
             ListSurface {

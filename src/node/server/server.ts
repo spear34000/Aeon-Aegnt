@@ -537,7 +537,10 @@ export class AeonServer {
         if (!this.online()) throw new HttpError(403, "internet lookups are off in the settings");
         if (interests.length === 0) throw new HttpError(400, "pick interests first");
         const cached = feed.get();
-        if (cached && cached.interests.join("\u0000") === interests.join("\u0000") && this.clock.now() - cached.updatedAt < FEED_MIN_GAP_MS) return this.json(res, 200, { feed: cached, interests, stale: false, online: true });
+        // Switching pictures on or off is worth a refresh at once; otherwise the five-minute gap applies.
+        const wantPictures = loadConfig(this.o.configDir).feedImages !== false;
+        const havePictures = cached?.sections.some((sec) => sec.items.some((i) => i.image)) ?? false;
+        if (cached && !(!wantPictures && havePictures) && cached.interests.join("\u0000") === interests.join("\u0000") && this.clock.now() - cached.updatedAt < FEED_MIN_GAP_MS) return this.json(res, 200, { feed: cached, interests, stale: false, online: true });
         // A model rewrites the headlines when one may be used; the headlines are public, and a failure keeps the originals.
         const chat = rt.router.candidates().length === 0 ? undefined : async (system: string, user: string) => (await rt.router.chat({ messages: [{ role: "system", content: system }, { role: "user", content: user }], maxTokens: 4000, temperature: 0.2 }, { taskId: null })).content;
         const data = await feed.refresh(interests, chat, { images: loadConfig(this.o.configDir).feedImages !== false });

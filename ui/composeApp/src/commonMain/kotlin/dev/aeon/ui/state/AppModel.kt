@@ -132,6 +132,20 @@ data class SkillUpdateState(
     val error: String? = null,
 )
 
+/** The feed of the owner's interests (headlines of the last refresh, and the pictures decoded so far). */
+data class FeedState(
+    val data: dev.aeon.ui.api.FeedData? = null,
+    val interests: List<String> = emptyList(),
+    val online: Boolean = true,
+    val loaded: Boolean = false,
+    val refreshing: Boolean = false,
+    val error: String? = null,
+    /** One interest shown alone, or null for all of them. */
+    val filter: String? = null,
+    /** Pictures by item id: absent while not asked for, null when the server has none or it could not be read. */
+    val images: Map<String, androidx.compose.ui.graphics.ImageBitmap?> = emptyMap(),
+)
+
 data class SkillsState(
     val list: List<dev.aeon.ui.api.SkillItem> = emptyList(),
     val dir: String = "",
@@ -216,6 +230,7 @@ data class UiState(
     val setup: SetupState = SetupState(),
     val pairPrefill: PairPrefill? = null,
     val skills: SkillsState = SkillsState(),
+    val feed: FeedState = FeedState(),
 ) {
     /** This device may change settings, keys, connections and devices. */
     val isAdmin: Boolean get() = status?.admin == true
@@ -1024,6 +1039,65 @@ class AppModel(
     }
 
     fun showConnection(c: ConnectionItem?) = explore { it.copy(detail = c) }
+
+    // ---------------------------------------------------------------- 피드
+
+    private fun feed(change: (FeedState) -> FeedState) = _state.update { it.copy(feed = change(it.feed)) }
+
+    private val feedImageRequests = mutableSetOf<String>()
+
+    /** Shows what the server has, and refreshes when it is old (needs interests in the profile and internet lookups on). */
+    fun loadFeed() {
+        scope.launch {
+            runCatching { client.feed() }
+                .onSuccess { r ->
+                    feed { it.copy(data = r.feed, interests = r.interests, online = r.online, loaded = true, error = null, filter = it.filter?.takeIf { f -> f in r.interests }) }
+                    if (r.stale && r.online && r.interests.isNotEmpty()) refreshFeed()
+                }
+                .onFailure { e -> feed { it.copy(loaded = true, error = describe(e as? Exception ?: Exception(e.message))) } }
+        }
+    }
+
+    fun refreshFeed() {
+        if (_state.value.feed.refreshing) return
+        scope.launch {
+            feed { it.copy(refreshing = true, error = null) }
+            try {
+                val r = client.refreshFeed()
+                feed { it.copy(data = r.feed, interests = r.interests, online = true, refreshing = false, loaded = true) }
+            } catch (e: Exception) {
+                val msg = when {
+                    e is AeonException && e.status == 403 -> null
+                    e is AeonException && e.status == 400 -> null
+                    else -> "새 소식을 가져오지 못했어요. 잠시 뒤에 다시 해 보세요."
+                }
+                feed { it.copy(refreshing = false, online = if (e is AeonException && e.status == 403) false else it.online, error = msg) }
+            }
+        }
+    }
+
+    fun setFeedFilter(interest: String?) = feed { it.copy(filter = interest) }
+
+    /** Fetches and decodes the picture of one item, at most three at a time. */
+    fun loadFeedImage(id: String) {
+        if (!feedImageRequests.add(id)) return
+        scope.launch {
+            val img = iconGate.withPermit { runCatching { client.feedImage(id) }.getOrNull()?.let { dev.aeon.ui.platform.decodeImage(it) } }
+            feed { it.copy(images = it.images + (id to img)) }
+        }
+    }
+
+    fun openArticle(url: String) = dev.aeon.ui.platform.openUrl(url)
+
+    /** Article pictures in the feed on or off (server-wide). Off also deletes the copies the server kept. */
+    fun setFeedImages(on: Boolean) = action(null) {
+        val cfg = client.config()
+        val saved = client.saveConfig(cfg.copy(feedImages = if (on) null else false))
+        _state.update { it.copy(config = saved, draft = saved) }
+        feedImageRequests.clear()
+        feed { it.copy(images = emptyMap()) }
+        refreshFeed()
+    }
 
     // ---------------------------------------------------------------- 스킬
 

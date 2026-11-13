@@ -127,6 +127,8 @@ data class AeonConfig(
     val profile: Profile? = null,
     /** false = the owner declined internet lookups for lists and logos. Absent means allowed. */
     val onlineLookups: Boolean? = null,
+    /** Article images in the feed. On unless false: each costs about a megabyte of data when the feed refreshes. */
+    val feedImages: Boolean? = null,
 )
 
 @Serializable
@@ -304,6 +306,23 @@ data class SkillPreview(val id: String, val source: String = "", val commit: Str
 @Serializable data class SkillInstallHint(val name: String, val rename: String? = null)
 @Serializable data class SkillUpdatePreview(val preview: SkillPreview, val install: SkillInstallHint, val diff: SkillFileDiff = SkillFileDiff())
 @Serializable data class SkillFileResponse(val path: String = "", val text: String? = null, val binary: Boolean = false, val size: Long = 0)
+
+/** One headline of the feed. [title] is what is shown (rewritten, or the original); [image] means the server kept the article's picture. */
+@Serializable
+data class FeedItem(
+    val id: String,
+    val title: String,
+    val original: String = "",
+    val source: String = "",
+    val publishedAt: Double = 0.0,
+    val url: String = "",
+    val rewritten: Boolean = false,
+    val image: Boolean = false,
+)
+
+@Serializable data class FeedSection(val interest: String, val items: List<FeedItem> = emptyList(), val note: String? = null)
+@Serializable data class FeedData(val updatedAt: Double = 0.0, val interests: List<String> = emptyList(), val sections: List<FeedSection> = emptyList(), val mode: String = "rules", val modeNote: String? = null)
+@Serializable data class FeedResponse(val feed: FeedData? = null, val interests: List<String> = emptyList(), val stale: Boolean = false, val online: Boolean = true)
 
 @Serializable data class SkillsResponse(val skills: List<SkillItem> = emptyList(), val dir: String = "", val projectDir: String? = null, val canEdit: Boolean = false)
 @Serializable data class SkillResponse(val skill: SkillItem)

@@ -394,4 +394,51 @@ class ServerIntegrationTest {
         assertEquals(null, sk().screen)
         m.stop()
     }
+
+    @Test
+    fun theFeedStatesFollowTheServerAndNothingIsFetchedWhenLookupsAreOff() = runBlocking {
+        val fx = startAeon(startFakeModel(emptyList()))
+        val (client, crypto) = newClient(fx.base)
+        val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
+        cleanup += { scope.cancel() }
+        val map = mutableMapOf<String, String>()
+        val store = object : dev.aeon.ui.platform.KeyValueStore {
+            override fun get(key: String) = map[key]
+            override fun put(key: String, value: String) { map[key] = value }
+            override fun remove(key: String) { map.remove(key) }
+        }
+        val m = dev.aeon.ui.state.AppModel(client, store, crypto, scope, pollMillis = 60_000, defaultServerUrl = fx.base)
+        m.pair(fx.base, fx.code)
+        waitFor { m.state.value.connection is dev.aeon.ui.state.Connection.Connected }
+        val f = { m.state.value.feed }
+
+        m.loadFeed()
+        waitFor(label = "empty feed loaded") { f().loaded }
+        assertEquals(emptyList(), f().interests, "no interests in the profile yet: the screen asks for them")
+        assertTrue(f().online && f().data == null)
+
+        // Interests chosen, internet lookups off: the server fetches nothing and the screen says why.
+        val cfg = client.config()
+        client.saveConfig(cfg.copy(profile = dev.aeon.ui.api.Profile(interests = listOf("AI", "여행")), onlineLookups = false))
+        m.loadFeed()
+        waitFor(label = "interests") { f().interests == listOf("AI", "여행") }
+        assertEquals(false, f().online)
+        assertEquals(null, f().data)
+        m.refreshFeed()
+        waitFor(label = "refresh answered") { !f().refreshing }
+        assertEquals(false, f().online, "a refused refresh keeps the screen on the 'lookups are off' message")
+
+        m.setFeedFilter("AI")
+        m.loadFeed()
+        waitFor(label = "filter kept") { f().filter == "AI" && f().loaded }
+        client.saveConfig(client.config().copy(profile = dev.aeon.ui.api.Profile(interests = listOf("여행")), onlineLookups = false))
+        m.loadFeed()
+        waitFor(label = "filter dropped") { f().interests == listOf("여행") }
+        assertEquals(null, f().filter, "a filter for an interest that is gone is dropped")
+        assertEquals("방금", dev.aeon.ui.screens.agoText(1_000_000.0, 1_030_000))
+        assertEquals("5분 전", dev.aeon.ui.screens.agoText(1_000_000.0, 1_000_000 + 5 * 60_000))
+        assertEquals("3시간 전", dev.aeon.ui.screens.agoText(1_000_000.0, 1_000_000 + 3 * 3_600_000))
+        assertEquals("어제", dev.aeon.ui.screens.agoText(1_000_000.0, 1_000_000 + 30 * 3_600_000))
+        m.stop()
+    }
 }

@@ -109,7 +109,8 @@ export function parseRss(xml: string): RawItem[] {
     if (!title || !link || !Number.isFinite(when) || !/^https:\/\//i.test(link)) continue;
     title = title.replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim();
     // Google News writes "Headline - Source".
-    if (source && title.endsWith(` - ${source}`)) title = title.slice(0, -(source.length + 3)).trim();
+    // (some outlets put their own name in the headline too, so it can be there twice)
+    while (source && title.endsWith(` - ${source}`)) title = title.slice(0, -(source.length + 3)).trim();
     if (title.length < 4 || title.length > 200) continue;
     out.push({ title, source: source.slice(0, 40) || "출처 없음", publishedAt: when, url: link });
   }
@@ -322,7 +323,9 @@ export class FeedService {
     if (chat) {
       try {
         await rewrite(chat, sections);
-        mode = "model";
+        // Only called a rewrite if one passed the check: otherwise the screen must not claim titles were rewritten.
+        if (sections.some((sec) => sec.items.some((i) => i.rewritten))) mode = "model";
+        else modeNote = "원문 제목을 그대로 보여 줘요. 모델이 다시 쓴 제목이 확인을 통과하지 못했어요.";
       } catch {
         modeNote = "원문 제목을 그대로 보여 줘요. 모델이 답하지 않았어요.";
       }

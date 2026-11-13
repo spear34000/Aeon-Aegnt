@@ -6,6 +6,7 @@ import io.ktor.client.HttpClient
 import io.ktor.client.request.header
 import io.ktor.client.request.request
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsBytes
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpMethod
 import kotlinx.serialization.json.JsonElement
@@ -187,6 +188,15 @@ class AeonClient(
         return ApiJson.decodeFromString(signed(HttpMethod.Get, "/v1/catalog?$q"))
     }
 
+    /** The stored feed of the profile's interests, and whether it should be refreshed. */
+    suspend fun feed(): FeedResponse = ApiJson.decodeFromString(signed(HttpMethod.Get, "/v1/feed"))
+
+    /** Fetches new headlines (the server answers from what it has when asked again within five minutes). */
+    suspend fun refreshFeed(): FeedResponse = ApiJson.decodeFromString(signed(HttpMethod.Post, "/v1/feed/refresh", "{}"))
+
+    /** The picture the server kept for a feed item: encoded JPEG, PNG or WebP bytes. */
+    suspend fun feedImage(id: String): ByteArray = signedRaw(HttpMethod.Get, "/v1/feed/image/$id", null, "application/json")
+
     suspend fun skills(): SkillsResponse = ApiJson.decodeFromString(signed(HttpMethod.Get, "/v1/skills"))
 
     suspend fun skill(folder: String, scope: String? = null): SkillItem =
@@ -273,14 +283,17 @@ class AeonClient(
     private suspend fun signed(method: HttpMethod, pathAndQuery: String, body: String? = null): String =
         signedBytes(method, pathAndQuery, body?.encodeToByteArray(), "application/json")
 
-    private suspend fun signedBytes(method: HttpMethod, pathAndQuery: String, body: ByteArray?, contentType: String): String {
+    private suspend fun signedBytes(method: HttpMethod, pathAndQuery: String, body: ByteArray?, contentType: String): String =
+        signedRaw(method, pathAndQuery, body, contentType).decodeToString()
+
+    private suspend fun signedRaw(method: HttpMethod, pathAndQuery: String, body: ByteArray?, contentType: String): ByteArray {
         check(deviceId.isNotEmpty()) { "device is not paired" }
         val bytes = body ?: ByteArray(0)
         val timestamp = clock().toString()
         val nonce = crypto.randomBytes(12).toHex()
         val bodyHash = crypto.sha256(bytes).toHex()
         val signature = crypto.sign(Signing.canonicalRequest(method.value, pathAndQuery, timestamp, nonce, bodyHash).encodeToByteArray())
-        return send(
+        return sendRaw(
             method,
             pathAndQuery,
             body,
@@ -289,7 +302,10 @@ class AeonClient(
         )
     }
 
-    private suspend fun send(method: HttpMethod, pathAndQuery: String, body: ByteArray?, headers: Map<String, String>, contentType: String = "application/json"): String {
+    private suspend fun send(method: HttpMethod, pathAndQuery: String, body: ByteArray?, headers: Map<String, String>, contentType: String = "application/json"): String =
+        sendRaw(method, pathAndQuery, body, headers, contentType).decodeToString()
+
+    private suspend fun sendRaw(method: HttpMethod, pathAndQuery: String, body: ByteArray?, headers: Map<String, String>, contentType: String = "application/json"): ByteArray {
         val response = http.request(baseUrl + pathAndQuery) {
             this.method = method
             headers.forEach { (k, v) -> header(k, v) }
@@ -298,13 +314,14 @@ class AeonClient(
                 setBody(body) // exactly the bytes that were hashed and signed
             }
         }
-        val text = response.bodyAsText()
+        val data = response.bodyAsBytes()
         val code = response.status.value
         if (code >= 400) {
+            val text = data.decodeToString()
             val message = runCatching { (ApiJson.parseToJsonElement(text) as? JsonObject)?.get("error")?.let { (it as? JsonPrimitive)?.content } }.getOrNull()
             throw AeonException(code, message ?: "HTTP $code")
         }
-        return text
+        return data
     }
 }
 

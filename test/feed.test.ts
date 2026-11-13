@@ -28,6 +28,7 @@ describe("reading headlines", () => {
       `<item><title>javascript link</title><link>javascript:alert(1)</link><pubDate>${hoursAgo(1)}</pubDate></item>`,
       `<item><title>no time</title><link>https://x.example/a</link></item>`,
     );
+    assert.equal(parseRss(rss(`<item><title>머니 제목 - 머니투데이 - 머니투데이</title><link>https://x.example/a</link><pubDate>${hoursAgo(1)}</pubDate><source url="https://m.example">머니투데이</source></item>`))[0]!.title, "머니 제목", "the outlet is taken off the end even when it is there twice");
     const items = parseRss(xml);
     assert.equal(items.length, 1);
     assert.deepEqual([items[0]!.title, items[0]!.source], ["삼성 & LG, 2분기 영업이익 1.2조 발표", "연합뉴스"]);
