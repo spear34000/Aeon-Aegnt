@@ -81,6 +81,9 @@ data class Approval(
     val irreversible: Boolean = false,
     /** Longer text to read before deciding (the instructions of a new skill). */
     val detail: String? = null,
+    /** "question": the agent asks something in words ([summary] is the question, [resources] are suggested answers). */
+    val kind: String? = null,
+    val answer: String? = null,
     val status: String,
     val createdAt: Long = 0,
     val expiresAt: Long = 0,

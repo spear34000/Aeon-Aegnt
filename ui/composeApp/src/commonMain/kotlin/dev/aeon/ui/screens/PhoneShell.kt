@@ -423,7 +423,7 @@ fun TasksScreen(state: UiState, model: AppModel, modifier: Modifier = Modifier) 
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 state.approvals.forEach { a ->
                     val goal = state.tasks.firstOrNull { it.id == a.taskId }?.goal ?: "작업"
-                    ApprovalCard(a, state.approvalSeenAt[a.id], goal, { model.decide(a.id, it) })
+                    ApprovalCard(a, state.approvalSeenAt[a.id], goal, { model.decide(a.id, it) }, onAnswer = { model.decide(a.id, true, it) })
                 }
             }
         }

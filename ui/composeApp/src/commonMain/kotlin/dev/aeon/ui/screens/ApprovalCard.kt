@@ -2,6 +2,7 @@ package dev.aeon.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -35,6 +36,7 @@ import dev.aeon.ui.design.AeonShape
 import dev.aeon.ui.design.Banner
 import dev.aeon.ui.design.Chip
 import dev.aeon.ui.design.Tone
+import dev.aeon.ui.design.AeonTextField
 import dev.aeon.ui.design.ButtonKind
 import dev.aeon.ui.design.LocalAeonStatus
 import dev.aeon.ui.platform.koreanClock
@@ -65,7 +67,11 @@ private fun folderOf(path: String): String = path.trimEnd('/', '\\').let { p -> 
  * that cannot be undone and stays disabled for one second after the card appears, against accidental taps.
  */
 @Composable
-fun ApprovalCard(a: Approval, seenAt: Long?, sourceLabel: String, onDecide: (Boolean) -> Unit, modifier: Modifier = Modifier) {
+fun ApprovalCard(a: Approval, seenAt: Long?, sourceLabel: String, onDecide: (Boolean) -> Unit, modifier: Modifier = Modifier, onAnswer: (String) -> Unit = {}) {
+    if (a.kind == "question") {
+        QuestionCard(a, sourceLabel, onSkip = { onDecide(false) }, onAnswer = onAnswer, modifier = modifier)
+        return
+    }
     val s = LocalAeonStatus.current
     val scheme = MaterialTheme.colorScheme
     val haptic = LocalHapticFeedback.current
@@ -201,5 +207,38 @@ private fun ExpiryText(expiresAt: Long, leftMs: Long, now: Long) {
         leftMs < 10 * 60_000 -> Text("${mins}:${((leftMs / 1000) % 60).toString().padStart(2, '0')} 남음", color = s.warn, style = MaterialTheme.typography.labelLarge)
         leftMs < 60 * 60_000 -> Text("${mins}분 남음", color = s.warn, style = MaterialTheme.typography.labelMedium)
         else -> Text("${koreanDayPrefix(expiresAt, now)}${koreanClock(expiresAt)}까지", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
+    }
+}
+
+/**
+ * A question from the agent (it needs a detail it cannot find itself). Suggested answers are one tap, the owner can type their
+ * own, or skip: then the agent goes on with the most careful choice or says what it could not decide.
+ */
+@Composable
+private fun QuestionCard(a: Approval, sourceLabel: String, onSkip: () -> Unit, onAnswer: (String) -> Unit, modifier: Modifier = Modifier) {
+    val scheme = MaterialTheme.colorScheme
+    val now = nowMillis()
+    var text by remember(a.id) { mutableStateOf("") }
+    val leftMs = a.expiresAt - now
+    Column(modifier.fillMaxWidth().background(scheme.surface, RoundedCornerShape(AeonShape.CARD.dp)).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(verticalAlignment = Alignment.Top) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Chip("에이전트가 물어봐요", Tone.Accent)
+                Text(a.summary, style = MaterialTheme.typography.titleLarge)
+                Text(sourceLabel, style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            ExpiryText(a.expiresAt, leftMs, now)
+        }
+        if (a.resources.isNotEmpty()) {
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                a.resources.forEach { o -> PillChoice(o, text == o) { text = o } }
+            }
+        }
+        AeonTextField(text, { text = it.take(1000) }, "답", placeholder = "직접 답하기", singleLine = false, minHeight = 52.dp)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            AeonButton("건너뛰기", onSkip, Modifier.weight(1f), kind = ButtonKind.Strong)
+            AeonButton("답하기", { onAnswer(text.trim()) }, Modifier.weight(1f), kind = ButtonKind.Primary, enabled = text.isNotBlank())
+        }
+        Text("건너뛰면 에이전트가 가장 조심스러운 쪽으로 진행하거나, 정하지 못한 점을 말하고 끝내요.", style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
     }
 }

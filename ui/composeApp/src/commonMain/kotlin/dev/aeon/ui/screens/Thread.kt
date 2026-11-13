@@ -109,6 +109,7 @@ fun ConversationScreen(state: UiState, model: AppModel, wide: Boolean, modifier:
                                     seenAt = state.approvalSeenAt[pending.id],
                                     sourceLabel = detail.goal,
                                     onDecide = { model.decide(pending.id, it) },
+                                    onAnswer = { model.decide(pending.id, true, it) },
                                 )
                             }
                         }

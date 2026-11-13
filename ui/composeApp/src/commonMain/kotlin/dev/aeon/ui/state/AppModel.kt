@@ -918,7 +918,7 @@ class AppModel(
         _state.update { it.copy(devices = client.devices()) }
     }
 
-    fun decide(approvalId: String, approve: Boolean) = action(null) { client.decide(approvalId, approve) }
+    fun decide(approvalId: String, approve: Boolean, answer: String? = null) = action(null) { client.decide(approvalId, approve, answer) }
     fun cancel(id: String) = action("멈췄어요") { client.cancel(id) }
     fun reverify(id: String) = action("다시 확인했어요") { client.reverify(id) }
     fun confirm(id: String) = action("확인했어요") { client.confirm(id) }

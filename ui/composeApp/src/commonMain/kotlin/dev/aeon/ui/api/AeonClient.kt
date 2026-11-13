@@ -92,8 +92,12 @@ class AeonClient(
         return ApiJson.decodeFromString<ApprovalsResponse>(signed(HttpMethod.Get, "/v1/approvals$q")).approvals
     }
 
-    suspend fun decide(approvalId: String, approve: Boolean): Approval {
-        val body = buildJsonObject { put("decision", if (approve) "approved" else "denied") }
+    /** [answer] is the owner's words when the approval is a question from the agent. */
+    suspend fun decide(approvalId: String, approve: Boolean, answer: String? = null): Approval {
+        val body = buildJsonObject {
+            put("decision", if (approve) "approved" else "denied")
+            if (answer != null) put("answer", answer)
+        }
         return ApiJson.decodeFromString<ApprovalResponse>(signed(HttpMethod.Post, "/v1/approvals/$approvalId/decide", body.toString())).approval
     }
 

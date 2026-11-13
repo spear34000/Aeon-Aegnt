@@ -220,7 +220,7 @@ fun ApprovalsPanel(state: UiState, model: AppModel, modifier: Modifier = Modifie
         }
         state.approvals.forEach { a ->
             val goal = state.tasks.firstOrNull { it.id == a.taskId }?.goal ?: "작업"
-            ApprovalCard(a, state.approvalSeenAt[a.id], goal, { model.decide(a.id, it) })
+            ApprovalCard(a, state.approvalSeenAt[a.id], goal, { model.decide(a.id, it) }, onAnswer = { model.decide(a.id, true, it) })
         }
         if (state.recentApprovals.isNotEmpty()) {
             SectionLabel("최근 처리")

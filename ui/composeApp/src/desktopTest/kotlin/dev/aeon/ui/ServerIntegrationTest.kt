@@ -441,4 +441,28 @@ class ServerIntegrationTest {
         assertEquals("어제", dev.aeon.ui.screens.agoText(1_000_000.0, 1_000_000 + 30 * 3_600_000))
         m.stop()
     }
+
+    @Test
+    fun theAgentAsksAQuestionTheOwnerAnswersInWordsAndTheTaskGoesOn() = runBlocking {
+        val port = startFakeModel(
+            listOf(
+                """{"plan":["ask which day"],"criteria":[]}""",
+                """{"action":"ask","question":"Which day should the report be for?","options":["Monday","Friday"]}""",
+                """{"action":"finish","summary":"made the Friday report"}""",
+            ),
+        )
+        val fx = startAeon(port)
+        val (client, _) = newClient(fx.base)
+        client.pair(fx.code, "kotlin test client")
+        val created = client.createTask("make the weekly report", emptyList())
+        awaitTask(client, created.id, "WAITING_FOR_APPROVAL")
+        val q = client.approvals("pending").single()
+        assertEquals(listOf("question", "Which day should the report be for?", "Monday,Friday"), listOf(q.kind, q.summary, q.resources.joinToString(",")))
+        assertEquals(409, assertFailsWith<AeonException> { client.decide(q.id, approve = true) }.status, "a question cannot be approved without an answer")
+        val answered = client.decide(q.id, approve = true, answer = "Friday")
+        assertEquals("Friday", answered.answer)
+        val done = awaitTask(client, created.id, "COMPLETED", "FAILED")
+        assertEquals("COMPLETED", done.status, done.error ?: "")
+        assertTrue(done.steps.any { it.tool == "agent.ask" && it.ok })
+    }
 }
