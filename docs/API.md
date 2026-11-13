@@ -50,7 +50,7 @@ Static files (the web UI, when `--web` is given) are served without authenticati
 
 | Method & path | Purpose |
 |---|---|
-| `GET /v1/providers` | providers from the catalogue (built-ins plus models.dev, cached a day) with address, `hasKey`, `local`, reasoning levels, and the model in use. `GET /v1/providers/{id}/models` lists one provider's models |
+| `GET /v1/providers` | providers from the catalogue (built-ins plus models.dev, cached a day) with address, `hasKey`, `local`, reasoning levels, `icon` (an `/v1/icons/…` path for the provider's logo, null when internet lookups are declined) and the model in use. `GET /v1/providers/{id}/models` lists one provider's models |
 | `POST /v1/model` `{provider, model, reasoningEffort?, consent?, custom?}` | puts the model first in line. A provider outside this machine needs `consent: true` once, and again if its address changed. Needs the right to change settings |
 | `PUT /v1/secrets/{NAME}` `{sealed}` | keys arrive sealed (see below); a plain `{value}` is accepted from the machine itself only |
 | `POST /v1/pairing-codes` `{admin?, epk}` | a paired device lets another in. The code comes back sealed for `epk` |
@@ -69,7 +69,9 @@ Devices have an `admin` flag (default true): without it a device keeps chat and 
 
 Nothing in the connection list is hard-coded in a UI. `config.mcpServers` holds `{ name, title?, url (https, no credentials), websiteUrl?, requires?[] }`; changing it needs the right to change settings, like providers. **Aeon does not run MCP tools yet:** an added server is stored and listed, nothing more. Package-based (stdio) servers cannot be added because host command execution is not allowed (D7). **The agent does not use skills yet either** (D17): they can be created, edited and deleted from the apps, but their text is not given to the model.
 
-Outbound requests made by the PC for this feature (never by a paired device): `registry.modelcontextprotocol.io` (search text), `cdn.jsdelivr.net` (Simple Icons brand index and one SVG per matched title), the publisher's website (page and icon), and `github.com/<owner>.png`. All go through the SSRF-guarded transport. Icons are cached in `<config dir>/cache/icons` for 30 days (misses for one day).
+Outbound requests made by the PC for this feature (never by a paired device): `registry.modelcontextprotocol.io` (search text), `cdn.jsdelivr.net` (Simple Icons brand index and one SVG per matched title), the publisher's website (page and icon), `github.com/<owner>.png`, and `models.dev/logos/<provider id>.svg` for model provider logos. All go through the SSRF-guarded transport. Icons are cached in `<config dir>/cache/icons` for 30 days (misses for one day).
+
+Provider logos come from `models.dev/logos/<id>.svg` only. The reader (`logoFromSvg`) accepts a square canvas of filled `<path>` elements in `currentColor` and returns `{kind:"path", d, color:"currentColor", size, rule?}`; the catalogue serves a stroked stand-in for providers without a logo and logos made of other shapes, and both are refused, so the app shows the provider's first letter. Icons for providers are drawn in the text colour, so one logo serves light and dark.
 
 Icon order: icons declared in the publisher's manifest, then a brand mark whose name equals the start of the title, then the publisher's site icon, then its GitHub avatar. A community server named after a brand therefore shows that brand's mark; the row also shows the publisher so it is not mistaken for an official one.
 

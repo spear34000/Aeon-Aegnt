@@ -39,9 +39,44 @@ export interface IconPlan {
   /** Host of the publisher's website or endpoint. */
   host: string | null;
   githubOwner: string | null;
+  /** An SVG logo to read the shapes from (provider logos). When set and the title is empty, nothing else is tried. */
+  svg?: string | null;
 }
 
-export type IconPayload = { kind: "image"; mime: string; data: string } | { kind: "path"; d: string; color: string };
+export type IconPayload = { kind: "image"; mime: string; data: string } | { kind: "path"; d: string; color: string; rule?: "evenodd"; size?: number };
+
+const PATH_DATA = /^[MmLlHhVvCcSsQqTtAaZz0-9eE\s.,+-]+$/;
+
+/**
+ * Reads a one-colour logo out of SVG text. Only what can be drawn faithfully as one filled shape is accepted:
+ * a square canvas whose paint is `currentColor`, and nothing but `<path>` elements without strokes, transforms or
+ * opacity. Everything else (the placeholder a catalogue serves for a missing logo draws with strokes) is refused, so
+ * the caller shows a letter instead of a wrong picture. `size` is the side of the canvas the path is drawn on.
+ */
+export function logoFromSvg(text: string): { d: string; size: number; rule?: "evenodd" } | null {
+  const root = /<svg\b[^>]*>/i.exec(text)?.[0];
+  const box = root ? /\bviewBox="0 0 (\d{1,3}) (\d{1,3})"/.exec(root) : null;
+  if (!root || !box || box[1] !== box[2] || Number(box[1]) < 8) return null;
+  const size = Number(box[1]);
+  const rootFill = /\sfill="([^"]*)"/.exec(root)?.[1];
+  if (/<(?!\/?(?:svg|path|title)\b)[a-z]/i.test(text.replace(/<!--[\s\S]*?-->/g, ""))) return null;
+  const tags = text.match(/<path\b[^>]*>/gi) ?? [];
+  if (tags.length === 0 || tags.length > 12) return null;
+  const parts: string[] = [];
+  const rules = new Set<string>();
+  for (const tag of tags) {
+    if (/\s(?:stroke|transform|opacity|fill-opacity|stroke-width|style)\s*=/i.test(tag)) return null;
+    if ((/\sfill="([^"]*)"/.exec(tag)?.[1] ?? rootFill) !== "currentColor") return null;
+    const d = /\sd="([^"]+)"/.exec(tag)?.[1];
+    if (!d || !PATH_DATA.test(d)) return null;
+    rules.add(/\s(?:fill-rule|clip-rule)="evenodd"/.test(tag) ? "evenodd" : "nonzero");
+    parts.push(d.replace(/\s+/g, " ").trim());
+  }
+  if (rules.size > 1) return null;
+  const d = parts.join(" ");
+  if (d.length > 16_000) return null;
+  return rules.has("evenodd") ? { d, size, rule: "evenodd" } : { d, size };
+}
 
 type Json = Record<string, unknown>;
 const obj = (v: unknown): Json | null => (v !== null && typeof v === "object" && !Array.isArray(v) ? (v as Json) : null);

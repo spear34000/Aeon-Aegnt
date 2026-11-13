@@ -1,5 +1,6 @@
 package dev.aeon.ui.screens
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -12,7 +13,9 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -22,6 +25,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -29,8 +33,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.PathFillType
+import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.vector.PathParser
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
+import dev.aeon.ui.api.IconPayload
 import dev.aeon.ui.api.ProviderRow
 import dev.aeon.ui.design.AeonButton
 import dev.aeon.ui.design.AeonIcons
@@ -72,6 +82,11 @@ private fun androidx.compose.foundation.layout.ColumnScope.ModelSheetBody(state:
     val provider = m.providers.firstOrNull { it.id == m.providerId }
     Row(verticalAlignment = Alignment.CenterVertically) {
         if (provider != null) Box(Modifier.size(40.dp).clickable { model.showProvider(null) }, contentAlignment = Alignment.Center) { Icon(AeonIcons.Back, contentDescription = "제공자 목록", modifier = Modifier.size(22.dp)) }
+        if (provider != null) {
+            provider.icon?.let { path -> LaunchedEffect(path) { model.requestIcon(path) } }
+            ProviderTile(provider.name, provider.icon?.let { state.explore.icons[it] }, 36.dp)
+            Spacer(Modifier.width(10.dp))
+        }
         Text(provider?.name ?: "모델", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
         Box(Modifier.size(40.dp).clickable { model.closeModelSheet() }, contentAlignment = Alignment.Center) { Icon(AeonIcons.Close, contentDescription = "닫기", modifier = Modifier.size(22.dp)) }
     }
@@ -82,6 +97,29 @@ private fun androidx.compose.foundation.layout.ColumnScope.ModelSheetBody(state:
     }
 }
 
+/**
+ * A provider's logo. The server reads it from the catalogue (one colour, drawn in the text colour so it works in light
+ * and dark); a provider without a usable logo shows its first letter instead of a made-up mark.
+ */
+@Composable
+internal fun ProviderTile(name: String, payload: IconPayload?, size: Dp = 40.dp) {
+    val scheme = MaterialTheme.colorScheme
+    val path = remember(payload?.d, payload?.rule) {
+        payload?.takeIf { it.kind == "path" }?.d?.let { d ->
+            runCatching { PathParser().parsePathString(d).toPath().also { p -> if (payload.rule == "evenodd") p.fillType = PathFillType.EvenOdd } }.getOrNull()
+        }
+    }
+    val tint = scheme.onSurface
+    Box(Modifier.size(size).clip(RoundedCornerShape(size * 0.3f)).background(scheme.surfaceVariant), contentAlignment = Alignment.Center) {
+        if (path != null) {
+            val side = (payload?.size ?: 24).coerceAtLeast(1).toFloat()
+            Canvas(Modifier.size(size * 0.55f)) { scale(this.size.width / side, this.size.height / side, pivot = Offset.Zero) { drawPath(path, tint) } }
+        } else {
+            Text(name.take(1).uppercase(), style = MaterialTheme.typography.titleMedium, color = scheme.onSurfaceVariant)
+        }
+    }
+}
+
 @Composable
 private fun ProviderList(state: UiState, model: AppModel) {
     val m = state.models
@@ -89,23 +127,23 @@ private fun ProviderList(state: UiState, model: AppModel) {
     var query by remember { mutableStateOf("") }
     var all by remember { mutableStateOf(false) }
     AeonTextField(query, { query = it }, "제공자 찾기", placeholder = "OpenAI, Groq, Upstage…")
-    val ranked = m.providers.sortedWith(compareByDescending<ProviderRow> { it.id == m.current?.provider }.thenByDescending { it.hasKey && !it.local }.thenBy { it.name.lowercase() })
+    val ranked = m.providers.sortedWith(compareByDescending<ProviderRow> { it.id == m.current?.provider }.thenByDescending { it.hasKey && it.keyName != null && !it.local }.thenBy { it.name.lowercase() })
     // Aeon's own providers (EXAONE, Ollama, llama.cpp), the one in use, and any with a saved key; the catalogue is behind the button.
     val builtin = setOf("exaone", "ollama", "llamacpp")
-    val mine = ranked.filter { it.id == m.current?.provider || it.hasKey || it.id in builtin }
+    val mine = ranked.filter { it.id == m.current?.provider || (it.hasKey && it.keyName != null) || it.id in builtin }
     val shown = when {
         query.isNotBlank() -> ranked.filter { it.name.contains(query, true) || it.id.contains(query, true) }
         all -> ranked
         else -> mine
     }
-    ProviderRows(shown, m.current?.provider, model)
+    ProviderRows(shown, m.current?.provider, state, model)
     if (query.isBlank() && !all && ranked.size > mine.size) {
         AeonButton("제공자 ${ranked.size - mine.size}개 더 보기", { all = true }, Modifier.fillMaxWidth(), kind = ButtonKind.Secondary)
     }
 }
 
 @Composable
-private fun ProviderRows(list: List<ProviderRow>, currentId: String?, model: AppModel) {
+private fun ProviderRows(list: List<ProviderRow>, currentId: String?, state: UiState, model: AppModel) {
     val scheme = MaterialTheme.colorScheme
     if (list.isEmpty()) {
         Text("찾는 제공자가 없어요.", Modifier.padding(4.dp), style = MaterialTheme.typography.bodyMedium, color = scheme.onSurfaceVariant)
@@ -114,7 +152,9 @@ private fun ProviderRows(list: List<ProviderRow>, currentId: String?, model: App
     ListSurface {
         list.forEachIndexed { i, p ->
             if (i > 0) RowDivider(16.dp)
-            Row(Modifier.fillMaxWidth().defaultMinSize(minHeight = 56.dp).clickable { model.showProvider(p.id) }.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            p.icon?.let { path -> LaunchedEffect(path) { model.requestIcon(path) } }
+            Row(Modifier.fillMaxWidth().defaultMinSize(minHeight = 64.dp).clickable { model.showProvider(p.id) }.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                ProviderTile(p.name, p.icon?.let { state.explore.icons[it] })
                 Text(p.name, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, maxLines = 1)
                 when {
                     p.id == currentId -> Chip("사용 중", Tone.Accent)

@@ -6,7 +6,7 @@ import { describe, it } from "node:test";
 import { inflateSync } from "node:zlib";
 import { ManualClock } from "../src/core/clock.ts";
 import { DEFAULT_CONFIG, parseConfig } from "../src/core/config.ts";
-import { brandCandidates, builtinConnections, iconLinks, prettyName, registryConnection, siteDomain, skillConnection } from "../src/core/connections.ts";
+import { brandCandidates, builtinConnections, iconLinks, prettyName, registryConnection, siteDomain, skillConnection, logoFromSvg } from "../src/core/connections.ts";
 import { MemoryStore } from "../src/core/memory-store.ts";
 import { MockProvider } from "../src/core/models/mock.ts";
 import { MemorySecretStore } from "../src/core/secrets.ts";
@@ -361,5 +361,33 @@ describe("Connections over the API", () => {
     assert.equal(add.status, 200);
     assert.deepEqual((await t.call("GET", "/v1/connections")).body.connections.filter((c: { kind: string }) => c.kind === "integration").map((c: { title: string }) => c.title), ["Notion"]);
     await t.close();
+  });
+});
+
+const LOGO = `<svg width="24" height="24" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">\n<path d="M26.9 9.9H22.1L30.8 31.8H35.5L26.9 9.9Z" fill="currentColor"/>\n<path d="M13 9.9L4.5 31.8H9.3L13 9.9Z" fill="currentColor"/>\n</svg>`;
+const PLACEHOLDER = `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">\n  <path shape-rendering="geometricPrecision" d="M9.8 15.9L9 18.7L8.2 15.9Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>\n</svg>`;
+
+describe("provider logos", () => {
+  it("reads filled paths on a square canvas and refuses everything it cannot draw faithfully", () => {
+    assert.deepEqual(logoFromSvg(LOGO), { d: "M26.9 9.9H22.1L30.8 31.8H35.5L26.9 9.9Z M13 9.9L4.5 31.8H9.3L13 9.9Z", size: 40 });
+    assert.deepEqual(logoFromSvg(LOGO.replace('fill="currentColor"', 'fill="currentColor" fill-rule="evenodd"').replace(/ fill="currentColor"\/>/, ' fill="currentColor" fill-rule="evenodd"/>')), { d: "M26.9 9.9H22.1L30.8 31.8H35.5L26.9 9.9Z M13 9.9L4.5 31.8H9.3L13 9.9Z", size: 40, rule: "evenodd" });
+    assert.equal(logoFromSvg(PLACEHOLDER), null, "the catalogue's stand-in for a missing logo is not a logo");
+    assert.equal(logoFromSvg(LOGO.replace('fill="currentColor"', 'fill="#ff0000"')), null, "other colours");
+    assert.equal(logoFromSvg(LOGO.replace("<path ", '<path transform="scale(2)" ')), null, "transforms");
+    assert.equal(logoFromSvg(LOGO.replace("</svg>", '<circle cx="1" cy="1" r="1" fill="currentColor"/></svg>')), null, "shapes other than paths");
+    assert.equal(logoFromSvg(LOGO.replace('viewBox="0 0 40 40"', 'viewBox="0 0 40 20"')), null, "not square");
+    assert.equal(logoFromSvg(LOGO.replace(/d="[^"]*"/, 'd="M0 0 L1 1 <script>"')), null, "path data with anything but path characters");
+    assert.equal(logoFromSvg("<svg></svg>"), null);
+  });
+
+  it("serves a provider's logo from the catalogue's logo URL, and nothing else is tried when it is missing", async () => {
+    const t = service({ "https://logos.test/openai.svg": LOGO, "https://logos.test/upstage.svg": PLACEHOLDER });
+    const svc = new ConnectionService({ configDir: t.dir, fetcher: fakeNet({ "https://logos.test/openai.svg": LOGO, "https://logos.test/upstage.svg": PLACEHOLDER }).fetcher, logoUrl: "https://logos.test" });
+    const a = svc.providerIcon("openai")!;
+    assert.match(a, /^\/v1\/icons\/[a-f0-9]{24}$/);
+    assert.deepEqual(await svc.icon(a.split("/").pop()!), { kind: "path", d: "M26.9 9.9H22.1L30.8 31.8H35.5L26.9 9.9Z M13 9.9L4.5 31.8H9.3L13 9.9Z", color: "currentColor", size: 40 });
+    assert.equal(await svc.icon(svc.providerIcon("upstage")!.split("/").pop()!), null, "placeholder: the app shows a letter");
+    assert.equal(svc.providerIcon("../x"), null, "ids are checked before they reach a URL");
+    t.cleanup();
   });
 });

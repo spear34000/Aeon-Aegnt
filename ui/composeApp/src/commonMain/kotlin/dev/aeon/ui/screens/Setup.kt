@@ -73,6 +73,7 @@ import dev.aeon.ui.design.AeonButton
 import dev.aeon.ui.design.AeonIcons
 import dev.aeon.ui.design.AeonShape
 import dev.aeon.ui.design.AeonTextField
+import dev.aeon.ui.design.InterestIcons
 import dev.aeon.ui.design.Banner
 import dev.aeon.ui.design.ButtonKind
 import dev.aeon.ui.design.Chip
@@ -488,10 +489,14 @@ internal fun PreviewCard(p: Profile) {
     }
 }
 
+/** An interest as the owner sees it and as it is saved (the label), with the icon drawn on its tile. */
+private class Interest(val label: String, val icon: String)
+
 private val INTEREST_GROUPS = listOf(
-    "일" to listOf("개발", "문서 정리", "일정", "공부", "재테크"),
-    "생활" to listOf("쇼핑", "여행", "건강", "요리"),
-    "취미" to listOf("게임", "음악", "영화", "사진"),
+    "일" to listOf(Interest("개발", "code"), Interest("문서 정리", "description"), Interest("일정", "calendar_month"), Interest("공부", "school"), Interest("재테크", "savings"), Interest("글쓰기", "edit_note"), Interest("디자인", "palette"), Interest("번역", "translate")),
+    "생활" to listOf(Interest("쇼핑", "shopping_bag"), Interest("여행", "flight"), Interest("건강", "favorite"), Interest("운동", "fitness_center"), Interest("요리", "restaurant"), Interest("반려동물", "pets"), Interest("자동차", "directions_car"), Interest("집 꾸미기", "chair")),
+    "취미" to listOf(Interest("게임", "sports_esports"), Interest("음악", "music_note"), Interest("영화", "movie"), Interest("사진", "photo_camera"), Interest("독서", "menu_book"), Interest("그림", "brush"), Interest("캠핑", "forest"), Interest("축구", "sports_soccer")),
+    "지식" to listOf(Interest("뉴스", "newspaper"), Interest("과학", "science"), Interest("AI", "smart_toy")),
 )
 
 private val ABOUT_STARTERS = listOf("직업", "사는 곳", "쓰는 도구", "피하고 싶은 것")
@@ -543,6 +548,34 @@ private fun StepBar(step: Int, count: Int) {
     val scheme = MaterialTheme.colorScheme
     Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp).semantics { contentDescription = "${step + 1} / $count" }, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         repeat(count) { i -> Box(Modifier.weight(1f).height(4.dp).background(if (i <= step) scheme.onSurface else scheme.surfaceVariant, CircleShape)) }
+    }
+}
+
+/** A square tile for one interest: its icon over its name, filled when chosen. */
+@Composable
+private fun InterestTile(item: Interest, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    val fg = if (selected) scheme.onPrimary else scheme.onSurface
+    Column(
+        modifier.height(88.dp).clip(RoundedCornerShape(20.dp)).background(if (selected) scheme.primary else scheme.surface).clickable(onClick = onClick)
+            .semantics { contentDescription = "${item.label}, ${if (selected) "선택됨" else "선택 안 됨"}" },
+        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
+    ) {
+        InterestIcons.get(item.icon)?.let { Icon(it, contentDescription = null, tint = fg, modifier = Modifier.size(28.dp)) }
+        Text(item.label, Modifier.padding(top = 8.dp), style = MaterialTheme.typography.labelLarge, color = fg, maxLines = 1)
+    }
+}
+
+/** Who the owner is talking to: the agent's mark, its name and how it will greet them, changing as they type. */
+@Composable
+private fun IdentityPreview(p: Profile, modifier: Modifier = Modifier) {
+    val scheme = MaterialTheme.colorScheme
+    Column(modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(Modifier.size(92.dp).background(scheme.primary, RoundedCornerShape(30.dp)), contentAlignment = Alignment.Center) {
+            Icon(AeonIcons.Mark, contentDescription = null, tint = scheme.onPrimary, modifier = Modifier.size(54.dp))
+        }
+        Text(p.agentName?.trim()?.takeIf { it.isNotEmpty() } ?: "Aeon", Modifier.padding(top = 14.dp), style = MaterialTheme.typography.titleLarge)
+        Text(greetingPreview(p), Modifier.padding(top = 4.dp), style = MaterialTheme.typography.bodyMedium, color = scheme.onSurfaceVariant, textAlign = TextAlign.Center)
     }
 }
 
@@ -635,8 +668,8 @@ fun ProfileSetupScreen(state: UiState, model: AppModel) {
                 when (pg) {
                     0 -> {
                         StepHeading("어떻게 부를까요?", "대화에서 쓸 이름이에요. 나중에 바꿀 수 있어요.")
-                        ChatPreview(p, if (p.language == "en") "Hello?" else "안녕?", greetingPreview(p), Modifier.padding(top = 22.dp))
-                        Spacer(Modifier.height(18.dp))
+                        IdentityPreview(p, Modifier.padding(top = 26.dp))
+                        Spacer(Modifier.height(8.dp))
                         AeonTextField(p.userName.orEmpty(), { model.editSetupProfile(p.copy(userName = it.replace('\n', ' ').take(40))) }, "나를 부르는 이름", placeholder = "예: 지우")
                         Spacer(Modifier.height(14.dp))
                         AeonTextField(p.agentName.orEmpty(), { model.editSetupProfile(p.copy(agentName = it.replace('\n', ' ').take(40))) }, "에이전트 이름", placeholder = "Aeon")
@@ -648,12 +681,23 @@ fun ProfileSetupScreen(state: UiState, model: AppModel) {
                             val on = label in interests
                             model.editSetupProfile(p.copy(interests = (if (on) interests - label else if (interests.size < 12) interests + label else interests).ifEmpty { null }))
                         }
-                        val known = INTEREST_GROUPS.flatMap { it.second }
-                        val own = interests.filter { it !in known }
-                        (INTEREST_GROUPS + (if (own.isEmpty()) emptyList() else listOf("직접 추가" to own))).forEach { (name, items) ->
+                        val known = INTEREST_GROUPS.flatMap { g -> g.second.map { it.label } }
+                        INTEREST_GROUPS.forEach { (name, items) ->
                             Text(name, Modifier.padding(top = 20.dp, bottom = 8.dp, start = 4.dp), style = MaterialTheme.typography.labelLarge, color = scheme.onSurfaceVariant)
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                items.chunked(3).forEach { row ->
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        row.forEach { InterestTile(it, it.label in interests, Modifier.weight(1f)) { toggle(it.label) } }
+                                        repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+                                    }
+                                }
+                            }
+                        }
+                        val own = interests.filter { it !in known }
+                        if (own.isNotEmpty()) {
+                            Text("직접 추가", Modifier.padding(top = 20.dp, bottom = 8.dp, start = 4.dp), style = MaterialTheme.typography.labelLarge, color = scheme.onSurfaceVariant)
                             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                items.forEach { InterestPill(it, it in interests) { toggle(it) } }
+                                own.forEach { InterestPill(it, true) { toggle(it) } }
                             }
                         }
                         var typed by remember { mutableStateOf("") }

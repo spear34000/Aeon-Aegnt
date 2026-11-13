@@ -155,6 +155,8 @@ data class ProviderRow(
     val modelCount: Int = 0,
     val inUse: Boolean = false,
     val consented: Boolean = false,
+    /** API path of the provider's logo; the logo is fetched once with [dev.aeon.ui.state.AppModel.requestIcon]. */
+    val icon: String? = null,
 )
 
 @Serializable
@@ -185,9 +187,12 @@ data class ConnectionItem(
     val icon: String? = null,
 )
 
-/** kind "image": base64 [data] of [mime]. kind "path": one SVG path [d] on a 24x24 grid in brand [color]. */
+/**
+ * kind "image": base64 [data] of [mime]. kind "path": one SVG path [d] on a square grid of [size] (24 when absent) in
+ * brand [color], or in the text colour when [color] is "currentColor"; [rule] "evenodd" fills with the even-odd rule.
+ */
 @Serializable
-data class IconPayload(val kind: String, val mime: String? = null, val data: String? = null, val d: String? = null, val color: String? = null)
+data class IconPayload(val kind: String, val mime: String? = null, val data: String? = null, val d: String? = null, val color: String? = null, val size: Int? = null, val rule: String? = null)
 
 @Serializable
 data class CatalogCollection(val id: String, val title: Map<String, String> = emptyMap(), val queries: List<String> = emptyList())

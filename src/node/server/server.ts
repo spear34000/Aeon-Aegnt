@@ -312,7 +312,7 @@ export class AeonServer {
       const names = new Set(await this.o.secrets.list());
       const used = new Set(cfg.providers);
       return this.json(res, 200, {
-        providers: catalog.map((p) => ({ id: p.id, name: p.name, baseUrl: p.baseUrl, keyName: p.keyName, hasKey: p.keyName ? names.has(p.keyName) : true, local: p.local, doc: p.doc, efforts: p.efforts, modelCount: p.models.length, inUse: used.has(p.id), consented: p.local || cfg.dataConsent.includes(p.id) })),
+        providers: catalog.map((p) => ({ id: p.id, name: p.name, baseUrl: p.baseUrl, keyName: p.keyName, hasKey: p.keyName ? names.has(p.keyName) : true, local: p.local, doc: p.doc, efforts: p.efforts, modelCount: p.models.length, inUse: used.has(p.id), consented: p.local || cfg.dataConsent.includes(p.id), icon: this.online() ? (this.o.connections?.providerIcon(p.id) ?? null) : null })),
         current: currentModel(cfg, catalog),
         catalogError: this.online() ? (this.o.providers?.error ?? null) : null,
         online: this.online(),

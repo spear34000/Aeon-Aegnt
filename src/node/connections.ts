@@ -9,6 +9,7 @@ import {
   brandKey,
   builtinConnections,
   iconLinks,
+  logoFromSvg,
   mcpConfigConnection,
   registryConnection,
   relevance,
@@ -42,12 +43,15 @@ export interface ConnectionServiceOptions {
   fetcher?: Fetcher;
   registryUrl?: string;
   brandIconsUrl?: string;
+  logoUrl?: string;
   now?: () => number;
 }
 
 const REGISTRY = "https://registry.modelcontextprotocol.io";
 /** Simple Icons (CC0 icon data; the marks remain trademarks of their owners). Pinned so slugs stay stable. */
 const BRAND_ICONS = "https://cdn.jsdelivr.net/npm/simple-icons@16.37.0";
+/** One SVG per provider id, next to the model list the provider catalogue already reads. */
+const PROVIDER_LOGOS = "https://models.dev/logos";
 const SEARCH_TTL_MS = 5 * 60_000;
 const ICON_TTL_MS = 30 * 24 * 3600_000;
 const ICON_MISS_TTL_MS = 24 * 3600_000;
@@ -189,6 +193,14 @@ export class ConnectionService {
     this.now = o.now ?? Date.now;
   }
 
+  /** API path of a provider's logo (models.dev serves one per provider id). The logo itself is fetched on first use. */
+  providerIcon(id: string): string | null {
+    if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(id)) return null;
+    const key = createHash("sha256").update(`provider:${id}`).digest("hex").slice(0, 24);
+    this.plans.set(key, { title: "", urls: [], host: null, githubOwner: null, svg: `${this.o.logoUrl ?? PROVIDER_LOGOS}/${id}.svg` });
+    return `/v1/icons/${key}`;
+  }
+
   private withIcon(c: Connection, plan: IconPlan): Connection {
     const key = createHash("sha256").update(c.id).digest("hex").slice(0, 24);
     this.plans.set(key, plan);
@@ -312,6 +324,16 @@ export class ConnectionService {
 
   /** Publisher-declared icon, then a brand mark matching the title, then the publisher's site icon, then its GitHub avatar. */
   private async resolve(plan: IconPlan): Promise<IconPayload | null> {
+    if (plan.svg) {
+      try {
+        const res = await this.fetcher(plan.svg, 64_000);
+        const logo = res.status === 200 && !res.truncated ? logoFromSvg(res.text) : null;
+        if (logo) return { kind: "path", d: logo.d, color: "currentColor", size: logo.size, ...(logo.rule ? { rule: logo.rule } : {}) };
+      } catch {
+        /* no logo: the app shows a letter */
+      }
+      if (!plan.title && plan.urls.length === 0) return null;
+    }
     for (const u of plan.urls) {
       const img = await this.image(u);
       if (img) return img;

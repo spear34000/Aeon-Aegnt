@@ -416,10 +416,14 @@ describe("Setting things up from any paired device", () => {
     const before = await t.owner.call(t.base, t.clock, "GET", "/v1/providers");
     assert.equal(before.body.online, true);
     assert.ok(before.body.providers.length > 3);
+    assert.ok(before.body.providers.every((p: { icon: string | null }) => p.icon === null || /^\/v1\/icons\/[a-f0-9]{24}$/.test(p.icon)), "every provider points at its logo, which is fetched on first use");
+    assert.ok(before.body.providers.some((p: { icon: string | null }) => p.icon !== null));
     const off = await t.owner.call(t.base, t.clock, "PUT", "/v1/config", { ...DEFAULT_CONFIG, onlineLookups: false });
     assert.equal(off.status, 200);
     assert.equal(loadConfig(t.cfgDir).onlineLookups, false);
-    assert.equal((await t.owner.call(t.base, t.clock, "GET", "/v1/providers")).body.online, false);
+    const offList = (await t.owner.call(t.base, t.clock, "GET", "/v1/providers")).body;
+    assert.equal(offList.online, false);
+    assert.ok(offList.providers.every((p: { icon: string | null }) => p.icon === null), "no logo is offered, so none is fetched");
     const ex = clientExchange(t.owner.serverKey);
     const code = ex.open((await t.owner.call(t.base, t.clock, "POST", "/v1/pairing-codes", { epk: ex.epk, admin: false })).body.sealed, `pairing-code|${t.owner.id}`);
     const limited = new Client("tablet");
