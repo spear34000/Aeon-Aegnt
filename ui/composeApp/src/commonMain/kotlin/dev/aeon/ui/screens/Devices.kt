@@ -49,6 +49,7 @@ import dev.aeon.ui.platform.nowMillis
 import dev.aeon.ui.state.AppModel
 import dev.aeon.ui.state.NewDevice
 import dev.aeon.ui.state.UiState
+import dev.aeon.ui.state.thisDevice
 import kotlinx.coroutines.delay
 
 private fun platformName(p: String?): String = when (p) {
@@ -85,7 +86,11 @@ fun DevicesPage(state: UiState, model: AppModel) {
     val active = state.devices.filter { !it.revoked }
     val host = state.status?.host
 
-    if (host != null) Text("서버 ${platformName(host.platform)} ${host.arch} · ${state.serverUrl.removePrefix("http://").removePrefix("https://")}", style = MaterialTheme.typography.labelMedium, color = s.fg3)
+    if (host != null) {
+        val where = "${platformName(host.platform)} ${host.arch}"
+        val line = if (state.thisDevice) "이 기기에서 실행 중 · $where" else "다른 기기에서 실행 중 · $where · ${state.serverUrl.removePrefix("http://").removePrefix("https://")}"
+        Text(line, style = MaterialTheme.typography.labelMedium, color = s.fg3)
+    }
     ListSurface {
         active.forEachIndexed { i, d ->
             if (i > 0) RowDivider(72.dp)

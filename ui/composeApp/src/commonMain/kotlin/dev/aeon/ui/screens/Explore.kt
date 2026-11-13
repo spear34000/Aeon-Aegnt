@@ -89,10 +89,16 @@ internal fun connectionTitle(c: ConnectionItem): String = if (c.kind == "builtin
 
 private fun kindLabel(kind: String): String = KINDS.firstOrNull { it.first == kind }?.second ?: kind
 
+private val TOOL_VERBS = mapOf("read" to "읽기", "write" to "쓰기", "list" to "목록", "delete" to "삭제", "mkdir" to "폴더 만들기", "move" to "옮기기", "copy" to "복사", "get" to "가져오기", "fetch" to "가져오기", "exec" to "실행", "run" to "실행", "stat" to "정보")
+
+/** One short line under a name: what kind it is, and for built-in tools what they can do. No ids or host names. */
 private fun subtitle(c: ConnectionItem): String = when (c.kind) {
-    "builtin" -> "기본 도구"
+    "builtin" -> {
+        val verbs = c.tools.mapNotNull { TOOL_VERBS[it.substringAfterLast('.')] }.distinct().take(3)
+        if (verbs.isEmpty()) "기본 도구" else "기본 도구 · ${verbs.joinToString(", ")}"
+    }
     "skill" -> c.description.ifBlank { "스킬" }
-    "integration" -> listOfNotNull("연동", c.publisher).joinToString(" · ")
+    "integration" -> "연동"
     else -> "MCP 서버"
 }
 
@@ -297,7 +303,6 @@ fun ExploreScreen(state: UiState, model: AppModel, modifier: Modifier = Modifier
             }
         }
 
-        state.skills.editing?.let { SkillEditor(it, state, model) }
         AnimatedVisibility(visible = e.detail != null, enter = fadeIn(tween(160)), exit = fadeOut(tween(120))) {
             Box(
                 Modifier.fillMaxSize().background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.45f))

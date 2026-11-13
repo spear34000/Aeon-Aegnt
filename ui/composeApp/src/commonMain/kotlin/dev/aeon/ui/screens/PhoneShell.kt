@@ -66,6 +66,9 @@ import dev.aeon.ui.state.Connection
 import dev.aeon.ui.state.Section
 import dev.aeon.ui.state.SettingsPage
 import dev.aeon.ui.state.UiState
+import dev.aeon.ui.state.connectedText
+import dev.aeon.ui.state.runsOn
+import dev.aeon.ui.state.thisDevice
 
 private data class PhoneTab(val section: Section, val icon: ImageVector, val label: String)
 
@@ -96,17 +99,19 @@ fun PhoneLayout(state: UiState, model: AppModel) {
         val current = tabFor(state.section)
         // System back closes whatever is open on top, innermost first, before it leaves the app.
         val detailOpen = state.showDetail && state.selectedTaskId != null
-        dev.aeon.ui.platform.PlatformBackHandler(enabled = state.models.open || state.explore.detail != null || state.drawerOpen || detailOpen) {
+        val settingsOpen = current == Section.Agent && state.settingsOpen
+        dev.aeon.ui.platform.PlatformBackHandler(enabled = state.models.open || state.explore.detail != null || state.drawerOpen || settingsOpen || detailOpen) {
             when {
                 state.models.open -> model.closeModelSheet()
                 state.explore.detail != null -> model.showConnection(null)
                 state.drawerOpen -> model.closeDrawer()
+                settingsOpen -> model.closeSettings()
                 else -> model.closeDetail()
             }
         }
         Column(Modifier.fillMaxSize()) {
             if (!(state.showDetail && state.selectedTaskId != null)) {
-                if (current == Section.Chat) ChatTopBar(state, model) else TitleBar(TABS.first { it.section == current }.label)
+                if (current == Section.Chat) ChatTopBar(state, model) else if (!settingsOpen) TitleBar(TABS.first { it.section == current }.label)
             }
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 when {
@@ -135,6 +140,8 @@ fun PhoneLayout(state: UiState, model: AppModel) {
         ) {
             ChatDrawer(state, model, Modifier.width(drawerWidth).fillMaxHeight())
         }
+        // The skill editor is a page of its own over the whole screen, bottom bar included.
+        state.skills.editing?.let { SkillEditor(it, state, model) }
     }
 }
 
@@ -161,7 +168,7 @@ private fun ChatTopBar(state: UiState, model: AppModel) {
         state.connection !is Connection.Connected -> s.danger to "서버에 연결되지 않음"
         state.pendingCount > 0 -> s.warn to "승인을 기다리는 중"
         busy -> MaterialTheme.colorScheme.primary to "작업 중"
-        else -> s.ok to "서버와 연결됨"
+        else -> s.ok to state.connectedText
     }
     Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         CircleButton(AeonIcons.Menu, "대화 목록 열기", model::openDrawer)
@@ -272,8 +279,8 @@ private fun ChatDrawer(state: UiState, model: AppModel, modifier: Modifier) {
         ) {
             StatusDot(if (connected) s.ok else s.danger, 9)
             Column {
-                Text(if (connected) "서버와 연결됨" else "서버에 연결되지 않음", style = MaterialTheme.typography.labelLarge)
-                Text(state.serverUrl.removePrefix("http://").removePrefix("https://"), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
+                Text(if (connected) (if (state.thisDevice) "이 기기에서 실행 중" else "내 에이전트와 연결됨") else "연결되지 않음", style = MaterialTheme.typography.labelLarge)
+                if (!state.thisDevice) Text(state.serverUrl.removePrefix("http://").removePrefix("https://"), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
             }
         }
     }
@@ -293,24 +300,31 @@ fun FeedScreen(state: UiState, model: AppModel, modifier: Modifier = Modifier) {
                 }
             }
         }
-        GroupHeader("활동")
         if (state.tasks.isEmpty()) {
+            GroupHeader("활동")
             EmptyState("아직 활동이 없습니다", "새 대화에서 목표를 말하면 여기에 쌓입니다.")
         } else {
-            ListSurface {
-                state.tasks.forEachIndexed { i, t ->
-                    if (i > 0) RowDivider(88.dp)
-                    val (dot, text) = taskStatusLine(t)
-                    Row(
-                        Modifier.fillMaxWidth().defaultMinSize(minHeight = 64.dp).clickable { model.selectTask(t.id) }.padding(horizontal = 16.dp, vertical = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        Text(koreanClock(t.updatedAt), Modifier.width(60.dp).padding(top = 2.dp), style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                            Text(t.goal, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                StatusDot(dot)
-                                Text(text, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
+            // Newest first, in the groups the mockup uses: 오늘, 어제, 이전.
+            val now = dev.aeon.ui.platform.nowMillis()
+            val byDay = state.tasks.sortedByDescending { it.updatedAt }.groupBy { dev.aeon.ui.platform.dayBucket(it.updatedAt, now) }
+            listOf("오늘", "어제", "이전").forEach { day ->
+                val rows = byDay[day] ?: return@forEach
+                GroupHeader(day)
+                ListSurface {
+                    rows.forEachIndexed { i, t ->
+                        if (i > 0) RowDivider(88.dp)
+                        val (dot, text) = taskStatusLine(t)
+                        Row(
+                            Modifier.fillMaxWidth().defaultMinSize(minHeight = 64.dp).clickable { model.selectTask(t.id) }.padding(horizontal = 16.dp, vertical = 12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            Text(koreanClock(t.updatedAt), Modifier.width(60.dp).padding(top = 2.dp), style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                Text(t.goal, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    StatusDot(dot)
+                                    Text(text, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
+                                }
                             }
                         }
                     }
@@ -349,25 +363,21 @@ private fun StatCard(label: String, value: String, modifier: Modifier) {
 @Composable
 fun AgentHubScreen(state: UiState, model: AppModel, modifier: Modifier = Modifier) {
     val scheme = MaterialTheme.colorScheme
-    var inSettings by remember { mutableStateOf(false) }
+    var confirmUnpair by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         model.loadSettings()
         model.loadUsage()
+        model.loadModels()
         if (state.explore.installed.isEmpty()) model.loadExplore()
     }
-    if (inSettings) {
-        Column(modifier.fillMaxSize()) {
-            Row(Modifier.clickable { inSettings = false }.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                Icon(AeonIcons.Back, contentDescription = null, tint = scheme.primary, modifier = Modifier.size(18.dp))
-                Text("내 에이전트", color = scheme.primary, style = MaterialTheme.typography.labelLarge)
-            }
-            SettingsScreen(state, model, Modifier.weight(1f), title = "설정")
-        }
+    if (state.settingsOpen) {
+        SettingsScreen(state, model, modifier.fillMaxSize(), title = "설정", onBack = model::closeSettings)
         return
     }
     val ok = state.usage.filter { it.ok }
     val connected = state.connection is Connection.Connected
-    val open: (SettingsPage) -> Unit = { model.openSettings(it); inSettings = true }
+    val modelName = state.models.current?.model?.takeIf { it.isNotBlank() }
+    val open: (SettingsPage) -> Unit = { model.openSettings(it) }
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, bottom = 24.dp)) {
         Row(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(AeonShape.CARD.dp)).background(scheme.surface).padding(16.dp),
@@ -380,7 +390,7 @@ fun AgentHubScreen(state: UiState, model: AppModel, modifier: Modifier = Modifie
             Column(Modifier.weight(1f)) {
                 Text(state.status?.name ?: "Aeon", style = MaterialTheme.typography.titleLarge)
                 Text(
-                    listOfNotNull(state.config?.providers?.firstOrNull(), state.serverUrl.removePrefix("http://").removePrefix("https://")).joinToString(" · "),
+                    listOfNotNull(modelName, state.runsOn).joinToString(" · "),
                     style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
             }
@@ -394,7 +404,7 @@ fun AgentHubScreen(state: UiState, model: AppModel, modifier: Modifier = Modifie
         ListSurface {
             SettingRow(AeonIcons.Agent, "개인화", state.profile.userName ?: "") { open(SettingsPage.Personal) }
             RowDivider(64.dp)
-            SettingRow(AeonIcons.Cpu, "모델", state.config?.providers?.firstOrNull() ?: "") { open(SettingsPage.Models) }
+            SettingRow(AeonIcons.Cpu, "모델", modelName ?: "") { open(SettingsPage.Models) }
             RowDivider(64.dp)
             SettingRow(AeonIcons.Key, "API 키", if (state.secretNames.isEmpty()) "없음" else "${state.secretNames.size}개 보관") { open(SettingsPage.Keys) }
             RowDivider(64.dp)
@@ -410,6 +420,16 @@ fun AgentHubScreen(state: UiState, model: AppModel, modifier: Modifier = Modifie
             RowDivider(64.dp)
             SettingRow(AeonIcons.Info, "정보", "") { open(SettingsPage.About) }
         }
+        AeonButton("이 기기 연결 해제", { confirmUnpair = true }, Modifier.padding(top = 20.dp).fillMaxWidth(), kind = ButtonKind.Destructive)
+    }
+    if (confirmUnpair) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirmUnpair = false },
+            title = { Text("이 기기의 연결을 해제할까요?") },
+            text = { Text("이 기기에서는 더 이상 요청하거나 승인할 수 없어요. 에이전트와 기록은 그대로 남아요. 다시 쓰려면 새 연결 코드가 필요해요.", style = MaterialTheme.typography.bodyMedium) },
+            confirmButton = { androidx.compose.material3.TextButton(onClick = { confirmUnpair = false; model.unpair() }) { Text("연결 해제", color = LocalAeonStatus.current.danger) } },
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { confirmUnpair = false }) { Text("취소") } },
+        )
     }
 }
 

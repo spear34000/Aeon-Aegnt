@@ -10,6 +10,12 @@ data class PairLink(val addresses: List<String>, val code: String) {
         const val MAX_ADDRESSES = 4
         private val CODE = Regex("[A-Z2-7]{16}")
 
+        /** True when the address is this device itself: the agent runs where the app runs. */
+        fun isThisDevice(origin: String): Boolean {
+            val host = runCatching { io.ktor.http.Url(origin).host.lowercase() }.getOrNull() ?: return false
+            return host == "localhost" || host == "::1" || host == "[::1]" || host.startsWith("127.")
+        }
+
         /** True for addresses on a home or office network (private ranges, shared 100.64/10 used by VPNs, loopback, `.local`). */
         fun isLanAddress(origin: String): Boolean {
             val host = runCatching { io.ktor.http.Url(origin).host.lowercase() }.getOrNull() ?: return false

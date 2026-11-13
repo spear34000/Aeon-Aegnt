@@ -100,6 +100,8 @@ data class UiState(
     val serverUrl: String = "http://127.0.0.1:7421",
     val section: Section = Section.Chat,
     val settingsPage: SettingsPage = SettingsPage.Models,
+    /** Phone: a settings page is open over the 내 에이전트 list. */
+    val settingsOpen: Boolean = false,
     val tasks: List<TaskSummary> = emptyList(),
     val approvals: List<Approval> = emptyList(),
     val recentApprovals: List<Approval> = emptyList(),
@@ -198,7 +200,9 @@ class AppModel(
         poller = null
     }
 
-    fun go(section: Section) = _state.update { it.copy(section = section, showDetail = false, drawerOpen = false) }
+    fun go(section: Section) = _state.update { it.copy(section = section, showDetail = false, drawerOpen = false, settingsOpen = false) }
+
+    fun closeSettings() = _state.update { it.copy(settingsOpen = false) }
 
     fun openDrawer() = _state.update { it.copy(drawerOpen = true) }
     fun closeDrawer() = _state.update { it.copy(drawerOpen = false) }
@@ -209,7 +213,7 @@ class AppModel(
     fun consumePrefill() = _state.update { it.copy(prefill = null) }
 
     fun openSettings(page: SettingsPage) {
-        _state.update { it.copy(section = Section.Settings, settingsPage = page, showDetail = false) }
+        _state.update { it.copy(section = Section.Settings, settingsPage = page, showDetail = false, settingsOpen = true) }
         if (page == SettingsPage.Devices) scope.launch { runCatching { client.devices() }.onSuccess { d -> _state.update { it.copy(devices = d) } } }
         if (page == SettingsPage.Usage) scope.launch { runCatching { client.usage() }.onSuccess { u -> _state.update { it.copy(usage = u) } } }
     }

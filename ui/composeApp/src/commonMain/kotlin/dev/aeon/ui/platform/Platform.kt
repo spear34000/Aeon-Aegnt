@@ -98,6 +98,16 @@ expect fun defaultDeviceName(): String
 /** Local, human-readable date and time. */
 expect fun formatDateTime(millis: Long): String
 
+/** Which feed group a moment belongs to: 오늘, 어제 or 이전, by the local calendar day. */
+fun dayBucket(millis: Long, now: Long = nowMillis()): String {
+    val day = formatDateTime(millis).take(10)
+    return when (day) {
+        formatDateTime(now).take(10) -> "오늘"
+        formatDateTime(now - 86_400_000L).take(10) -> "어제"
+        else -> "이전"
+    }
+}
+
 /** Korean clock text such as "오후 3:44", built from the local time string so it works on every platform. */
 fun koreanClock(millis: Long): String {
     val s = formatDateTime(millis) // yyyy-MM-dd HH:mm:ss, local time

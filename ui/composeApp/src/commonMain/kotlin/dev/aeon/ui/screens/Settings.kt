@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -31,9 +33,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import dev.aeon.ui.api.AeonConfig
 import dev.aeon.ui.design.AeonButton
+import dev.aeon.ui.design.AeonIcons
 import dev.aeon.ui.design.AeonShape
 import dev.aeon.ui.design.AeonSwitch
 import dev.aeon.ui.design.AeonTextField
@@ -60,27 +64,68 @@ private val PROVIDERS = listOf(
     ProviderRow("llamacpp", "로컬 · llama.cpp", null, external = false),
 )
 
+internal fun pageTitle(p: SettingsPage): String = when (p) {
+    SettingsPage.Personal -> "개인화"
+    SettingsPage.Models -> "모델"
+    SettingsPage.Keys -> "API 키"
+    SettingsPage.Devices -> "연결된 기기"
+    SettingsPage.Usage -> "사용량"
+    SettingsPage.Legal -> "약관 · 권한"
+    SettingsPage.About -> "정보"
+}
+
+/**
+ * Settings. On the phone ([onBack] given) one page fills the screen under a back button and its title, as in the
+ * mockup. In the wide layout the pages are tabs on one screen.
+ */
 @Composable
-fun SettingsScreen(state: UiState, model: AppModel, modifier: Modifier = Modifier, title: String = "설정") {
+fun SettingsScreen(state: UiState, model: AppModel, modifier: Modifier = Modifier, title: String = "설정", onBack: (() -> Unit)? = null) {
     LaunchedEffect(Unit) { model.loadSettings() }
-    Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Text(title, style = MaterialTheme.typography.titleLarge)
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            SettingsPage.entries.forEach { p ->
-                val label = when (p) {
-                    SettingsPage.Personal -> "개인화"
-                    SettingsPage.Models -> "모델"
-                    SettingsPage.Keys -> "API 키"
-                    SettingsPage.Devices -> "기기"
-                    SettingsPage.Usage -> "사용량"
-                    SettingsPage.Legal -> "약관·권한"
-                    SettingsPage.About -> "정보"
-                }
-                AeonButton(label, { model.openSettings(p) }, Modifier.widthIn(min = 64.dp), kind = if (p == state.settingsPage) ButtonKind.Primary else ButtonKind.Ghost, wide = true)
+    Column(modifier.fillMaxSize()) {
+        if (onBack != null) {
+            Row(Modifier.fillMaxWidth().height(60.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                CircleButton(AeonIcons.Back, "뒤로", onBack)
+                Text(pageTitle(state.settingsPage), Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
+                Spacer(Modifier.width(48.dp))
             }
         }
+        if (state.settingsPage == SettingsPage.Personal) {
+            // The personalization page scrolls by itself and keeps its save bar in view.
+            if (onBack == null) Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) { SettingsTabs(state, model, title) }
+            PersonalPage(state, model, Modifier.weight(1f))
+        } else {
+            Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = if (onBack != null) 4.dp else 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                if (onBack == null) SettingsTabs(state, model, title)
+                SettingsBody(state, model)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsTabs(state: UiState, model: AppModel, title: String) {
+    Text(title, style = MaterialTheme.typography.titleLarge)
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        SettingsPage.entries.forEach { p ->
+            val label = when (p) {
+                SettingsPage.Personal -> "개인화"
+                SettingsPage.Models -> "모델"
+                SettingsPage.Keys -> "API 키"
+                SettingsPage.Devices -> "기기"
+                SettingsPage.Usage -> "사용량"
+                SettingsPage.Legal -> "약관·권한"
+                SettingsPage.About -> "정보"
+            }
+            AeonButton(label, { model.openSettings(p) }, Modifier.widthIn(min = 64.dp), kind = if (p == state.settingsPage) ButtonKind.Primary else ButtonKind.Ghost, wide = true)
+        }
+    }
+}
+
+@Composable
+private fun SettingsBody(state: UiState, model: AppModel) {
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         when (state.settingsPage) {
-            SettingsPage.Personal -> PersonalPage(state, model)
+            SettingsPage.Personal -> {}
             SettingsPage.Models -> ModelsPage(state, model)
             SettingsPage.Keys -> KeysPage(state, model)
             SettingsPage.Devices -> DevicesPage(state, model)

@@ -490,18 +490,18 @@ internal fun PreviewCard(p: Profile) {
 }
 
 /** An interest as the owner sees it and as it is saved (the label), with the icon drawn on its tile. */
-private class Interest(val label: String, val icon: String)
+internal class Interest(val label: String, val icon: String)
 
-private val INTEREST_GROUPS = listOf(
+internal val INTEREST_GROUPS = listOf(
     "일" to listOf(Interest("개발", "code"), Interest("문서 정리", "description"), Interest("일정", "calendar_month"), Interest("공부", "school"), Interest("재테크", "savings"), Interest("글쓰기", "edit_note"), Interest("디자인", "palette"), Interest("번역", "translate")),
     "생활" to listOf(Interest("쇼핑", "shopping_bag"), Interest("여행", "flight"), Interest("건강", "favorite"), Interest("운동", "fitness_center"), Interest("요리", "restaurant"), Interest("반려동물", "pets"), Interest("자동차", "directions_car"), Interest("집 꾸미기", "chair")),
     "취미" to listOf(Interest("게임", "sports_esports"), Interest("음악", "music_note"), Interest("영화", "movie"), Interest("사진", "photo_camera"), Interest("독서", "menu_book"), Interest("그림", "brush"), Interest("캠핑", "forest"), Interest("축구", "sports_soccer")),
     "지식" to listOf(Interest("뉴스", "newspaper"), Interest("과학", "science"), Interest("AI", "smart_toy")),
 )
 
-private val ABOUT_STARTERS = listOf("직업", "사는 곳", "쓰는 도구", "피하고 싶은 것")
+internal val ABOUT_STARTERS = listOf("직업", "사는 곳", "쓰는 도구", "피하고 싶은 것")
 
-private fun greetingPreview(p: Profile): String {
+internal fun greetingPreview(p: Profile): String {
     val me = p.userName?.trim()?.takeIf { it.isNotEmpty() }
     return when {
         p.language == "en" -> "Hi${me?.let { " $it" } ?: ""}. What can I help with?"
@@ -520,7 +520,7 @@ private fun AgentAvatar() {
 
 /** A small conversation that changes with what is typed, so each choice shows its effect at once. */
 @Composable
-private fun ChatPreview(p: Profile, mine: String?, reply: String, modifier: Modifier = Modifier) {
+internal fun ChatPreview(p: Profile, mine: String?, reply: String, modifier: Modifier = Modifier) {
     val scheme = MaterialTheme.colorScheme
     Column(modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(scheme.primaryContainer).padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("미리보기 · ${p.agentName?.trim()?.takeIf { it.isNotEmpty() } ?: "Aeon"}", style = MaterialTheme.typography.labelMedium, color = scheme.onPrimaryContainer)
@@ -553,7 +553,7 @@ private fun StepBar(step: Int, count: Int) {
 
 /** A square tile for one interest: its icon over its name, filled when chosen. */
 @Composable
-private fun InterestTile(item: Interest, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+internal fun InterestTile(item: Interest, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val scheme = MaterialTheme.colorScheme
     val fg = if (selected) scheme.onPrimary else scheme.onSurface
     Column(
@@ -568,7 +568,7 @@ private fun InterestTile(item: Interest, selected: Boolean, modifier: Modifier =
 
 /** Who the owner is talking to: the agent's mark, its name and how it will greet them, changing as they type. */
 @Composable
-private fun IdentityPreview(p: Profile, modifier: Modifier = Modifier) {
+internal fun IdentityPreview(p: Profile, modifier: Modifier = Modifier) {
     val scheme = MaterialTheme.colorScheme
     Column(modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
         Box(Modifier.size(92.dp).background(scheme.primary, RoundedCornerShape(30.dp)), contentAlignment = Alignment.Center) {
@@ -581,7 +581,7 @@ private fun IdentityPreview(p: Profile, modifier: Modifier = Modifier) {
 
 /** A big pill for one interest: filled with a check when chosen. */
 @Composable
-private fun InterestPill(text: String, selected: Boolean, onClick: () -> Unit) {
+internal fun InterestPill(text: String, selected: Boolean, onClick: () -> Unit) {
     val scheme = MaterialTheme.colorScheme
     Row(
         Modifier.height(44.dp).clip(CircleShape).background(if (selected) scheme.primary else scheme.surface).clickable(onClick = onClick)
@@ -595,7 +595,7 @@ private fun InterestPill(text: String, selected: Boolean, onClick: () -> Unit) {
 
 /** A choice with a sample line under it; the chosen one has an accent outline. */
 @Composable
-private fun OptionCard(title: String, sample: String, selected: Boolean, onClick: () -> Unit) {
+internal fun OptionCard(title: String, sample: String, selected: Boolean, onClick: () -> Unit) {
     val scheme = MaterialTheme.colorScheme
     val shape = RoundedCornerShape(AeonShape.CARD.dp)
     Column(
