@@ -208,9 +208,13 @@ export class WorkflowEngine {
     }
   }
 
-  async decideApproval(approvalId: string, decision: "approved" | "denied"): Promise<Approval> {
+  /** [answer] is required to approve a question (the owner's words, cut to 1000 characters) and ignored for anything else. */
+  async decideApproval(approvalId: string, decision: "approved" | "denied", answer?: string): Promise<Approval> {
     const { store, clock } = this.cfg;
-    const a = await store.decideApproval(approvalId, decision, clock.now());
+    const before = await store.getApproval(approvalId);
+    const text = answer?.replace(/[\u0000-\u0008\u000b-\u001f]/g, " ").trim().slice(0, 1000);
+    if (before?.kind === "question" && decision === "approved" && !text) throw new Error("an answer is needed");
+    const a = await store.decideApproval(approvalId, decision, clock.now(), before?.kind === "question" ? text : undefined);
     await this.audit(a.taskId, `approval_${decision}`, { approvalId, tool: a.tool, summary: a.summary });
     await this.resumeIfBlocked(a);
     return a;

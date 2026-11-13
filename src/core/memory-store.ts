@@ -164,6 +164,7 @@ export class MemoryStore implements Store {
     id: string,
     status: Extract<ApprovalStatus, "approved" | "denied">,
     now: number,
+    answer?: string,
   ): Promise<Approval> {
     const a = this.approvals.get(id);
     if (!a) throw new NotFoundError("Approval", id);
@@ -172,6 +173,7 @@ export class MemoryStore implements Store {
     if (a.expiresAt <= now) throw new Error(`Approval ${id} has expired`);
     a.status = status;
     a.decidedAt = now;
+    if (answer !== undefined && a.kind === "question") a.answer = answer;
     this.changed();
     return structuredClone(a);
   }

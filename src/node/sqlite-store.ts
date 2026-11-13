@@ -214,6 +214,7 @@ export class SqliteStore implements Store {
     id: string,
     status: Extract<ApprovalStatus, "approved" | "denied">,
     now: number,
+    answer?: string,
   ): Promise<Approval> {
     return this.tx(() => {
       const a = this.loadApproval(id);
@@ -222,6 +223,7 @@ export class SqliteStore implements Store {
       if (a.expiresAt <= now) throw new Error(`Approval ${id} has expired`);
       a.status = status;
       a.decidedAt = now;
+      if (answer !== undefined && a.kind === "question") a.answer = answer;
       this.saveApproval(a);
       return a;
     });

@@ -115,6 +115,10 @@ export interface Approval {
   irreversible: boolean;
   /** Longer text to read before deciding, shown behind a "details" control. */
   detail?: string;
+  /** "question": the agent needs an answer in words (`summary` is the question, `resources` are suggested answers), not a yes or no. */
+  kind?: "approval" | "question";
+  /** The owner's answer to a question. */
+  answer?: string;
   status: ApprovalStatus;
   createdAt: number;
   expiresAt: number;
