@@ -9,6 +9,7 @@ import type { Redactor } from "./redact.ts";
 import type { Store } from "./store.ts";
 import type { ToolRegistry } from "./tools.ts";
 import type { PendingAction, StepRecord, Task } from "./types.ts";
+import { skillCatalogLines } from "./skills.ts";
 import { extractJsonObject, looksLikeInjection, truncate, wrapUntrusted } from "./untrusted.ts";
 import { parseCriterion } from "./verify.ts";
 import type { RunContext, RunOutcome, TaskRunner } from "./workflow.ts";
@@ -28,6 +29,8 @@ export interface AgentConfig {
   maxTokensCeiling?: number;
   /** Owner-set wording preferences (name, tone, language). They never widen what the agent may do. */
   profile?: Profile;
+  /** The skills that exist right now (name and description only). Read at every model call, so a skill made during a task is seen at once. */
+  skills?: () => { name: string; description: string }[];
 }
 
 /** Lines appended to the system prompt. Kept short and stripped of control characters and tag brackets. */
@@ -124,6 +127,7 @@ export class Agent implements TaskRunner {
       "another way or finish and explain.",
       "Available tools:",
       toolLines || "(none)",
+      ...skillCatalogLines(this.cfg.skills?.() ?? []),
       ...profileLines(this.cfg.profile),
     ].join("\n");
   }
@@ -260,6 +264,7 @@ export class Agent implements TaskRunner {
           risk: assessment.risk,
           resources: assessment.resources.map((r) => this.cfg.redactor.redact(r)).slice(0, 50),
           irreversible: assessment.irreversible === true,
+          ...(assessment.detail ? { detail: this.cfg.redactor.redact(assessment.detail.slice(0, 8000)) } : {}),
           status: "pending" as const,
           createdAt: now,
           expiresAt: now + (this.cfg.approvalTtlMs ?? 24 * 3_600_000),
@@ -294,11 +299,22 @@ export class Agent implements TaskRunner {
           return { ok: false, output: `tool error: ${e.message}` };
         });
       ok = result.ok;
-      output = this.cfg.redactor.redact(truncate(result.output, this.cfg.maxOutputChars ?? 8000));
+      output = this.cfg.redactor.redact(truncate(result.output, tool.instructions ? 30_000 : (this.cfg.maxOutputChars ?? 8000)));
       await ctx.putEffect(effectKey, JSON.stringify({ ok, output }));
     }
     if (looksLikeInjection(output)) await ctx.audit("injection_suspected", { tool: tool.name, index: p.index });
     return finish(output, ok, true);
+  }
+
+  /**
+   * Tool output goes back as untrusted data, except a skill the owner approved: that is instructions for this task.
+   * Only a successful read of the skill store gets this; the text is fenced so it cannot pretend to end early.
+   */
+  private renderOutput(s: StepRecord): string {
+    if (s.ok && this.cfg.tools.get(s.tool)?.instructions === true) {
+      return `<skill_instructions>\n${s.output.replace(/<\/?skill_instructions>/gi, "")}\n</skill_instructions>`;
+    }
+    return wrapUntrusted(`tool:${s.tool}`, s.output);
   }
 
   private record(index: number, tool: string, args: unknown, output: string, ok: boolean): StepRecord {
@@ -307,7 +323,7 @@ export class Agent implements TaskRunner {
 
   private buildMessages(task: Task, steps: StepRecord[]): ChatMessage[] {
     const history = steps
-      .map((s) => `Step ${s.index} ${s.ok ? "OK" : "FAILED"} tool=${s.tool} args=${truncate(JSON.stringify(s.args), 400)}\n${wrapUntrusted(`tool:${s.tool}`, s.output)}`)
+      .map((s) => `Step ${s.index} ${s.ok ? "OK" : "FAILED"} tool=${s.tool} args=${truncate(JSON.stringify(s.args), 400)}\n${this.renderOutput(s)}`)
       .join("\n\n");
     const user = [
       `Owner goal: ${task.goal}`,

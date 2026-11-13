@@ -16,6 +16,8 @@ import { SqliteStore } from "./sqlite-store.ts";
 import { fsTools } from "./tools/fs-tools.ts";
 import { httpTools } from "./tools/http-tools.ts";
 import { sandboxTool, type SandboxRunner } from "./tools/sandbox-tool.ts";
+import { skillTools } from "./tools/skill-tools.ts";
+import { SkillStore } from "./skills.ts";
 import { nodeVerifierEnv } from "./verifier-env.ts";
 
 export interface RuntimeOptions {
@@ -41,6 +43,8 @@ export interface RuntimeOptions {
   /** OpenAI-compatible services from the settings; `providers` may name them by id. */
   endpoints?: EndpointConfig[];
   profile?: Profile;
+  /** Folder of skills (Agent Skills format). When set the agent can read skills and propose new ones. */
+  skillsDir?: string;
 }
 
 /**
@@ -138,9 +142,16 @@ export function createRuntime(opts: RuntimeOptions) {
   for (const t of fsTools(guard)) tools.register(t);
   for (const t of httpTools()) tools.register(t);
   tools.register(sandboxTool(guard, ...(opts.sandboxRunner ? [opts.sandboxRunner] : [])));
+  const skills = opts.skillsDir ? new SkillStore(opts.skillsDir) : undefined;
+  if (skills) for (const t of skillTools(skills)) tools.register(t);
 
   const policy = new PolicyEngine(opts.policyRules ?? DEFAULT_RULES);
-  const agent = new Agent({ router, tools, policy, store, clock, redactor, ...(opts.profile ? { profile: opts.profile } : {}) });
+  const agent = new Agent({
+    router, tools, policy, store, clock, redactor,
+    ...(opts.profile ? { profile: opts.profile } : {}),
+    // Only skills that follow the format are offered to the model.
+    ...(skills ? { skills: () => skills.list().filter((s) => s.problems.length === 0).map((s) => ({ name: s.name, description: s.description })) } : {}),
+  });
   const engine = new WorkflowEngine({
     store,
     clock,
@@ -150,5 +161,5 @@ export function createRuntime(opts: RuntimeOptions) {
     holderId: opts.holderId ?? `local-${process.pid}`,
     ...(opts.leaseTtlMs ? { leaseTtlMs: opts.leaseTtlMs } : {}),
   });
-  return { engine, store, router, tools, policy, guard, redactor, clock };
+  return { engine, store, router, tools, policy, guard, redactor, clock, skills };
 }

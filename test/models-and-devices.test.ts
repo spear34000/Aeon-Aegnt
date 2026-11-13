@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createCipheriv, createDecipheriv, createHash, createPublicKey, diffieHellman, generateKeyPairSync, randomBytes, sign, type KeyObject } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { profileLines } from "../src/core/agent.ts";
@@ -14,6 +14,7 @@ import { MemorySecretStore } from "../src/core/secrets.ts";
 import { loadConfig } from "../src/node/config-file.ts";
 import { ConnectionService, type Fetched } from "../src/node/connections.ts";
 import { ProviderCatalog } from "../src/node/provider-catalog.ts";
+import { SkillStore } from "../src/node/skills.ts";
 import { buildProviders, createRuntime } from "../src/node/runtime.ts";
 import { canonicalRequest, DeviceRegistry, PairingManager } from "../src/node/server/device-auth.ts";
 import { ServerIdentity } from "../src/node/server/seal.ts";
@@ -435,35 +436,40 @@ describe("Setting things up from any paired device", () => {
     await t.close();
   });
 
-  it("skills can be created, edited and deleted from a device that may change settings, and only inside the skills folder", async () => {
+  it("the owner can read, correct and delete skills but not create them; the agent makes them", async () => {
     const t = await boot();
     const put = (folder: string, body: Record<string, unknown>) => t.owner.call(t.base, t.clock, "PUT", `/v1/skills/${folder}`, body);
     assert.deepEqual((await t.owner.call(t.base, t.clock, "GET", "/v1/skills")).body.skills, []);
+    assert.equal((await put("meeting-notes", { description: "x", body: "y" })).status, 404, "no create from the API: skills are made by the agent");
 
-    const made = await put("meeting-notes", { name: "회의록 정리", description: "결정과 할 일: 정리", body: "# 순서\n1. 읽기", create: true });
-    assert.equal(made.status, 201);
-    assert.deepEqual([made.body.skill.name, made.body.skill.description, made.body.skill.body], ["회의록 정리", "결정과 할 일: 정리", "# 순서\n1. 읽기\n"]);
-    assert.match(readFileSync(join(t.cfgDir, "skills", "meeting-notes", "SKILL.md"), "utf8"), /^---\nname: 회의록 정리\ndescription: "결정과 할 일: 정리"\n---\n\n# 순서/, "a colon in a value is quoted");
-    assert.equal((await put("meeting-notes", { name: "again", body: "x", create: true })).status, 409);
-    assert.equal((await put("meeting-notes", { name: "회의록 정리", description: "", body: "수정" })).status, 200);
-    assert.equal((await t.owner.call(t.base, t.clock, "GET", "/v1/skills/meeting-notes")).body.skill.body, "수정\n");
-    assert.deepEqual((await t.owner.call(t.base, t.clock, "GET", "/v1/connections")).body.connections.filter((c: { kind: string }) => c.kind === "skill").map((c: { title: string }) => c.title), ["회의록 정리"], "the connection list shows it");
+    const store = new SkillStore(join(t.cfgDir, "skills"));
+    store.write({ name: "meeting-notes", description: "Summarise meeting notes into decisions and to-dos. Use when the owner asks for a summary of meetings.", body: "# Steps\n1. Read the notes", metadata: { author: "aeon" } }, true, { "references/FORMAT.md": "# Format\n" });
+    mkdirSync(join(t.cfgDir, "skills", "old-format"), { recursive: true });
+    writeFileSync(join(t.cfgDir, "skills", "old-format", "SKILL.md"), "---\nname: Old Format\n---\nbody\n");
 
-    for (const bad of ["a%20b", "A", "-x", "x".repeat(65)]) assert.notEqual((await put(bad, { name: "n", body: "b", create: true })).status, 201, bad);
-    assert.equal((await put("big", { name: "n", body: "x".repeat(100_001), create: true })).status, 413);
-    assert.equal((await put("nobody", { name: "n", body: "b" })).status, 404, "editing a skill that does not exist");
-    assert.equal((await put("empty", { name: " ", body: "b", create: true })).status, 400);
-    assert.ok(!existsSync(join(t.cfgDir, "skills", "big")) && !existsSync(join(t.cfgDir, "skills", "empty")), "nothing is left behind by refused requests");
+    const list = (await t.owner.call(t.base, t.clock, "GET", "/v1/skills")).body.skills as { folder: string; problems: string[]; files: string[] }[];
+    assert.deepEqual(list.map((x) => [x.folder, x.problems.length === 0, x.files]), [["meeting-notes", true, ["references/FORMAT.md"]], ["old-format", false, []]], "a skill that does not follow the format is listed with what is wrong");
+    assert.match(list[1]!.problems.join(" "), /name|description/);
+    const one = (await t.owner.call(t.base, t.clock, "GET", "/v1/skills/meeting-notes")).body.skill;
+    assert.deepEqual([one.name, one.metadata, one.body], ["meeting-notes", { author: "aeon" }, "# Steps\n1. Read the notes\n"]);
+
+    const edited = await put("meeting-notes", { description: "Summarise meeting notes. Use for meetings.", body: "수정" });
+    assert.equal(edited.status, 200);
+    assert.match(readFileSync(join(t.cfgDir, "skills", "meeting-notes", "SKILL.md"), "utf8"), /^---\nname: meeting-notes\ndescription: Summarise meeting notes\. Use for meetings\.\nmetadata:\n {2}author: "aeon"\n---\n\n수정\n$/, "front matter keeps the spec's shape; name stays the folder name");
+    assert.ok(existsSync(join(t.cfgDir, "skills", "meeting-notes", "references", "FORMAT.md")), "supporting files stay");
+    assert.equal((await put("meeting-notes", { description: "", body: "x" })).status, 400, "the spec needs a description");
+    assert.equal((await put("meeting-notes", { description: "d", body: "x".repeat(100_001) })).status, 400);
+    assert.equal((await t.owner.call(t.base, t.clock, "GET", "/v1/connections")).body.connections.filter((c: { kind: string }) => c.kind === "skill").map((c: { title: string }) => c.title).sort().join(","), "Old Format,meeting-notes", "the connection list shows both");
 
     assert.equal((await t.owner.call(t.base, t.clock, "DELETE", "/v1/skills/meeting-notes")).status, 204);
     assert.equal((await t.owner.call(t.base, t.clock, "DELETE", "/v1/skills/meeting-notes")).status, 404);
-    assert.ok(!existsSync(join(t.cfgDir, "skills", "meeting-notes")));
+    assert.ok(!existsSync(join(t.cfgDir, "skills", "meeting-notes")), "the folder goes with it");
 
     const ex = clientExchange(t.owner.serverKey);
     const code = ex.open((await t.owner.call(t.base, t.clock, "POST", "/v1/pairing-codes", { epk: ex.epk, admin: false })).body.sealed, `pairing-code|${t.owner.id}`);
     const limited = new Client("tablet");
     await limited.pair(t.base, code);
-    assert.equal((await limited.call(t.base, t.clock, "PUT", "/v1/skills/x", { name: "n", body: "b", create: true })).status, 403);
+    assert.equal((await limited.call(t.base, t.clock, "PUT", "/v1/skills/old-format", { description: "d", body: "b" })).status, 403);
     assert.equal((await limited.call(t.base, t.clock, "GET", "/v1/skills")).status, 200, "reading is allowed");
     await t.close();
   });

@@ -531,11 +531,20 @@ export class AeonServer {
             res.writeHead(204).end();
             return;
           }
+          // Skills are made by the agent (the owner approves each one). The owner can correct or delete what exists, not create one.
           const b = this.parseJson(raw);
-          if (typeof b.name !== "string" || !b.name.trim() || typeof b.body !== "string") throw new HttpError(400, "name and body are required");
-          const description = typeof b.description === "string" ? b.description : "";
-          const saved = conn.skillStore.write(folder, { name: b.name, description, body: b.body }, b.create === true);
-          return this.json(res, b.create === true ? 201 : 200, { skill: saved });
+          if (typeof b.description !== "string" || typeof b.body !== "string") throw new HttpError(400, "description and body are required");
+          const strings = (v: unknown): Record<string, string> | undefined => (v !== null && typeof v === "object" && !Array.isArray(v) && Object.values(v).every((x) => typeof x === "string") ? (v as Record<string, string>) : undefined);
+          const saved = conn.skillStore.write(
+            {
+              name: folder, description: b.description, body: b.body,
+              ...(typeof b.license === "string" ? { license: b.license } : {}),
+              ...(typeof b.compatibility === "string" ? { compatibility: b.compatibility } : {}),
+              ...(strings(b.metadata) ? { metadata: strings(b.metadata)! } : {}),
+            },
+            false,
+          );
+          return this.json(res, 200, { skill: saved });
         }
       } catch (e) {
         if (e instanceof SkillError) throw new HttpError(e.status, e.message);

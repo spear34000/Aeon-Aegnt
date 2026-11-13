@@ -191,13 +191,11 @@ class AeonClient(
 
     suspend fun skill(folder: String): SkillItem = ApiJson.decodeFromString<SkillResponse>(signed(HttpMethod.Get, "/v1/skills/$folder")).skill
 
-    /** Creates ([create] true) or replaces a skill. The server composes SKILL.md from the three fields. */
-    suspend fun saveSkill(folder: String, name: String, description: String, body: String, create: Boolean): SkillItem {
+    /** Corrects an existing skill (the agent makes new ones). The name stays the folder name, as the Agent Skills format requires. */
+    suspend fun saveSkill(folder: String, description: String, body: String): SkillItem {
         val json = buildJsonObject {
-            put("name", name)
             put("description", description)
             put("body", body)
-            if (create) put("create", true)
         }
         return ApiJson.decodeFromString<SkillResponse>(signed(HttpMethod.Put, "/v1/skills/$folder", json.toString())).skill
     }

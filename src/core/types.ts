@@ -113,6 +113,8 @@ export interface Approval {
   /** Paths or URLs the action touches, shown on the card (first 3, plus a count). */
   resources: string[];
   irreversible: boolean;
+  /** Longer text to read before deciding, shown behind a "details" control. */
+  detail?: string;
   status: ApprovalStatus;
   createdAt: number;
   expiresAt: number;

@@ -71,7 +71,18 @@ data class ModelState(
 data class PairPrefill(val addresses: List<String>, val code: String, val address: String? = null, val serverName: String? = null, val probing: Boolean = false, val probed: Boolean = false)
 
 /** The skill being written or changed. [folder] is null for a new one. */
-data class SkillDraft(val folder: String?, val name: String = "", val description: String = "", val body: String = "", val saving: Boolean = false, val error: String? = null)
+/** A skill being looked at or corrected. [folder] is also its name (Agent Skills format). */
+data class SkillDraft(
+    val folder: String,
+    val description: String = "",
+    val body: String = "",
+    val license: String? = null,
+    val compatibility: String? = null,
+    val files: List<String> = emptyList(),
+    val problems: List<String> = emptyList(),
+    val saving: Boolean = false,
+    val error: String? = null,
+)
 
 data class SkillsState(val list: List<dev.aeon.ui.api.SkillItem> = emptyList(), val dir: String = "", val canEdit: Boolean = false, val loaded: Boolean = false, val editing: SkillDraft? = null)
 
@@ -897,35 +908,29 @@ class AppModel(
         }
     }
 
-    /** Opens the editor on an existing skill, or on a new one when [folder] is null. */
-    fun editSkill(folder: String?) {
-        if (folder == null) return skills { it.copy(editing = SkillDraft(null)) }
-        val s = _state.value.skills.list.firstOrNull { it.folder == folder } ?: return
-        skills { it.copy(editing = SkillDraft(s.folder, s.name, s.description, s.body)) }
+    /** Opens a skill to read and, if needed, correct. New skills are made by the agent, not here. */
+    fun editSkill(folder: String) {
+        scope.launch {
+            runCatching { client.skill(folder) }.onSuccess { s ->
+                skills { it.copy(editing = SkillDraft(s.folder, s.description, s.body, s.license, s.compatibility, s.files, s.problems)) }
+            }.onFailure { e -> _state.update { it.copy(message = describe(e as? Exception ?: Exception(e.message))) } }
+        }
     }
+
+    /** Starts a conversation that asks the agent to make a skill; the owner finishes the sentence. */
+    fun askForSkill() = startWith("이런 일을 할 때 쓸 스킬을 만들어 줘: ")
 
     fun changeSkillDraft(change: (SkillDraft) -> SkillDraft) = skills { s -> s.copy(editing = s.editing?.let { change(it).copy(error = null) }) }
 
     fun closeSkillEditor() = skills { it.copy(editing = null) }
 
-    /** A folder name for a new skill: its name in ASCII letters and digits, or a time-based one when there are none. */
-    private fun skillFolder(name: String, taken: Set<String>): String {
-        val base = name.lowercase().map { if (it in 'a'..'z' || it in '0'..'9') it else '-' }.joinToString("").replace(Regex("-+"), "-").trim('-').take(40)
-            .ifEmpty { "skill-" + dev.aeon.ui.platform.nowMillis().toString(36) }
-        var folder = base
-        var n = 2
-        while (folder in taken) folder = "$base-${n++}"
-        return folder
-    }
-
     fun saveSkill() {
         val d = _state.value.skills.editing ?: return
-        if (d.name.isBlank() || d.saving) return
+        if (d.description.isBlank() || d.saving) return
         scope.launch {
             skills { s -> s.copy(editing = s.editing?.copy(saving = true, error = null)) }
             try {
-                val folder = d.folder ?: skillFolder(d.name, _state.value.skills.list.map { it.folder }.toSet())
-                client.saveSkill(folder, d.name.trim(), d.description.trim(), d.body, create = d.folder == null)
+                client.saveSkill(d.folder, d.description.trim(), d.body)
                 val r = client.skills()
                 skills { it.copy(list = r.skills, dir = r.dir, editing = null) }
                 loadExplore()

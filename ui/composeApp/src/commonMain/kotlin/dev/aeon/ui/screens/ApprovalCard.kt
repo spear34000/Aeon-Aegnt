@@ -6,8 +6,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -41,7 +44,7 @@ import dev.aeon.ui.platform.nowMillis
  */
 data class RiskInfo(val kind: String, val level: Int, val title: (Int) -> String)
 
-fun riskInfo(a: Approval): RiskInfo = when (a.risk) {
+fun riskInfo(a: Approval): RiskInfo = if (a.tool == "skill.create") RiskInfo("스킬", 2) { _ -> "스킬을 만들까요?" } else if (a.tool == "skill.update") RiskInfo("스킬", 2) { _ -> "스킬을 바꿀까요?" } else when (a.risk) {
     "read" -> RiskInfo("읽기", 1) { n -> "파일 ${n}개를 읽을까요?" }
     "write" -> RiskInfo("쓰기", 2) { n -> "파일 ${n}개를 쓸까요?" }
     "delete" -> RiskInfo("삭제", 3) { n -> "파일 ${n}개를 삭제할까요?" }
@@ -67,6 +70,7 @@ fun ApprovalCard(a: Approval, seenAt: Long?, sourceLabel: String, onDecide: (Boo
     val info = riskInfo(a)
     val high = info.level == 3 || a.irreversible
     val isFileAction = a.risk == "read" || a.risk == "write" || a.risk == "delete"
+    val isSkill = a.tool == "skill.create" || a.tool == "skill.update"
     val leftMs = a.expiresAt - now
     var allowReady by remember(a.id) { mutableStateOf(seenAt == null || now - seenAt >= 1000) }
     var showAll by remember(a.id) { mutableStateOf(false) }
@@ -91,7 +95,24 @@ fun ApprovalCard(a: Approval, seenAt: Long?, sourceLabel: String, onDecide: (Boo
             ExpiryText(a.expiresAt, leftMs, now)
         }
         val shown = if (showAll) a.resources else a.resources.take(3)
-        if (shown.isNotEmpty()) {
+        if (isSkill) {
+            // A skill steers every later task, so the owner sees what it is called, what it is for and, one tap away, what it says.
+            val name = a.resources.firstOrNull()?.removePrefix("skill:") ?: ""
+            val purpose = a.summary.substringAfter("\": ", "")
+            Column(Modifier.fillMaxWidth().background(scheme.background, RoundedCornerShape(AeonShape.CONTROL.dp)).padding(horizontal = 14.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(name, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.titleMedium)
+                if (purpose.isNotBlank()) Text(purpose, style = MaterialTheme.typography.bodyMedium)
+                a.resources.drop(1).takeIf { it.isNotEmpty() }?.let { files -> Text("파일 ${files.joinToString(", ")}", style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant) }
+            }
+            if (!a.detail.isNullOrBlank()) {
+                Text(if (details) "지침 닫기" else "지침 보기", color = scheme.primary, style = MaterialTheme.typography.labelLarge, modifier = Modifier.clickable { details = !details })
+                if (details) {
+                    Column(Modifier.fillMaxWidth().heightIn(max = 280.dp).background(scheme.surfaceVariant, RoundedCornerShape(AeonShape.CONTROL.dp)).verticalScroll(rememberScrollState()).padding(12.dp)) {
+                        SelectionContainer { Text(a.detail, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall) }
+                    }
+                }
+            }
+        } else if (shown.isNotEmpty()) {
             Column(Modifier.fillMaxWidth().background(scheme.background, RoundedCornerShape(AeonShape.CONTROL.dp)).padding(horizontal = 14.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 shown.forEach { r ->
                     if (isFileAction) {
@@ -113,9 +134,9 @@ fun ApprovalCard(a: Approval, seenAt: Long?, sourceLabel: String, onDecide: (Boo
         // What will run or leave this machine (a command line, a URL, a request body) is always shown as it will be
         // used: it is what the owner is approving. For file actions the names and folders above are enough, and the
         // exact request is one tap away.
-        val always = a.risk == "exec" || a.risk == "network_write" || a.risk == "external_effect" || info.kind == "확인"
-        if (!always) Text(if (details) "자세히 닫기" else "자세히", color = scheme.primary, style = MaterialTheme.typography.labelLarge, modifier = Modifier.clickable { details = !details })
-        if (always || details) {
+        val always = !isSkill && (a.risk == "exec" || a.risk == "network_write" || a.risk == "external_effect" || info.kind == "확인")
+        if (!always && !isSkill) Text(if (details) "자세히 닫기" else "자세히", color = scheme.primary, style = MaterialTheme.typography.labelLarge, modifier = Modifier.clickable { details = !details })
+        if (always || (details && !isSkill)) {
             Column(Modifier.fillMaxWidth().background(scheme.surfaceVariant, RoundedCornerShape(AeonShape.CONTROL.dp)).padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(a.tool, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant)
                 if (isFileAction) a.resources.forEach { SelectionContainer { Text(it, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall) } }

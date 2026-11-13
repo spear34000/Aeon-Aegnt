@@ -395,16 +395,16 @@ private fun ConnectionSheet(c: ConnectionItem, state: UiState, model: AppModel) 
 }
 
 
-/** The skills list with a button to write a new one. Rows open the editor. */
+/** The skills list. The agent makes skills (the owner approves each one); a row opens one to read, correct or delete. */
 @Composable
 private fun SkillsSection(state: UiState, model: AppModel, query: String) {
     val sk = state.skills
     LaunchedEffect(Unit) { model.loadSkills() }
     val list = sk.list.filter { query.isEmpty() || it.name.contains(query, true) || it.description.contains(query, true) }
     GroupHeader("내 스킬", list.size.toString())
-    if (sk.canEdit) AeonButton("스킬 만들기", { model.editSkill(null) }, Modifier.fillMaxWidth().padding(bottom = 10.dp), kind = ButtonKind.Primary)
+    AeonButton("에이전트에게 스킬 만들게 하기", { model.askForSkill() }, Modifier.fillMaxWidth().padding(bottom = 10.dp), kind = ButtonKind.Primary)
     if (list.isEmpty()) {
-        Hint(if (!sk.loaded) "불러오는 중이에요." else if (query.isNotEmpty()) "찾는 스킬이 없어요." else "스킬이 없어요.")
+        Hint(if (!sk.loaded) "불러오는 중이에요." else if (query.isNotEmpty()) "찾는 스킬이 없어요." else "아직 스킬이 없어요. 자주 시키는 일을 말하면 에이전트가 스킬로 만들어 줘요.")
     } else {
         ListSurface {
             list.forEachIndexed { i, k ->
@@ -418,17 +418,13 @@ private fun SkillsSection(state: UiState, model: AppModel, query: String) {
                     }
                     Column(Modifier.weight(1f)) {
                         Text(k.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        if (k.description.isNotBlank()) Text(k.description, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        if (k.description.isNotBlank()) Text(k.description, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
+                    if (k.problems.isNotEmpty()) Chip("형식 오류", Tone.Warn)
                     Icon(AeonIcons.Chevron, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
                 }
             }
         }
     }
-    if (sk.dir.isNotBlank()) {
-        androidx.compose.foundation.text.selection.SelectionContainer {
-            Text("저장 위치 ${sk.dir}", Modifier.padding(start = 4.dp, top = 12.dp), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
-    Hint("에이전트가 스킬을 쓰는 기능은 아직 준비 중이에요.")
+    Hint("스킬은 에이전트가 만들고, 만들 때마다 내용을 먼저 보여 드려요. 허용해야 저장돼요.")
 }

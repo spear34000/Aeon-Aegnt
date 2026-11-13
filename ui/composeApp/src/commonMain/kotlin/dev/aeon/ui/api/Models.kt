@@ -79,6 +79,8 @@ data class Approval(
     val risk: String,
     val resources: List<String> = emptyList(),
     val irreversible: Boolean = false,
+    /** Longer text to read before deciding (the instructions of a new skill). */
+    val detail: String? = null,
     val status: String,
     val createdAt: Long = 0,
     val expiresAt: Long = 0,
@@ -228,7 +230,20 @@ data class UsageRecord(
 
 /** A skill: a folder with a SKILL.md. [folder] is the name on disk. */
 @Serializable
-data class SkillItem(val folder: String, val name: String, val description: String = "", val body: String = "", val size: Long = 0, val updatedAt: Double = 0.0)
+data class SkillItem(
+    val folder: String,
+    val name: String,
+    val description: String = "",
+    val body: String = "",
+    val license: String? = null,
+    val compatibility: String? = null,
+    val metadata: Map<String, String> = emptyMap(),
+    /** What is wrong with the SKILL.md (the Agent Skills format). Empty when it is fine. */
+    val problems: List<String> = emptyList(),
+    val files: List<String> = emptyList(),
+    val size: Long = 0,
+    val updatedAt: Double = 0.0,
+)
 
 @Serializable data class SkillsResponse(val skills: List<SkillItem> = emptyList(), val dir: String = "", val canEdit: Boolean = false)
 @Serializable data class SkillResponse(val skill: SkillItem)
