@@ -85,9 +85,71 @@ data class SkillDraft(
     val problems: List<String> = emptyList(),
     val saving: Boolean = false,
     val error: String? = null,
+    /** Only the owner's skills ("user") can be corrected here; a project skill is read-only. */
+    val scope: String = "user",
 )
 
-data class SkillsState(val list: List<dev.aeon.ui.api.SkillItem> = emptyList(), val dir: String = "", val canEdit: Boolean = false, val loaded: Boolean = false, val editing: SkillDraft? = null)
+/** The pages of the skills manager, pushed one over the other. */
+enum class SkillScreen { List, Add, Found, Review, Detail, Read, Update }
+
+/** Adding a skill: the source being typed, what was found, and the choices made before installing. */
+data class SkillAddState(
+    val source: String = "",
+    val busy: Boolean = false,
+    val error: String? = null,
+    val preview: dev.aeon.ui.api.SkillPreview? = null,
+    /** Name of the skill picked from the preview. */
+    val pick: String? = null,
+    val scope: String = "user",
+    val rename: String = "",
+    /** The same name exists: the sheet asking what to do is open. */
+    val conflict: Boolean = false,
+    val installing: Boolean = false,
+)
+
+/** One skill open on its detail page, and what is being done to it. */
+data class SkillDetailState(val skill: dev.aeon.ui.api.SkillItem, val busy: Boolean = false, val error: String? = null)
+
+/** The text of a skill laid out for reading before it is approved: the instructions and every file. */
+data class SkillReadState(
+    val skill: dev.aeon.ui.api.SkillItem,
+    /** File path to its text; null while loading, "" text for a file that is not text. */
+    val files: Map<String, String?> = emptyMap(),
+    val busy: Boolean = false,
+    val error: String? = null,
+)
+
+/** A newer version of an installed skill, with what would change, waiting for the owner. */
+data class SkillUpdateState(
+    val folder: String,
+    val scope: String,
+    val preview: dev.aeon.ui.api.SkillPreview,
+    val install: dev.aeon.ui.api.SkillInstallHint,
+    val diff: dev.aeon.ui.api.SkillFileDiff,
+    val busy: Boolean = false,
+    val error: String? = null,
+)
+
+data class SkillsState(
+    val list: List<dev.aeon.ui.api.SkillItem> = emptyList(),
+    val dir: String = "",
+    val projectDir: String? = null,
+    val canEdit: Boolean = false,
+    val loaded: Boolean = false,
+    val editing: SkillDraft? = null,
+    /** The page of the skills manager that is open, or null when it is closed. */
+    val screen: SkillScreen? = null,
+    val add: SkillAddState = SkillAddState(),
+    val detail: SkillDetailState? = null,
+    val read: SkillReadState? = null,
+    val update: SkillUpdateState? = null,
+    /** What the last look for newer versions found (empty until looked). */
+    val updates: List<dev.aeon.ui.api.SkillUpdateStatus> = emptyList(),
+    val checking: Boolean = false,
+    val checkedOnce: Boolean = false,
+    /** Opened from 둘러보기 instead of the list: back closes the manager. */
+    val fromOutside: Boolean = false,
+)
 
 /** A pairing code shown on this device so another device can be let in. */
 data class NewDevice(val code: String, val expiresAt: Long, val admin: Boolean, val addresses: List<String>)
@@ -967,15 +1029,15 @@ class AppModel(
 
     fun loadSkills() {
         scope.launch {
-            runCatching { client.skills() }.onSuccess { r -> skills { it.copy(list = r.skills, dir = r.dir, canEdit = r.canEdit, loaded = true) } }
+            runCatching { client.skills() }.onSuccess { r -> skills { it.copy(list = r.skills, dir = r.dir, projectDir = r.projectDir, canEdit = r.canEdit, loaded = true) } }
         }
     }
 
     /** Opens a skill to read and, if needed, correct. New skills are made by the agent, not here. */
-    fun editSkill(folder: String) {
+    fun editSkill(folder: String, skillScope: String = "user") {
         scope.launch {
-            runCatching { client.skill(folder) }.onSuccess { s ->
-                skills { it.copy(editing = SkillDraft(s.folder, s.description, s.body, s.license, s.compatibility, s.files, s.problems)) }
+            runCatching { client.skill(folder, skillScope) }.onSuccess { s ->
+                skills { it.copy(editing = SkillDraft(s.folder, s.description, s.body, s.license, s.compatibility, s.files, s.problems, scope = s.scope)) }
             }.onFailure { e -> _state.update { it.copy(message = describe(e as? Exception ?: Exception(e.message))) } }
         }
     }
@@ -1003,15 +1065,214 @@ class AppModel(
         }
     }
 
-    fun deleteSkill(folder: String) {
+    fun deleteSkill(folder: String, skillScope: String = "user") {
         scope.launch {
             try {
-                client.deleteSkill(folder)
+                client.deleteSkill(folder, skillScope)
                 val r = client.skills()
-                skills { it.copy(list = r.skills, editing = null) }
+                // Deleting from the detail page returns to where it was opened from; from the editor it just closes.
+                skills { it.copy(list = r.skills, editing = null, detail = null, read = null, screen = if (it.screen == null) null else if (it.fromOutside) null else SkillScreen.List) }
                 loadExplore()
             } catch (e: Exception) {
-                skills { s -> s.copy(editing = s.editing?.copy(error = describe(e))) }
+                val msg = if (e is AeonException && e.status == 403) "이 기기는 스킬을 바꿀 수 없어요." else describe(e)
+                skills { s -> s.copy(editing = s.editing?.copy(error = msg), detail = s.detail?.copy(busy = false, error = msg)) }
+            }
+        }
+    }
+
+    // ---- the skills manager: list, add from a source, detail, read before approving, update
+
+    private fun skillMessage(e: Exception): String = when {
+        e is AeonException && e.status == 403 -> "이 기기는 스킬을 바꿀 수 없어요."
+        e is AeonException && e.status == 409 -> e.message ?: "이미 있거나 바뀐 스킬이에요."
+        else -> describe(e)
+    }
+
+    /** Opens the skills manager at its list. */
+    fun openSkills() {
+        skills { it.copy(screen = SkillScreen.List, fromOutside = false, detail = null, read = null, update = null) }
+        loadSkills()
+        // Looking for newer versions asks GitHub: once per run, and only when the owner can act on the answer.
+        if (!_state.value.skills.checkedOnce) checkSkillUpdates(quiet = true)
+    }
+
+    fun closeSkills() = skills { it.copy(screen = null, detail = null, read = null, update = null, add = SkillAddState()) }
+
+    /** One step back inside the skills manager. */
+    fun skillsBack() {
+        val s = _state.value.skills
+        when (s.screen) {
+            null -> {}
+            SkillScreen.List -> closeSkills()
+            SkillScreen.Add -> skills { it.copy(screen = SkillScreen.List) }
+            SkillScreen.Found -> skills { it.copy(screen = SkillScreen.Add, add = it.add.copy(preview = null, pick = null, error = null, conflict = false)) }
+            SkillScreen.Review -> skills { it.copy(screen = if ((it.add.preview?.candidates?.size ?: 0) > 1) SkillScreen.Found else SkillScreen.Add, add = it.add.copy(conflict = false, error = null)) }
+            SkillScreen.Detail -> if (s.fromOutside) closeSkills() else skills { it.copy(screen = SkillScreen.List, detail = null) }
+            SkillScreen.Read -> skills { it.copy(screen = SkillScreen.Detail, read = null) }
+            SkillScreen.Update -> skills { it.copy(screen = SkillScreen.Detail, update = null) }
+        }
+    }
+
+    /** Opens one skill's page. [fromOutside] is true when it was opened from 둘러보기, so back leaves the manager. */
+    fun openSkill(folder: String, skillScope: String = "user", fromOutside: Boolean = false) {
+        scope.launch {
+            runCatching { client.skill(folder, skillScope) }
+                .onSuccess { s -> skills { it.copy(screen = SkillScreen.Detail, detail = SkillDetailState(s), fromOutside = fromOutside || (it.screen == null)) } }
+                .onFailure { e -> _state.update { it.copy(message = describe(e as? Exception ?: Exception(e.message))) } }
+        }
+    }
+
+    private suspend fun reloadSkill(folder: String, skillScope: String) {
+        runCatching { client.skills() }.onSuccess { r -> skills { it.copy(list = r.skills, dir = r.dir, projectDir = r.projectDir, canEdit = r.canEdit, loaded = true) } }
+        runCatching { client.skill(folder, skillScope) }.onSuccess { s -> skills { it.copy(detail = it.detail?.copy(skill = s, busy = false, error = null)) } }
+    }
+
+    fun setSkillEnabled(on: Boolean) {
+        val d = _state.value.skills.detail ?: return
+        scope.launch {
+            skills { it.copy(detail = it.detail?.copy(busy = true, error = null)) }
+            try {
+                client.setSkillEnabled(d.skill.folder, d.skill.scope, on)
+                reloadSkill(d.skill.folder, d.skill.scope)
+            } catch (e: Exception) {
+                skills { it.copy(detail = it.detail?.copy(busy = false, error = skillMessage(e))) }
+            }
+        }
+    }
+
+    /** Opens the text of the skill (instructions and every file) so the owner reads what they are approving. */
+    fun readSkill() {
+        val d = _state.value.skills.detail ?: return
+        val sk = d.skill
+        skills { it.copy(screen = SkillScreen.Read, read = SkillReadState(sk, files = sk.files.associateWith { null }, busy = true)) }
+        scope.launch {
+            for (path in sk.files.take(20)) {
+                val text = runCatching { client.skillFile(sk.folder, sk.scope, path) }.getOrNull()
+                val shown = if (text == null) "(읽지 못했어요)" else if (text.binary) "(글이 아닌 파일이에요 · ${text.size}바이트)" else text.text ?: ""
+                skills { st -> st.copy(read = st.read?.let { r -> r.copy(files = r.files + (path to shown)) }) }
+            }
+            skills { it.copy(read = it.read?.copy(busy = false)) }
+        }
+    }
+
+    /** Approves the skill as it was when the page was opened: the hash shown goes back, so a skill that changed since is refused. */
+    fun trustSkill() {
+        val s = _state.value.skills
+        val sk = s.read?.skill ?: s.detail?.skill ?: return
+        scope.launch {
+            skills { it.copy(read = it.read?.copy(busy = true, error = null), detail = it.detail?.copy(busy = true, error = null)) }
+            try {
+                client.trustSkill(sk.folder, sk.scope, sk.hash)
+                reloadSkill(sk.folder, sk.scope)
+                skills { it.copy(screen = SkillScreen.Detail, read = null) }
+            } catch (e: Exception) {
+                val msg = if (e is AeonException && e.status == 409) "읽는 동안 스킬이 바뀌었어요. 다시 열어 새 내용을 읽어 주세요." else skillMessage(e)
+                skills { it.copy(read = it.read?.copy(busy = false, error = msg), detail = it.detail?.copy(busy = false, error = msg)) }
+            }
+        }
+    }
+
+    // ---- adding from a source
+
+    fun openAddSkill() = skills { it.copy(screen = SkillScreen.Add, add = SkillAddState(scope = if (it.projectDir != null) it.add.scope else "user")) }
+
+    fun changeSkillSource(text: String) = skills { it.copy(add = it.add.copy(source = text.take(300), error = null)) }
+
+    fun inspectSkillSource() {
+        val src = _state.value.skills.add.source.trim()
+        if (src.isEmpty() || _state.value.skills.add.busy) return
+        scope.launch {
+            skills { it.copy(add = it.add.copy(busy = true, error = null)) }
+            try {
+                val p = client.inspectSkillSource(src)
+                val usable = p.candidates.filter { it.problems.isEmpty() }
+                // One skill that follows the format goes straight to its review; otherwise the owner picks.
+                val single = if (p.candidates.size == 1 && usable.size == 1) usable.first().name else null
+                skills { it.copy(screen = if (single != null) SkillScreen.Review else SkillScreen.Found, add = it.add.copy(busy = false, preview = p, pick = single, rename = single ?: "")) }
+            } catch (e: Exception) {
+                skills { it.copy(add = it.add.copy(busy = false, error = if (e is AeonException && e.status == 403) "이 기기는 스킬을 가져올 수 없어요." else skillMessage(e))) }
+            }
+        }
+    }
+
+    fun pickSkillCandidate(name: String) = skills { it.copy(screen = SkillScreen.Review, add = it.add.copy(pick = name, rename = name, error = null, conflict = false)) }
+
+    fun setSkillInstallScope(scopeName: String) = skills { it.copy(add = it.add.copy(scope = scopeName, error = null)) }
+
+    fun changeSkillRename(text: String) = skills { it.copy(add = it.add.copy(rename = text.lowercase().filter { c -> c in 'a'..'z' || c in '0'..'9' || c == '-' }.take(64), error = null)) }
+
+    fun closeSkillConflict() = skills { it.copy(add = it.add.copy(conflict = false, error = null)) }
+
+    /** Installs the picked skill. [replace] overwrites a skill of the same name; a new [rename] installs it next to it. */
+    fun installSkill(replace: Boolean = false, renamed: Boolean = false) {
+        val a = _state.value.skills.add
+        val pick = a.pick ?: return
+        val p = a.preview ?: return
+        if (a.installing) return
+        val rename = if (renamed && a.rename.isNotBlank() && a.rename != pick) a.rename else null
+        scope.launch {
+            skills { it.copy(add = it.add.copy(installing = true, error = null)) }
+            try {
+                val s = client.installSkill(p.id, pick, a.scope, rename, replace)
+                val r = client.skills()
+                skills { it.copy(list = r.skills, dir = r.dir, projectDir = r.projectDir, add = SkillAddState(scope = a.scope), screen = SkillScreen.Detail, detail = SkillDetailState(s), fromOutside = false) }
+                loadExplore()
+            } catch (e: Exception) {
+                if (e is AeonException && e.status == 409 && !replace && rename == null) {
+                    skills { it.copy(add = it.add.copy(installing = false, conflict = true, rename = suggestSkillName(pick, it.list.map { s -> s.folder }))) }
+                } else {
+                    skills { it.copy(add = it.add.copy(installing = false, conflict = if (e is AeonException && e.status == 409) it.add.conflict else false, error = skillMessage(e))) }
+                }
+            }
+        }
+    }
+
+    private fun suggestSkillName(base: String, taken: List<String>): String {
+        var i = 2
+        while ("$base-$i" in taken) i++
+        return "$base-$i".take(64)
+    }
+
+    // ---- newer versions
+
+    /** Asks GitHub whether the skills that came from it have newer versions. [quiet] hides a failure (offline, lookups off). */
+    fun checkSkillUpdates(quiet: Boolean = false) {
+        if (_state.value.skills.checking) return
+        scope.launch {
+            skills { it.copy(checking = true) }
+            try {
+                val u = client.skillUpdates()
+                skills { it.copy(updates = u, checking = false, checkedOnce = true) }
+            } catch (e: Exception) {
+                skills { it.copy(checking = false, checkedOnce = true) }
+                if (!quiet) _state.update { it.copy(message = skillMessage(e)) }
+            }
+        }
+    }
+
+    fun previewSkillUpdate() {
+        val d = _state.value.skills.detail ?: return
+        scope.launch {
+            skills { it.copy(detail = it.detail?.copy(busy = true, error = null)) }
+            try {
+                val u = client.skillUpdatePreview(d.skill.folder, d.skill.scope)
+                skills { it.copy(screen = SkillScreen.Update, update = SkillUpdateState(d.skill.folder, d.skill.scope, u.preview, u.install, u.diff), detail = it.detail?.copy(busy = false)) }
+            } catch (e: Exception) {
+                skills { it.copy(detail = it.detail?.copy(busy = false, error = skillMessage(e))) }
+            }
+        }
+    }
+
+    fun applySkillUpdate() {
+        val u = _state.value.skills.update ?: return
+        scope.launch {
+            skills { it.copy(update = it.update?.copy(busy = true, error = null)) }
+            try {
+                val s = client.installSkill(u.preview.id, u.install.name, u.scope, u.install.rename, replace = true)
+                val r = client.skills()
+                skills { it.copy(list = r.skills, update = null, screen = SkillScreen.Detail, detail = SkillDetailState(s), updates = it.updates.filterNot { x -> x.name == u.folder && x.scope == u.scope }) }
+            } catch (e: Exception) {
+                skills { it.copy(update = it.update?.copy(busy = false, error = skillMessage(e))) }
             }
         }
     }

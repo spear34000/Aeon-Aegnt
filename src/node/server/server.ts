@@ -516,7 +516,7 @@ export class AeonServer {
 
     const conn = this.o.connections;
     const lib = rt.skills ?? this.o.connections?.library;
-    const skillMatch = /^\/v1\/skills(?:\/([a-z0-9][a-z0-9-]{0,63})(?:\/(enable|trust|update-preview))?)?$/.exec(path);
+    const skillMatch = /^\/v1\/skills(?:\/([a-z0-9][a-z0-9-]{0,63})(?:\/(enable|trust|update-preview|file))?)?$/.exec(path);
     const sourceMatch = /^\/v1\/skill-sources\/(inspect|install|updates)$/.exec(path);
     if (lib && (skillMatch || sourceMatch)) {
       const scopeOf = (v: unknown, fallback: "user" | "project" = "user"): "user" | "project" => (v === "user" || v === "project" ? v : fallback);
@@ -550,8 +550,17 @@ export class AeonServer {
           const action = skillMatch[2];
           const scope = scopeOf(url.searchParams.get("scope"));
           if (method === "GET" && !folder) return this.json(res, 200, { skills: lib.list(), dir: lib.userDir, projectDir: lib.project?.dir ?? null, canEdit: this.canAdmin(req, deviceId) });
+          if (method === "GET" && folder && action === "file") {
+            // Reading a file of a skill (any state) so the owner can read it before approving. Open to any paired device like the rest of the reads.
+            const rel = url.searchParams.get("path") ?? "";
+            const f = lib.readSupportFile(scope, folder, rel);
+            if (!f) throw new HttpError(404, "file not found");
+            return this.json(res, 200, { path: rel, ...f });
+          }
           if (method === "GET" && folder && !action) {
-            const hit = lib.list().find((x) => x.folder === folder && (url.searchParams.has("scope") ? x.scope === scope : true) && (x.active || !url.searchParams.has("scope")));
+            // With a scope: that one, whatever its state (an unapproved skill has to be readable). Without: the one in use, else the first.
+            const same = lib.list().filter((x) => x.folder === folder);
+            const hit = url.searchParams.has("scope") ? same.find((x) => x.scope === scope) : (same.find((x) => x.active) ?? same[0]);
             const full = hit ? (hit.scope === "project" ? lib.project : lib.user)?.read(folder) : null;
             if (!hit || !full) throw new HttpError(404, "skill not found");
             return this.json(res, 200, { skill: { ...full, scope: hit.scope, status: hit.status, enabled: hit.enabled, active: hit.active, inactiveBecause: hit.inactiveBecause, ...(hit.source ? { source: hit.source } : {}), hash: hit.hash } });

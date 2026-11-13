@@ -189,7 +189,53 @@ class AeonClient(
 
     suspend fun skills(): SkillsResponse = ApiJson.decodeFromString(signed(HttpMethod.Get, "/v1/skills"))
 
-    suspend fun skill(folder: String): SkillItem = ApiJson.decodeFromString<SkillResponse>(signed(HttpMethod.Get, "/v1/skills/$folder")).skill
+    suspend fun skill(folder: String, scope: String? = null): SkillItem =
+        ApiJson.decodeFromString<SkillResponse>(signed(HttpMethod.Get, "/v1/skills/$folder" + if (scope != null) "?scope=$scope" else "")).skill
+
+    /** One file of a skill as text, for reading before approving it. [binary] files come back without text. */
+    suspend fun skillFile(folder: String, scope: String, path: String): SkillFileResponse =
+        ApiJson.decodeFromString(signed(HttpMethod.Get, "/v1/skills/$folder/file?scope=$scope&path=$path"))
+
+    /** Reads a source (a GitHub repository or a folder on the machine that runs Aeon). Installs nothing. */
+    suspend fun inspectSkillSource(source: String): SkillPreview {
+        val json = buildJsonObject { put("source", source) }
+        return ApiJson.decodeFromString<SkillPreviewResponse>(signed(HttpMethod.Post, "/v1/skill-sources/inspect", json.toString())).preview
+    }
+
+    suspend fun installSkill(previewId: String, name: String, scope: String, rename: String?, replace: Boolean): SkillItem {
+        val json = buildJsonObject {
+            put("previewId", previewId)
+            put("name", name)
+            put("scope", scope)
+            if (rename != null) put("rename", rename)
+            if (replace) put("replace", true)
+        }
+        return ApiJson.decodeFromString<SkillResponse>(signed(HttpMethod.Post, "/v1/skill-sources/install", json.toString())).skill
+    }
+
+    suspend fun setSkillEnabled(folder: String, scope: String, enabled: Boolean): SkillItem {
+        val json = buildJsonObject {
+            put("scope", scope)
+            put("enabled", enabled)
+        }
+        return ApiJson.decodeFromString<SkillResponse>(signed(HttpMethod.Post, "/v1/skills/$folder/enable", json.toString())).skill
+    }
+
+    /** Approves a skill as it is. [hash] is the hash of what the owner was shown; the server refuses if the folder changed since. */
+    suspend fun trustSkill(folder: String, scope: String, hash: String): SkillItem {
+        val json = buildJsonObject {
+            put("scope", scope)
+            put("hash", hash)
+        }
+        return ApiJson.decodeFromString<SkillResponse>(signed(HttpMethod.Post, "/v1/skills/$folder/trust", json.toString())).skill
+    }
+
+    suspend fun skillUpdates(): List<SkillUpdateStatus> = ApiJson.decodeFromString<SkillUpdatesResponse>(signed(HttpMethod.Get, "/v1/skill-sources/updates")).updates
+
+    suspend fun skillUpdatePreview(folder: String, scope: String): SkillUpdatePreview {
+        val json = buildJsonObject { put("scope", scope) }
+        return ApiJson.decodeFromString(signed(HttpMethod.Post, "/v1/skills/$folder/update-preview", json.toString()))
+    }
 
     /** Corrects an existing skill (the agent makes new ones). The name stays the folder name, as the Agent Skills format requires. */
     suspend fun saveSkill(folder: String, description: String, body: String): SkillItem {
@@ -200,8 +246,8 @@ class AeonClient(
         return ApiJson.decodeFromString<SkillResponse>(signed(HttpMethod.Put, "/v1/skills/$folder", json.toString())).skill
     }
 
-    suspend fun deleteSkill(folder: String) {
-        signed(HttpMethod.Delete, "/v1/skills/$folder")
+    suspend fun deleteSkill(folder: String, scope: String = "user") {
+        signed(HttpMethod.Delete, "/v1/skills/$folder?scope=$scope")
     }
 
     /** [path] is the `icon` field of a connection. Returns null when the server found no icon. */

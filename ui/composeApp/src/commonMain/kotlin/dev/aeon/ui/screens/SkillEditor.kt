@@ -45,7 +45,8 @@ import dev.aeon.ui.state.UiState
 fun SkillEditor(draft: SkillDraft, state: UiState, model: AppModel) {
     val s = LocalAeonStatus.current
     var confirm by remember(draft.folder) { mutableStateOf(false) }
-    val canEdit = state.skills.canEdit
+    // Only the owner's own skills are corrected here; a project skill is read-only.
+    val canEdit = state.skills.canEdit && draft.scope == "user"
     PlatformBackHandler(enabled = true) { model.closeSkillEditor() }
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).pointerInput(Unit) { detectTapGestures { } }) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -62,7 +63,7 @@ fun SkillEditor(draft: SkillDraft, state: UiState, model: AppModel) {
             AeonTextField(draft.body, { v -> model.changeSkillDraft { it.copy(body = v.take(90_000)) } }, "지침", singleLine = false, placeholder = "에이전트가 따를 순서나 규칙", enabled = canEdit, minHeight = 240.dp)
             val facts = listOfNotNull(draft.license?.let { "라이선스 $it" }, draft.compatibility?.let { "사용 환경 $it" }, draft.files.takeIf { it.isNotEmpty() }?.let { "파일 ${it.joinToString(", ")}" })
             facts.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = s.fg3) }
-            if (canEdit) AeonButton("삭제", { confirm = true }, Modifier.fillMaxWidth(), kind = ButtonKind.Destructive)
+            if (state.skills.canEdit) AeonButton("삭제", { confirm = true }, Modifier.fillMaxWidth(), kind = ButtonKind.Destructive)
         }
     }
     if (confirm) {
@@ -70,7 +71,7 @@ fun SkillEditor(draft: SkillDraft, state: UiState, model: AppModel) {
             onDismissRequest = { confirm = false },
             title = { Text("\"${draft.folder}\" 스킬을 삭제할까요?") },
             text = { Text("스킬과 안에 있는 파일이 지워져요. 에이전트는 더 이상 이 스킬을 쓰지 않아요.", style = MaterialTheme.typography.bodyMedium) },
-            confirmButton = { TextButton(onClick = { confirm = false; model.deleteSkill(draft.folder) }) { Text("삭제", color = s.danger) } },
+            confirmButton = { TextButton(onClick = { confirm = false; model.deleteSkill(draft.folder, draft.scope) }) { Text("삭제", color = s.danger) } },
             dismissButton = { TextButton(onClick = { confirm = false }) { Text("취소") } },
         )
     }

@@ -243,9 +243,61 @@ data class SkillItem(
     val files: List<String> = emptyList(),
     val size: Long = 0,
     val updatedAt: Double = 0.0,
+    /** "user" (the owner's skills) or "project" (this workspace's `.agents/skills`). */
+    val scope: String = "user",
+    /** "tracked": exactly what the owner approved. "modified": changed since. "untracked": never approved. */
+    val status: String = "tracked",
+    val enabled: Boolean = false,
+    /** Offered to the model right now. */
+    val active: Boolean = false,
+    val inactiveBecause: String = "",
+    val shadowedBy: String? = null,
+    val source: SkillSourceInfo? = null,
+    /** The content hash. Approving a skill sends back the hash that was shown. */
+    val hash: String = "",
+    val version: String? = null,
+    val scripts: Boolean = false,
+    val warnings: List<String> = emptyList(),
 )
 
-@Serializable data class SkillsResponse(val skills: List<SkillItem> = emptyList(), val dir: String = "", val canEdit: Boolean = false)
+/** Where a skill came from: `agent`, `legacy`, `local` (path) or `github` (owner, repo, ref, path, commit). */
+@Serializable
+data class SkillSourceInfo(val type: String = "", val owner: String? = null, val repo: String? = null, val ref: String? = null, val path: String? = null, val commit: String? = null)
+
+@Serializable data class SkillFileInfo(val path: String, val size: Long = 0)
+@Serializable data class SkillScriptText(val path: String, val text: String = "", val cut: Boolean = false)
+@Serializable data class SkillExisting(val scope: String, val status: String = "", val source: SkillSourceInfo? = null)
+
+/** One skill found in a source, with everything the owner should read before it is installed. */
+@Serializable
+data class SkillCandidate(
+    val name: String,
+    val dir: String = "",
+    val description: String = "",
+    val problems: List<String> = emptyList(),
+    val warnings: List<String> = emptyList(),
+    val files: List<SkillFileInfo> = emptyList(),
+    val scripts: Boolean = false,
+    val ignored: List<String> = emptyList(),
+    val hash: String = "",
+    val bytes: Long = 0,
+    val skillMd: String = "",
+    val scriptTexts: List<SkillScriptText> = emptyList(),
+    val existing: List<SkillExisting> = emptyList(),
+)
+
+@Serializable
+data class SkillPreview(val id: String, val source: String = "", val commit: String? = null, val skipped: List<String> = emptyList(), val candidates: List<SkillCandidate> = emptyList())
+
+@Serializable data class SkillPreviewResponse(val preview: SkillPreview)
+@Serializable data class SkillUpdateStatus(val scope: String, val name: String, val status: String, val message: String? = null, val remoteCommit: String? = null)
+@Serializable data class SkillUpdatesResponse(val updates: List<SkillUpdateStatus> = emptyList())
+@Serializable data class SkillFileDiff(val added: List<String> = emptyList(), val removed: List<String> = emptyList(), val changed: List<String> = emptyList())
+@Serializable data class SkillInstallHint(val name: String, val rename: String? = null)
+@Serializable data class SkillUpdatePreview(val preview: SkillPreview, val install: SkillInstallHint, val diff: SkillFileDiff = SkillFileDiff())
+@Serializable data class SkillFileResponse(val path: String = "", val text: String? = null, val binary: Boolean = false, val size: Long = 0)
+
+@Serializable data class SkillsResponse(val skills: List<SkillItem> = emptyList(), val dir: String = "", val projectDir: String? = null, val canEdit: Boolean = false)
 @Serializable data class SkillResponse(val skill: SkillItem)
 @Serializable data class HelloResponse(val name: String = "Aeon", val api: Int = 1, val pairingRequired: Boolean = true)
 @Serializable data class PairResponse(val deviceId: String, val serverProof: String, val serverName: String = "Aeon", val admin: Boolean = true, val serverKey: String? = null, val serverKeyProof: String? = null)

@@ -490,6 +490,8 @@ describe("Setting things up from any paired device", () => {
     assert.equal((await call("POST", "/v1/skill-sources/install", { previewId: preview.id, name: "tidy-notes", scope: "user" })).status, 409, "the same name is not overwritten silently");
     const listed = (await call("GET", "/v1/skills")).body.skills as { folder: string; scope: string; status: string; active: boolean; scripts: boolean }[];
     assert.deepEqual(listed.map((s) => [s.folder, s.scope, s.status, s.active, s.scripts]), [["tidy-notes", "user", "tracked", true, true]]);
+    assert.equal((await call("GET", "/v1/skills/tidy-notes/file?scope=user&path=scripts/tidy.py")).body.text, "print('tidy')\n", "the owner can read a script before approving");
+    assert.equal((await call("GET", "/v1/skills/tidy-notes/file?scope=user&path=..%2FSKILL.md")).status, 404, "only references/, assets/ and scripts/ can be read");
     assert.equal((await call("POST", "/v1/skills/tidy-notes/enable", { scope: "user", enabled: false })).body.skill.active, false);
     assert.equal((await call("POST", "/v1/skills/tidy-notes/enable", { scope: "user", enabled: true })).body.skill.active, true);
 
@@ -498,6 +500,7 @@ describe("Setting things up from any paired device", () => {
     writeFileSync(join(dropped, "SKILL.md"), "---\nname: from-a-clone\ndescription: Arrived with a repository. Use for anything.\n---\n\nbody\n");
     const clone = (await call("GET", "/v1/skills")).body.skills.find((s: { folder: string }) => s.folder === "from-a-clone");
     assert.deepEqual([clone.scope, clone.status, clone.active], ["project", "untracked", false]);
+    assert.equal((await call("GET", "/v1/skills/from-a-clone?scope=project")).body.skill.status, "untracked", "an unapproved skill can be opened to be read");
     assert.equal((await call("POST", "/v1/skills/from-a-clone/enable", { scope: "project", enabled: true })).status, 409, "switching on is not approving");
     assert.equal((await call("POST", "/v1/skills/from-a-clone/trust", { scope: "project" })).status, 400, "the hash of what was shown is required");
     assert.equal((await call("POST", "/v1/skills/from-a-clone/trust", { scope: "project", hash: "0".repeat(64) })).status, 409, "a skill that is not what was shown is not approved");

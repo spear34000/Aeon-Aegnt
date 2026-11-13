@@ -222,13 +222,13 @@ class ServerIntegrationTest {
         model.stop()
     }
 
-    private suspend fun waitFor(timeoutMs: Long = 15_000, cond: () -> Boolean) {
+    private suspend fun waitFor(timeoutMs: Long = 15_000, label: String = "", cond: () -> Boolean) {
         val end = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < end) {
             if (cond()) return
             delay(50)
         }
-        error("condition not reached in ${timeoutMs}ms")
+        error("condition not reached in ${timeoutMs}ms: $label")
     }
 
     @Test
@@ -289,5 +289,106 @@ class ServerIntegrationTest {
         // Revoke ourselves: the next call must fail with 401.
         client.revokeDevice(devices[0].id)
         assertEquals(401, assertFailsWith<AeonException> { client.status() }.status)
+    }
+
+    /** A skill folder on this machine to install from (what the owner types as a path). */
+    private fun skillSource(root: File): File {
+        val dir = File(root, "src/tidy-notes").apply { File(this, "scripts").mkdirs() }
+        File(dir, "SKILL.md").writeText("---\nname: tidy-notes\ndescription: Tidy messy notes. Use when notes are untidy.\n---\n\nRun scripts/tidy.py on the notes.\n")
+        File(dir, "scripts/tidy.py").writeText("print('tidy')\n")
+        return dir
+    }
+
+    @Test
+    fun skillsAreInstalledReadApprovedAndSwitchedThroughTheRealServer() = runBlocking {
+        val fx = startAeon(startFakeModel(emptyList()))
+        val (client, _) = newClient(fx.base)
+        client.pair(fx.code, "kotlin test client")
+        val src = skillSource(fx.workspace.parentFile)
+
+        val preview = client.inspectSkillSource(src.absolutePath)
+        val c = preview.candidates.single()
+        assertEquals("tidy-notes", c.name)
+        assertTrue(c.scripts && c.scriptTexts.single().text.contains("print('tidy')"), "the script text is shown before installing")
+        assertTrue(client.skills().skills.isEmpty(), "looking installs nothing")
+
+        val installed = client.installSkill(preview.id, "tidy-notes", "user", null, false)
+        assertEquals(listOf("user", "tracked", true, true), listOf(installed.scope, installed.status, installed.enabled, installed.active))
+        assertTrue(installed.hash.length == 64 && installed.scripts)
+        assertEquals(409, assertFailsWith<AeonException> { client.installSkill(preview.id, "tidy-notes", "user", null, false) }.status, "the same name is not overwritten silently")
+        assertEquals("print('tidy')\n", client.skillFile("tidy-notes", "user", "scripts/tidy.py").text)
+        assertEquals(false, client.setSkillEnabled("tidy-notes", "user", false).active)
+        assertEquals(true, client.setSkillEnabled("tidy-notes", "user", true).active)
+
+        // A skill that merely appeared in the project is listed but never approved by itself.
+        val dropped = File(fx.workspace, ".agents/skills/from-a-clone").apply { mkdirs() }
+        File(dropped, "SKILL.md").writeText("---\nname: from-a-clone\ndescription: Arrived with a repository. Use never.\n---\n\nbody\n")
+        val clone = client.skills().skills.single { it.folder == "from-a-clone" }
+        assertEquals(listOf("project", "untracked", false), listOf(clone.scope, clone.status, clone.active))
+        assertEquals(409, assertFailsWith<AeonException> { client.setSkillEnabled("from-a-clone", "project", true) }.status, "switching on is not approving")
+        assertEquals(409, assertFailsWith<AeonException> { client.trustSkill("from-a-clone", "project", "0".repeat(64)) }.status, "a hash that was not shown is refused")
+        assertEquals(true, client.trustSkill("from-a-clone", "project", clone.hash).active)
+        client.deleteSkill("from-a-clone", "project")
+        assertTrue(client.skills().skills.none { it.folder == "from-a-clone" })
+    }
+
+    @Test
+    fun theSkillsManagerWalksFromASourceToAnInstalledSkill() = runBlocking {
+        val fx = startAeon(startFakeModel(emptyList()))
+        val (client, crypto) = newClient(fx.base)
+        val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
+        cleanup += { scope.cancel() }
+        val map = mutableMapOf<String, String>()
+        val store = object : dev.aeon.ui.platform.KeyValueStore {
+            override fun get(key: String) = map[key]
+            override fun put(key: String, value: String) { map[key] = value }
+            override fun remove(key: String) { map.remove(key) }
+        }
+        val m = dev.aeon.ui.state.AppModel(client, store, crypto, scope, pollMillis = 60_000, defaultServerUrl = fx.base)
+        m.pair(fx.base, fx.code)
+        waitFor(label = "step 1") { m.state.value.connection is dev.aeon.ui.state.Connection.Connected }
+        val src = skillSource(fx.workspace.parentFile)
+        val sk = { m.state.value.skills }
+
+        m.openSkills()
+        waitFor(label = "step 2") { sk().loaded }
+        assertEquals(dev.aeon.ui.state.SkillScreen.List, sk().screen)
+        m.openAddSkill()
+        m.changeSkillSource(src.absolutePath)
+        m.inspectSkillSource()
+        waitFor(label = "step 3") { sk().screen == dev.aeon.ui.state.SkillScreen.Review }
+        assertEquals("tidy-notes", sk().add.pick, "one skill that follows the format goes straight to its review")
+
+        m.installSkill()
+        waitFor(label = "step 4") { sk().screen == dev.aeon.ui.state.SkillScreen.Detail }
+        assertEquals("tracked", sk().detail?.skill?.status)
+
+        // Installing it again clashes: the sheet opens with a new name suggested, and a new name installs next to it.
+        m.openAddSkill(); m.changeSkillSource(src.absolutePath); m.inspectSkillSource()
+        waitFor(label = "step 5") { sk().screen == dev.aeon.ui.state.SkillScreen.Review }
+        m.installSkill()
+        waitFor(label = "step 6") { sk().add.conflict }
+        assertEquals("tidy-notes-2", sk().add.rename)
+        m.installSkill(renamed = true)
+        waitFor(label = "step 7") { sk().screen == dev.aeon.ui.state.SkillScreen.Detail && sk().detail?.skill?.folder == "tidy-notes-2" }
+
+        // Reading a skill loads its files; an unapproved skill is approved with the hash that was shown.
+        File(fx.workspace, ".agents/skills/dropped").mkdirs()
+        File(fx.workspace, ".agents/skills/dropped/SKILL.md").writeText("---\nname: dropped\ndescription: Dropped here. Use never.\n---\n\nbody\n")
+        m.openSkill("dropped", "project")
+        waitFor(label = "step 8") { sk().screen == dev.aeon.ui.state.SkillScreen.Detail && sk().detail?.skill?.folder == "dropped" }
+        assertEquals("untracked", sk().detail?.skill?.status)
+        m.readSkill()
+        waitFor(label = "step 9") { sk().read?.busy == false }
+        m.trustSkill()
+        waitFor(label = "step 10") { sk().detail?.skill?.status == "tracked" }
+        assertEquals(dev.aeon.ui.state.SkillScreen.Detail, sk().screen)
+
+        m.deleteSkill("dropped", "project")
+        waitFor(label = "step 11") { sk().list.none { it.folder == "dropped" } }
+        assertEquals(dev.aeon.ui.state.SkillScreen.List, sk().screen, "deleting returns to the list")
+        m.skillsBack()
+        assertEquals(null, sk().screen)
+        m.stop()
     }
 }

@@ -52,6 +52,10 @@ object AeonIcons {
     val Clock by lazy { stroke("clock", "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 7v5l3 2") }
     val Dash by lazy { stroke("dash", "M6 12h12", 2.2f) }
     val Box by lazy { stroke("box", "M12 3l8 4.5v9L12 21l-8-4.5v-9zM4 7.5l8 4.5 8-4.5M12 12v9") }
+    val Code by lazy { stroke("code", "M8 8l-4 4 4 4M16 8l4 4-4 4M13.5 5l-3 14") }
+    val Refresh by lazy { stroke("refresh", "M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5") }
+    val Warn by lazy { stroke("warn", "M12 4l9 16H3zM12 10v4M12 17v.01") }
+    val More by lazy { stroke("more", "M6 12h.01M12 12h.01M18 12h.01", 2.4f) }
 
     /** The Aeon mark: an orbit around a core. */
     val Mark: ImageVector by lazy {

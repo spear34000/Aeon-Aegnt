@@ -249,6 +249,16 @@ export class SkillLibrary {
     return ok;
   }
 
+  /**
+   * A supporting file of any skill in a folder, trusted or not, for the owner to read before approving it (references/,
+   * assets/ and scripts/ only; the text is for a person to read and is never given to the model from here).
+   */
+  readSupportFile(scope: SkillScope, name: string, rel: string): { text: string; size: number } | { binary: true; size: number } | null {
+    const bytes = this.store(scope).readBytes(name, rel, 1_000_000);
+    if (!bytes) return null;
+    return bytes.includes(0) ? { binary: true, size: bytes.length } : { text: bytes.toString("utf8"), size: bytes.length };
+  }
+
   setEnabled(scope: SkillScope, name: string, enabled: boolean): LibrarySkill {
     const s = this.get(scope, name);
     if (!s) throw new SkillError(404, "skill not found");

@@ -140,7 +140,8 @@ fun PhoneLayout(state: UiState, model: AppModel) {
         ) {
             ChatDrawer(state, model, Modifier.width(drawerWidth).fillMaxHeight())
         }
-        // The skill editor is a page of its own over the whole screen, bottom bar included.
+        // The skills manager and the skill editor are pages of their own over the whole screen, bottom bar included.
+        SkillsHost(state, model)
         state.skills.editing?.let { SkillEditor(it, state, model) }
     }
 }
@@ -368,6 +369,7 @@ fun AgentHubScreen(state: UiState, model: AppModel, modifier: Modifier = Modifie
         model.loadSettings()
         model.loadUsage()
         model.loadModels()
+        model.loadSkills()
         if (state.explore.installed.isEmpty()) model.loadExplore()
     }
     if (state.settingsOpen) {
@@ -411,6 +413,8 @@ fun AgentHubScreen(state: UiState, model: AppModel, modifier: Modifier = Modifie
             SettingRow(AeonIcons.Phone, "연결된 기기", if (state.devices.isEmpty()) "" else "${state.devices.count { !it.revoked }}대") { open(SettingsPage.Devices) }
             RowDivider(64.dp)
             SettingRow(AeonIcons.Plug, "연결과 도구", if (state.explore.installed.isEmpty()) "" else "${state.explore.installed.size}개") { model.go(Section.Explore) }
+            RowDivider(64.dp)
+            SettingRow(AeonIcons.Book, "스킬", if (state.skills.list.isEmpty()) "" else "${state.skills.list.size}개") { model.openSkills() }
             RowDivider(64.dp)
             SettingRow(AeonIcons.Chart, "사용량", "") { open(SettingsPage.Usage) }
             RowDivider(64.dp)

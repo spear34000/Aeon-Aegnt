@@ -209,7 +209,7 @@ private fun ConnectionList(items: List<ConnectionItem>, e: ExploreState, model: 
         items.forEachIndexed { i, c ->
             if (i > 0) RowDivider()
             c.icon?.let { path -> LaunchedEffect(path) { model.requestIcon(path) } }
-            ConnectionRow(c, c.icon?.let { e.icons[it] }, installed) { if (c.kind == "skill") { model.loadSkills(); model.editSkill(c.id.removePrefix("skill:")) } else model.showConnection(c) }
+            ConnectionRow(c, c.icon?.let { e.icons[it] }, installed) { if (c.kind == "skill") { model.loadSkills(); model.openSkill(c.id.removePrefix("skill:"), "user", fromOutside = true) } else model.showConnection(c) }
         }
     }
 }
@@ -402,7 +402,8 @@ private fun SkillsSection(state: UiState, model: AppModel, query: String) {
     LaunchedEffect(Unit) { model.loadSkills() }
     val list = sk.list.filter { query.isEmpty() || it.name.contains(query, true) || it.description.contains(query, true) }
     GroupHeader("내 스킬", list.size.toString())
-    AeonButton("에이전트에게 스킬 만들게 하기", { model.askForSkill() }, Modifier.fillMaxWidth().padding(bottom = 10.dp), kind = ButtonKind.Primary)
+    AeonButton("에이전트에게 스킬 만들게 하기", { model.askForSkill() }, Modifier.fillMaxWidth().padding(bottom = 8.dp), kind = ButtonKind.Primary)
+    AeonButton("스킬 관리 · 가져오기", { model.openSkills() }, Modifier.fillMaxWidth().padding(bottom = 10.dp), kind = ButtonKind.Secondary)
     if (list.isEmpty()) {
         Hint(if (!sk.loaded) "불러오는 중이에요." else if (query.isNotEmpty()) "찾는 스킬이 없어요." else "아직 스킬이 없어요. 자주 시키는 일을 말하면 에이전트가 스킬로 만들어 줘요.")
     } else {
@@ -410,7 +411,7 @@ private fun SkillsSection(state: UiState, model: AppModel, query: String) {
             list.forEachIndexed { i, k ->
                 if (i > 0) RowDivider()
                 Row(
-                    Modifier.fillMaxWidth().defaultMinSize(minHeight = 64.dp).clickable { model.editSkill(k.folder) }.padding(horizontal = 16.dp, vertical = 10.dp),
+                    Modifier.fillMaxWidth().defaultMinSize(minHeight = 64.dp).clickable { model.openSkill(k.folder, k.scope, fromOutside = true) }.padding(horizontal = 16.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Box(Modifier.size(44.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
@@ -420,7 +421,7 @@ private fun SkillsSection(state: UiState, model: AppModel, query: String) {
                         Text(k.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         if (k.description.isNotBlank()) Text(k.description, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
-                    if (k.problems.isNotEmpty()) Chip("형식 오류", Tone.Warn)
+                    SkillStateChip(k)
                     Icon(AeonIcons.Chevron, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
                 }
             }
