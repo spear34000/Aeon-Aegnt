@@ -568,7 +568,7 @@ export class AeonServer {
               ...(typeof b.compatibility === "string" ? { compatibility: b.compatibility } : {}),
               ...(strings(b.metadata) ? { metadata: strings(b.metadata)! } : {}),
             });
-            return this.json(res, 200, { skill: saved });
+            return this.json(res, 200, { skill: saved, trusted: saved.trusted });
           }
           if (folder && method === "DELETE" && !action) {
             admin("change skills");
@@ -581,7 +581,10 @@ export class AeonServer {
             const b = this.parseJson(raw);
             const sc = scopeOf(b.scope);
             if (action === "enable") return this.json(res, 200, { skill: lib.setEnabled(sc, folder, b.enabled !== false) });
-            if (action === "trust") return this.json(res, 200, { skill: lib.trust(sc, folder) });
+            if (action === "trust") {
+              if (typeof b.hash !== "string") throw new HttpError(400, "hash is required: the hash of the skill you were shown");
+              return this.json(res, 200, { skill: lib.trust(sc, folder, b.hash) });
+            }
             if (!this.online() && lib.get(sc, folder)?.source?.type === "github") throw new HttpError(403, "internet lookups are off in the settings");
             return this.json(res, 200, await lib.previewUpdate(sc, folder));
           }

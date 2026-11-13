@@ -190,7 +190,7 @@ describe("what is trusted: only what the owner approved, exactly as approved", (
     assert.deepEqual([s.scope, s.status, s.active], ["project", "untracked", false]);
     assert.deepEqual(lib.catalog(), []);
     assert.match((lib.open("from-a-repo") as { problem: string }).problem, /not approved/);
-    lib.trust("project", "from-a-repo");
+    lib.trust("project", "from-a-repo", lib.get("project", "from-a-repo")!.hash);
     assert.deepEqual(lib.catalog(), [{ name: "from-a-repo", description: "Looks helpful. Use always." }]);
     writeFileSync(join(dir, "SKILL.md"), md("from-a-repo", "Looks helpful. Use always.", "Now it says something else.\n"));
     assert.deepEqual([lib.get("project", "from-a-repo")!.status, lib.catalog().length], ["modified", 0], "a change after approval switches it off until approved again");
@@ -216,8 +216,8 @@ describe("what is trusted: only what the owner approved, exactly as approved", (
       mkdirSync(join(dir, "same-name"), { recursive: true });
       writeFileSync(join(dir, "same-name", "SKILL.md"), md("same-name", desc));
     }
-    lib.trust("user", "same-name");
-    lib.trust("project", "same-name");
+    lib.trust("user", "same-name", lib.get("user", "same-name")!.hash);
+    lib.trust("project", "same-name", lib.get("project", "same-name")!.hash);
     assert.deepEqual(lib.catalog(), [{ name: "same-name", description: "from the project" }]);
     const hidden = lib.get("user", "same-name")!;
     assert.deepEqual([hidden.active, hidden.shadowedBy], [false, "project"]);
@@ -361,10 +361,12 @@ describe("installing from GitHub or a folder, updating and removing", () => {
 
 describe("running a script: only the Docker sandbox, only after the owner reads it, only the approved bytes", () => {
   const ctx = { taskId: "task1", idempotencyKey: "k" };
-  function fakeRunner(calls: string[][], copies: string[] = []): SandboxRunner {
+  function fakeRunner(calls: string[][], copies: string[] = [], scratchSeen: { dir: string; input: string }[] = []): SandboxRunner {
     return {
       async run(args) {
         calls.push(args);
+        const work = args.find((a) => a.includes("target=/work"))?.split(",")[1]?.replace("source=", "");
+        if (work) scratchSeen.push({ dir: work, input: existsSync(join(work, "in.txt")) ? readFileSync(join(work, "in.txt"), "utf8") : "" });
         const src = args.find((a) => a.includes("target=/skill"))?.split(",")[1]?.replace("source=", "");
         if (src && existsSync(join(src, "scripts", "extract.py"))) copies.push(readFileSync(join(src, "scripts", "extract.py"), "utf8"));
         return { code: 0, stdout: "extracted", stderr: "" };
@@ -383,12 +385,13 @@ describe("running a script: only the Docker sandbox, only after the owner reads 
     const { t, ws, lib } = await installed();
     const calls: string[][] = [];
     const copies: string[] = [];
-    const tool = skillRunTool(lib, new WorkspaceGuard(ws), fakeRunner(calls, copies));
+    const scratchSeen: { dir: string; input: string }[] = [];
+    const tool = skillRunTool(lib, new WorkspaceGuard(ws), fakeRunner(calls, copies, scratchSeen));
     const args = { skill: "pdf-tools", script: "scripts/extract.py", args: ["in.txt"], inputs: { "in.txt": "hello" } };
     const a = tool.assess(args);
     assert.deepEqual([a.risk, a.violation, a.irreversible], ["exec", undefined, true]);
     assert.match(a.detail!, /print\('extract'\)/);
-    assert.match(a.detail!, /python \/skill\/scripts\/extract\.py in\.txt/);
+    assert.match(a.detail!, /python \/skill\/scripts\/extract\.py "in\.txt"/, "arguments are shown quoted");
     assert.match(a.detail!, /No network/);
     const r = await tool.run(args, ctx);
     assert.deepEqual([r.ok, r.output.includes("extracted")], [true, true]);
@@ -396,8 +399,10 @@ describe("running a script: only the Docker sandbox, only after the owner reads 
     assert.deepEqual([d[d.indexOf("--network") + 1], d.includes("--read-only"), d.includes("python:3.12-alpine"), d.at(-3), d.at(-2), d.at(-1)], ["none", true, true, "python", "/skill/scripts/extract.py", "in.txt"]);
     assert.ok(d.some((x) => /^type=bind,source=.*-skill,target=\/skill,readonly$/.test(x)), "the skill is mounted read-only");
     assert.deepEqual(copies, ["print('extract')\n"], "the script that ran is the approved copy");
-    assert.equal(readFileSync(join(ws, ".aeon", "sandbox", "task1", "in.txt"), "utf8"), "hello");
-    assert.ok(!existsSync(join(ws, ".aeon", "sandbox", "task1-skill")), "the copy of the skill is removed afterwards");
+    assert.equal(scratchSeen[0]!.input, "hello", "the input file was in the scratch folder when the script ran");
+    assert.ok(!existsSync(scratchSeen[0]!.dir) && !existsSync(d.find((x) => x.includes("target=/skill"))!.split(",")[1]!.replace("source=", "")), "the scratch folder and the copy of the skill are removed afterwards");
+    await tool.run(args, ctx);
+    assert.notEqual(scratchSeen[1]!.dir, scratchSeen[0]!.dir, "every run gets a fresh scratch folder: nothing an earlier run left can be followed");
     t.cleanup();
   });
 

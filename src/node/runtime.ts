@@ -15,9 +15,10 @@ import { WorkspaceGuard } from "./fs-guard.ts";
 import { FileStore } from "./file-store.ts";
 import { fsTools } from "./tools/fs-tools.ts";
 import { httpTools } from "./tools/http-tools.ts";
-import { sandboxTool, type SandboxRunner } from "./tools/sandbox-tool.ts";
+import { DEFAULT_SANDBOX, dockerRunner, sandboxTool, type SandboxRunner } from "./tools/sandbox-tool.ts";
 import { skillTools } from "./tools/skill-tools.ts";
 import { skillRunTool } from "./tools/skill-run-tool.ts";
+import { nodeHostRunner, type HostRunner } from "./tools/host-script-runner.ts";
 import { SkillLibrary } from "./skill-library.ts";
 import type { FetchLike } from "./skill-sources.ts";
 import { nodeVerifierEnv } from "./verifier-env.ts";
@@ -59,6 +60,11 @@ export interface RuntimeOptions {
   skillsLockFile?: string;
   /** Injected transport for fetching skills from GitHub (tests). */
   skillFetch?: FetchLike;
+  /**
+   * Runs skill scripts on this computer when a task asks for isolation "host" (D21). Default: the real runner, except inside the
+   * phone app. Pass null to switch host runs off, or a fake in tests.
+   */
+  hostRunner?: HostRunner | null;
 }
 
 /**
@@ -164,7 +170,7 @@ export function createRuntime(opts: RuntimeOptions) {
     : undefined;
   if (skills) {
     for (const t of skillTools(skills)) tools.register(t);
-    tools.register(skillRunTool(skills, guard, ...(opts.sandboxRunner ? [opts.sandboxRunner] : [])));
+    tools.register(skillRunTool(skills, guard, opts.sandboxRunner ?? dockerRunner, DEFAULT_SANDBOX, opts.hostRunner === undefined ? (process.platform === "android" ? null : nodeHostRunner) : opts.hostRunner));
   }
 
   const policy = new PolicyEngine(opts.policyRules ?? DEFAULT_RULES);

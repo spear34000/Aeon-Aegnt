@@ -88,7 +88,7 @@ This needs the Android NDK (29.0.14206865) and Node 24 on the build machine. Wit
 
 ## Skills (decision D20)
 
-Skills follow the Agent Skills specification. The agent makes them (you approve each), or you install one from GitHub or a folder through the API (`POST /v1/skill-sources/inspect`, then `/install`; see docs/API.md). Skills live per owner (`<config dir>/skills`) or per project (`<workspace>/.agents/skills`), and the agent only uses ones you approved (`skills-lock.json`). Scripts run only in the Docker sandbox, after you approve each run.
+Skills follow the Agent Skills specification. The agent makes them (you approve each), or you install one from GitHub or a folder through the API (`POST /v1/skill-sources/inspect`, then `/install`; see docs/API.md). Skills live per owner (`<config dir>/skills`) or per project (`<workspace>/.agents/skills`), and the agent only uses ones you approved (`skills-lock.json`). Scripts run only after you read them and approve each run: in a Docker container by default, or on the computer itself when asked (JavaScript under Node's permission model; Python and shell with no isolation, and the approval card says so).
 
 ## Commands
 

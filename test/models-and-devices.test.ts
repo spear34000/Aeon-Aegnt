@@ -499,7 +499,9 @@ describe("Setting things up from any paired device", () => {
     const clone = (await call("GET", "/v1/skills")).body.skills.find((s: { folder: string }) => s.folder === "from-a-clone");
     assert.deepEqual([clone.scope, clone.status, clone.active], ["project", "untracked", false]);
     assert.equal((await call("POST", "/v1/skills/from-a-clone/enable", { scope: "project", enabled: true })).status, 409, "switching on is not approving");
-    assert.equal((await call("POST", "/v1/skills/from-a-clone/trust", { scope: "project" })).body.skill.active, true);
+    assert.equal((await call("POST", "/v1/skills/from-a-clone/trust", { scope: "project" })).status, 400, "the hash of what was shown is required");
+    assert.equal((await call("POST", "/v1/skills/from-a-clone/trust", { scope: "project", hash: "0".repeat(64) })).status, 409, "a skill that is not what was shown is not approved");
+    assert.equal((await call("POST", "/v1/skills/from-a-clone/trust", { scope: "project", hash: clone.hash })).body.skill.active, true);
     assert.equal((await call("GET", "/v1/skills/from-a-clone?scope=project")).body.skill.scope, "project");
     assert.equal((await call("DELETE", "/v1/skills/from-a-clone?scope=project")).status, 204);
 
@@ -507,7 +509,7 @@ describe("Setting things up from any paired device", () => {
     const code = ex.open((await call("POST", "/v1/pairing-codes", { epk: ex.epk, admin: false })).body.sealed, `pairing-code|${t.owner.id}`);
     const limited = new Client("tablet");
     await limited.pair(t.base, code);
-    for (const [m, p, b] of [["POST", "/v1/skill-sources/inspect", { source: src }], ["POST", "/v1/skill-sources/install", { previewId: preview.id, name: "tidy-notes" }], ["POST", "/v1/skills/tidy-notes/trust", { scope: "user" }], ["POST", "/v1/skills/tidy-notes/enable", { scope: "user", enabled: false }], ["DELETE", "/v1/skills/tidy-notes", undefined]] as [string, string, Record<string, unknown> | undefined][]) {
+    for (const [m, p, b] of [["POST", "/v1/skill-sources/inspect", { source: src }], ["POST", "/v1/skill-sources/install", { previewId: preview.id, name: "tidy-notes" }], ["POST", "/v1/skills/tidy-notes/trust", { scope: "user", hash: "x" }], ["POST", "/v1/skills/tidy-notes/enable", { scope: "user", enabled: false }], ["DELETE", "/v1/skills/tidy-notes", undefined]] as [string, string, Record<string, unknown> | undefined][]) {
       assert.equal((await limited.call(t.base, t.clock, m, p, b)).status, 403, `${m} ${p}`);
     }
     assert.equal((await call("POST", "/v1/skill-sources/inspect", { source: "https://gitlab.com/o/r" })).status, 400);

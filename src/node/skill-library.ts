@@ -222,18 +222,24 @@ export class SkillLibrary {
     return entries;
   }
 
-  /** The agent's own write (after the owner approved it on the approval card): saved in the owner's scope and trusted as written. */
-  writeAsAgent(spec: SkillSpec, create: boolean, files: Record<string, string>): SkillFull {
+  /**
+   * The agent's own write (after the owner approved it on the approval card): saved in the owner's scope. A new skill is
+   * trusted as written. A change keeps the trust only if the skill was exactly what the owner approved before: the card
+   * shows the SKILL.md and the files being written, not the files that stay, so if those had been changed the result is
+   * saved but left unapproved (`trusted: false`) and the owner has to review it.
+   */
+  writeAsAgent(spec: SkillSpec, create: boolean, files: Record<string, string>): SkillFull & { trusted: boolean } {
     this.adoptExisting();
+    const wasTracked = !create && this.get("user", spec.name)?.status === "tracked";
     const saved = this.user.write(spec, create, files);
-    const entries = this.user.entries(saved.folder);
     const before = this.entry("user", saved.folder);
-    this.setEntry("user", saved.folder, skillHash(entries ?? []), before?.source ?? { type: "agent" }, saved.metadata?.version, before?.enabled ?? true);
-    return saved;
+    const trusted = create || wasTracked;
+    if (trusted) this.setEntry("user", saved.folder, skillHash(this.user.entries(saved.folder) ?? []), before?.source ?? { type: "agent" }, saved.metadata?.version, before?.enabled ?? true);
+    return { ...saved, trusted };
   }
 
-  /** The owner's correction of a skill in the owner's scope. */
-  writeAsOwner(spec: SkillSpec): SkillFull {
+  /** The owner's correction of a skill in the owner's scope. Trusted afterwards only under the same condition as the agent's change. */
+  writeAsOwner(spec: SkillSpec): SkillFull & { trusted: boolean } {
     return this.writeAsAgent(spec, false, {});
   }
 
@@ -251,10 +257,14 @@ export class SkillLibrary {
     return this.get(scope, name)!;
   }
 
-  /** The owner has read this skill as it is now and accepts it. Records its current content as the approved one. */
-  trust(scope: SkillScope, name: string): LibrarySkill {
+  /**
+   * The owner has read this skill and accepts it. [expectedHash] is the hash of what they were shown: if the folder
+   * changed since, nothing is approved (409), so what is trusted is always what was read.
+   */
+  trust(scope: SkillScope, name: string, expectedHash: string): LibrarySkill {
     const s = this.get(scope, name);
     if (!s) throw new SkillError(404, "skill not found");
+    if (s.hash !== expectedHash) throw new SkillError(409, "the skill changed since you looked at it: look at it again");
     if (s.problems.length > 0) throw new SkillError(400, `it does not follow the Agent Skills format: ${s.problems.join("; ")}`);
     this.setEntry(scope, name, s.hash, s.source ?? { type: "local", path: this.store(scope).folderPath(name) }, s.version, true);
     return this.get(scope, name)!;

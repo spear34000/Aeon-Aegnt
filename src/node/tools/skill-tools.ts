@@ -120,6 +120,7 @@ function writeTool(library: SkillLibrary, create: boolean): Tool {
       try {
         const saved = library.writeAsAgent(p.value.spec, create, p.value.files);
         const hidden = library.get("project", saved.folder)?.active ? " A project skill with the same name exists and is used instead of this one." : "";
+        if (!saved.trusted) return { ok: true, output: `Saved skill "${saved.name}", but it is NOT available: other files of this skill had changed since the owner approved it, so the owner has to review it before it can be used.` };
         return { ok: true, output: `${create ? "Created" : "Changed"} skill "${saved.name}" (${saved.files.length} supporting files). It is available from now on: use skill.read to open it.${hidden}` };
       } catch (e) {
         if (e instanceof SkillError) return { ok: false, output: `ERROR: ${e.message}` };
