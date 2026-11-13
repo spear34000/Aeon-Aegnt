@@ -11,7 +11,7 @@ import type { ToolRegistry } from "./tools.ts";
 import type { PendingAction, StepRecord, Task } from "./types.ts";
 import { skillCatalogLines } from "./skills.ts";
 import { extractJsonObject, looksLikeInjection, truncate, wrapUntrusted } from "./untrusted.ts";
-import { parseCriterion } from "./verify.ts";
+import { parseCriterion, type VerificationCriterion, type VerificationResult } from "./verify.ts";
 import type { RunContext, RunOutcome, TaskRunner } from "./workflow.ts";
 
 export interface AgentConfig {
@@ -31,6 +31,18 @@ export interface AgentConfig {
   profile?: Profile;
   /** The skills that exist right now (name and description only). Read at every model call, so a skill made during a task is seen at once. */
   skills?: () => { name: string; description: string }[];
+  /**
+   * Checks the task's criteria against the real world, so the agent can look at its own result before it says it is done and,
+   * if a check fails, reflect and repair (Reflexion: a failed trial with an outside signal is followed by a written reflection).
+   * Without it the agent finishes when it says so and only the engine's final check decides.
+   */
+  verify?: (criteria: VerificationCriterion[]) => Promise<VerificationResult>;
+  /** How many times a failed check sends the agent back to work before it finishes anyway (default 2). */
+  maxRepairs?: number;
+  /** The most recent steps shown in full in each model call; older ones shrink to one line (default 6). */
+  historyFullSteps?: number;
+  /** Largest history text per model call, in characters (default 20000). */
+  historyBudgetChars?: number;
 }
 
 /** Lines appended to the system prompt. Kept short and stripped of control characters and tag brackets. */
@@ -53,6 +65,17 @@ export function profileLines(p: Profile | undefined): string[] {
 }
 
 const MAX_CONSECUTIVE_FORMAT_ERRORS = 3;
+/** Steps the agent writes for itself, not tool runs: notes, reflections and notices. They are never sent to a tool. */
+const NOTE = "agent.note";
+const REFLECT = "agent.reflect";
+const NOTICE = "agent.notice";
+const isOwn = (tool: string) => tool === NOTE || tool === REFLECT || tool === NOTICE;
+const MAX_NOTES = 12;
+const NOTE_CHARS = 300;
+const MAX_REFLECTIONS_SHOWN = 3;
+/** The same action with the same result this many times in a row is a loop (the heuristic Reflexion used: more than 3 cycles). */
+const STALL_REPEATS = 3;
+const MAX_STALL_NOTICES = 3;
 
 /**
  * Agent Orchestrator (Phase 1): plan -> act loop, one checkpoint per step.
@@ -169,6 +192,10 @@ export class Agent implements TaskRunner {
     const steps = [...task.steps];
     let pending: PendingAction | undefined = task.pendingAction;
     let formatErrors = 0;
+    // Counted from the saved steps, so a restart does not give the agent a fresh set of repairs.
+    let repairs = steps.filter((s) => s.tool === REFLECT && (s.args as { trigger?: unknown } | null)?.trigger === "check").length;
+    let noteStreak = 0;
+    const maxRepairs = this.cfg.maxRepairs ?? 2;
 
     while (steps.length < task.maxSteps) {
       const fresh = await ctx.reload();
@@ -180,8 +207,30 @@ export class Agent implements TaskRunner {
         const res = await this.callModel(this.buildMessages(task, steps), task, ctx);
         const action = extractJsonObject(res.content) as Record<string, unknown> | null;
 
+        // A note is for the agent itself: something it must still know many steps from now (Anthropic: structured note-taking).
+        if (action && action.action === "note" && typeof action.text === "string" && action.text.trim() !== "" && noteStreak < 2) {
+          noteStreak += 1;
+          const text = this.cfg.redactor.redact(action.text.replace(/[\u0000-\u001f<>]/g, " ").replace(/\s+/g, " ").trim().slice(0, NOTE_CHARS));
+          steps.push(this.record(steps.length, NOTE, {}, text, true));
+          await ctx.checkpoint({ steps });
+          continue;
+        }
+        noteStreak = 0;
+
         if (action && action.action === "finish") {
           const summary = typeof action.summary === "string" ? action.summary : "(no summary)";
+          // Look at the result before saying it is done. A failed check is an outside signal: reflect on it and go back to work.
+          if (this.cfg.verify && task.criteria.length > 0 && repairs < maxRepairs && steps.length < task.maxSteps - 1) {
+            const checked = await this.cfg.verify(task.criteria);
+            await ctx.audit("self_check", { status: checked.status, repairs });
+            if (checked.status === "failed") {
+              repairs += 1;
+              const text = await this.reflect(task, steps, "check", describeFailures(checked), ctx);
+              steps.push(this.record(steps.length, REFLECT, { trigger: "check" }, text, true));
+              await ctx.checkpoint({ steps });
+              continue;
+            }
+          }
           return { kind: "done", result: this.cfg.redactor.redact(summary) };
         }
         const toolName = action && action.action === "tool" && typeof action.tool === "string" ? action.tool : null;
@@ -208,6 +257,20 @@ export class Agent implements TaskRunner {
       const outcome = await this.handlePending(task, pending, steps, ctx);
       if (outcome.kind === "stop") return outcome.outcome;
       pending = undefined;
+
+      // The same action with the same result again and again is a loop. First a notice, then a written reflection, then stop.
+      if (isStalled(steps)) {
+        const notices = steps.filter((s) => s.tool === NOTICE).length;
+        const last = steps[steps.length - 1]!;
+        if (notices >= MAX_STALL_NOTICES) return { kind: "fail", error: `the agent kept repeating ${last.tool} with the same result`, retryable: false };
+        await ctx.audit("stall_detected", { tool: last.tool, notices });
+        if (notices === 1) {
+          const text = await this.reflect(task, steps, "stall", `The last ${STALL_REPEATS} steps were the same ${last.tool} call with the same result.`, ctx);
+          steps.push(this.record(steps.length, REFLECT, { trigger: "stall" }, text, true));
+        }
+        steps.push(this.record(steps.length, NOTICE, {}, `You repeated ${last.tool} ${STALL_REPEATS} times with the same result. Do not do it again: try something different, or finish and say what stopped you.`, false));
+        await ctx.checkpoint({ steps });
+      }
     }
     return { kind: "fail", error: `step budget exhausted (${task.maxSteps} steps)`, retryable: false };
   }
@@ -324,20 +387,94 @@ export class Agent implements TaskRunner {
     return { index, tool, args: this.cfg.redactor.redactValue(args ?? {}), output, ok, at: this.cfg.clock.now() };
   }
 
+  /**
+   * What the model sees each step. The goal and plan come first and a reminder of the reply format comes last (models use the
+   * start and end of a long prompt best: "Lost in the Middle"). The agent's own notes and its last few reflections are kept
+   * whole. Tool results are the bulk: the most recent ones stay in full, older ones shrink to a line (clearing old tool
+   * results is the lightest compaction there is), and the history as a whole is held to a budget.
+   */
   private buildMessages(task: Task, steps: StepRecord[]): ChatMessage[] {
-    const history = steps
-      .map((s) => `Step ${s.index} ${s.ok ? "OK" : "FAILED"} tool=${s.tool} args=${truncate(JSON.stringify(s.args), 400)}\n${this.renderOutput(s)}`)
-      .join("\n\n");
+    const notes = steps.filter((s) => s.tool === NOTE).slice(-MAX_NOTES).map((s) => `- ${s.output}`);
+    const reflections = steps.filter((s) => s.tool === REFLECT).slice(-MAX_REFLECTIONS_SHOWN).map((s) => `- ${s.output}`);
+    const full = this.cfg.historyFullSteps ?? 6;
+    const budget = this.cfg.historyBudgetChars ?? 20_000;
+    const work = steps.filter((s) => s.tool !== NOTE && s.tool !== REFLECT);
+    const toolSteps = work.filter((s) => s.tool !== NOTICE);
+    const recent = new Set(toolSteps.slice(-full).map((s) => s.index));
+    const lines = work.map((s) => {
+      if (s.tool === NOTICE) return `Notice: ${s.output}`;
+      if (recent.has(s.index)) return `Step ${s.index} ${s.ok ? "OK" : "FAILED"} tool=${s.tool} args=${truncate(JSON.stringify(s.args), 400)}\n${this.renderOutput(s)}`;
+      const first = s.output.replace(/\s+/g, " ").slice(0, s.ok ? 160 : 300);
+      return `Step ${s.index} ${s.ok ? "OK" : "FAILED"} tool=${s.tool} args=${truncate(JSON.stringify(s.args), 120)} -> ${wrapUntrusted(`tool:${s.tool}`, first + (s.output.length > first.length ? " [shortened: the full result is no longer shown]" : ""))}`;
+    });
+    // Over budget: the oldest lines go first, and the model is told that they did.
+    let used = 0;
+    let keepFrom = lines.length;
+    for (let i = lines.length - 1; i >= 0; i--) {
+      used += lines[i]!.length + 2;
+      if (used > budget) break;
+      keepFrom = i;
+    }
+    const shown = lines.slice(keepFrom);
+    const left = keepFrom > 0 ? `[${keepFrom} earlier steps left out to keep this short. Your notes above still hold what mattered.]\n\n` : "";
     const user = [
       `Owner goal: ${task.goal}`,
       `Plan: ${task.plan.map((p, i) => `${i + 1}. ${p}`).join(" ")}`,
-      history ? `History:\n${history}` : "History: (none yet)",
-      'Reply with {"action":"tool","tool":"<name>","args":{...}} to act, or {"action":"finish","summary":"<what was actually done>"} when done.',
-      "Only claim what the history proves.",
+      ...(notes.length > 0 ? [`Your notes (written by you earlier in this task):\n${notes.join("\n")}`] : []),
+      ...(reflections.length > 0 ? [`What you learned from earlier trouble (your own reflections):\n${reflections.join("\n")}`] : []),
+      shown.length > 0 ? `History:\n${left}${shown.join("\n\n")}` : "History: (none yet)",
+      'Reply with {"action":"tool","tool":"<name>","args":{...}} to act, {"action":"note","text":"<one short fact to remember>"} to write something down, or {"action":"finish","summary":"<what was actually done>"} when done.',
+      "Only claim what the history proves. Do not repeat an action that already failed or gave the same result.",
     ].join("\n");
     return [
       { role: "system", content: this.systemPrompt() },
       { role: "user", content: user },
     ];
   }
+
+  /** One written reflection after a failed check or a loop: what went wrong and what to do differently (Reflexion). Never fails the task. */
+  private async reflect(task: Task, steps: StepRecord[], trigger: "check" | "stall", what: string, ctx: RunContext): Promise<string> {
+    const fallback = trigger === "check" ? `The result did not pass its checks: ${what} Look at what is really there before trying again.` : `I was repeating myself: ${what}`;
+    try {
+      const res = await this.callModel(
+        [
+          { role: "system", content: this.systemPrompt() },
+          {
+            role: "user",
+            content: [
+              `Owner goal: ${task.goal}`,
+              `What happened: ${what}`,
+              `Recent steps:\n${steps.filter((s) => !isOwn(s.tool)).slice(-4).map((s) => `Step ${s.index} ${s.ok ? "OK" : "FAILED"} tool=${s.tool} -> ${s.output.replace(/\s+/g, " ").slice(0, 200)}`).join("\n")}`,
+              'Reply with JSON: {"reflection":"<two or three sentences: what went wrong, and what you will do differently>"}. Say only what the steps above support.',
+            ].join("\n"),
+          },
+        ],
+        task,
+        ctx,
+      );
+      const parsed = extractJsonObject(res.content) as { reflection?: unknown } | null;
+      const text = typeof parsed?.reflection === "string" ? parsed.reflection.replace(/[\u0000-\u001f<>]/g, " ").replace(/\s+/g, " ").trim().slice(0, 500) : "";
+      await ctx.audit("reflection", { trigger, written: text !== "" });
+      return this.cfg.redactor.redact(text !== "" ? text : fallback);
+    } catch (e) {
+      if (e instanceof QuotaWaitError || (e instanceof Error && e.name === "StaleLeaseError")) throw e;
+      return this.cfg.redactor.redact(fallback);
+    }
+  }
+}
+
+/** The failed checks of a verification, one plain sentence each: what was expected and what was found. */
+function describeFailures(v: VerificationResult): string {
+  const bad = v.evidence.filter((e) => !e.passed).slice(0, 5);
+  if (bad.length === 0) return "The checks did not pass.";
+  return bad.map((e) => `Expected ${JSON.stringify({ ...e.criterion, source: undefined })} but found: ${e.observed.slice(0, 200)}.`).join(" ");
+}
+
+/** The last STALL_REPEATS real steps are the same call with the same result. */
+function isStalled(steps: StepRecord[]): boolean {
+  const real = steps.filter((s) => !isOwn(s.tool));
+  if (real.length < STALL_REPEATS) return false;
+  const tail = real.slice(-STALL_REPEATS);
+  const key = (s: StepRecord) => JSON.stringify([s.tool, s.args, s.ok, s.output]);
+  return tail.every((s) => key(s) === key(tail[0]!));
 }

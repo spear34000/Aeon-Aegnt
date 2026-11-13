@@ -7,7 +7,7 @@ import { MemoryStore } from "../src/core/memory-store.ts";
 import { MockProvider } from "../src/core/models/mock.ts";
 import type { Task } from "../src/core/types.ts";
 import { createRuntime } from "../src/node/runtime.ts";
-import { finishReply, harness, planReply, tempDir, toolReply } from "./helpers.ts";
+import { finishReply, harness, json, planReply, tempDir, toolReply } from "./helpers.ts";
 
 const get = async (h: ReturnType<typeof harness>, id: string): Promise<Task> => (await h.store.getTask(id))!;
 
@@ -30,7 +30,9 @@ describe("Agent end-to-end (mock model, real filesystem tools)", () => {
   });
 
   it("catches an agent that SAYS it finished but did nothing (user-defined criterion)", async () => {
-    const m = new MockProvider("m", [planReply(), finishReply("All done, file created!")]);
+    // It says it is done three times: the first two are sent back to work after a failed check, the third is the final answer.
+    const reflection = json({ reflection: "I said I was done without making the file." });
+    const m = new MockProvider("m", [planReply(), finishReply("All done, file created!"), reflection, finishReply("All done, file created!"), reflection, finishReply("All done, file created!")]);
     const h = harness({ providers: [m] });
     const t = await h.engine.submit({ goal: "create out.txt", criteria: [{ kind: "file_exists", path: "out.txt" }] });
     await h.engine.runTask(t.id);

@@ -11,6 +11,7 @@ import { Redactor } from "../core/redact.ts";
 import type { Store } from "../core/store.ts";
 import { ToolRegistry } from "../core/tools.ts";
 import { WorkflowEngine } from "../core/workflow.ts";
+import { verify as verifyCriteria } from "../core/verify.ts";
 import { WorkspaceGuard } from "./fs-guard.ts";
 import { FileStore } from "./file-store.ts";
 import { fsTools } from "./tools/fs-tools.ts";
@@ -176,6 +177,8 @@ export function createRuntime(opts: RuntimeOptions) {
   const policy = new PolicyEngine(opts.policyRules ?? DEFAULT_RULES);
   const agent = new Agent({
     router, tools, policy, store, clock, redactor,
+    // The agent looks at its own result against the real files before it says it is done (it may then repair, twice at most).
+    verify: (criteria) => verifyCriteria(criteria, nodeVerifierEnv(guard), clock.now()),
     ...(opts.profile ? { profile: opts.profile } : {}),
     // Only skills the owner trusts, that are switched on and follow the format, are offered to the model.
     ...(skills ? { skills: () => skills.catalog() } : {}),
