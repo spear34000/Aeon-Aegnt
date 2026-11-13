@@ -41,11 +41,11 @@ export class PolicyEngine {
     if (input.assessment.violation) {
       return { effect: "deny", reason: `scope violation: ${input.assessment.violation}` };
     }
-    // Consent given in advance and recorded by the tool itself (never a deny rule's business: a violation was refused above).
-    if (input.assessment.preApproved) return { effect: "allow", reason: `approved in advance: ${input.assessment.preApproved}` };
     for (const r of this.rules) {
       if (!matchesTool(r.tool, input.tool)) continue;
       if (r.risks && !r.risks.includes(input.assessment.risk)) continue;
+      // Consent given in advance (recorded by the tool itself) only turns a question into a yes. A deny rule still wins.
+      if (r.effect === "ask" && input.assessment.preApproved) return { effect: "allow", reason: `approved in advance: ${input.assessment.preApproved}` };
       if (r.effect === "allow" && input.assessment.risk === "network_read") {
         if (input.assessment.exfilRisk) return { effect: "ask", reason: "request carries data in its URL (query/fragment)" };
         if (input.tainted) return { effect: "ask", reason: "network request after reading workspace content could leak it" };

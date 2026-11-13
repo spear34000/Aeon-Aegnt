@@ -38,6 +38,9 @@ const RULES: Rule[] = [
   { re: /\b(?:eval|exec)\s*\(\s*(?:input|sys\.argv|process\.argv|req|request|fetch|urlopen)/i, severity: "block", what: "runs text that comes from outside" },
   { re: /\bnew\s+Function\s*\(/, severity: "block", what: "builds code from text while running" },
   { re: /\\x[0-9a-f]{2}(?:\\x[0-9a-f]{2}){24,}/i, severity: "block", what: "a long block of escaped bytes (hidden text)" },
+  { re: /\b(?:eval|exec)\s*\(\s*(?:open|Path|pathlib|fs\.readFileSync|readFileSync)/i, severity: "block", what: "runs the contents of a file it reads (an input file could carry code)" },
+  { re: /(?:__import__|importlib\.import_module|require|import)\s*\(\s*(?:sys\.argv|process\.argv|input\()/i, severity: "block", what: "loads code named by its arguments" },
+  { re: /\beval\s+["']?\$[@*0-9{]|\b(?:ba|z)?sh\s+-c\s+["']?\$[@*0-9{]|\bsource\s+["']?\$[@*0-9{]/i, severity: "block", what: "runs text it was handed as a command" },
   // Reaching out of the sandbox or taking over the machine.
   { re: /docker\.sock|\/var\/run\/docker|\/proc\/(?:self|1)\/(?:root|ns|environ)|\/sys\/fs\/cgroup/i, severity: "block", what: "touches the container runtime or host internals" },
   { re: /\b(?:sudo|su\s+-|chmod\s+(?:[0-7]?777|[ugo]*\+s)|chown\s+root|setuid|insmod|modprobe|nsenter|unshare|mount\s+-)/i, severity: "block", what: "asks for more rights than a script needs" },
@@ -53,12 +56,15 @@ const RULES: Rule[] = [
   { re: /\b(?:rm\s+-rf|shutil\.rmtree|fs\.rmSync|os\.remove|unlink)\b/i, severity: "note", what: "deletes files (only the scratch folder is writable in Docker)" },
 ];
 
-/** Looks at every file in scripts/ (text only; a binary there is a finding). */
+/** Code-like files outside scripts/ are looked at too: a script can import or source them. */
+const CODE_FILE = /\.(?:py|js|mjs|cjs|ts|sh|bash|zsh|ps1|bat|cmd|rb|pl|php|lua)$/i;
+
+/** Looks at every file in scripts/ and every code-like file elsewhere in the skill (text only; a binary in scripts/ is a finding). */
 export function scanSkillScripts(entries: { path: string; bytes: Buffer }[]): SafetyReport {
   const findings: Finding[] = [];
   let scanned = 0;
   for (const e of entries) {
-    if (!e.path.startsWith("scripts/")) continue;
+    if (!e.path.startsWith("scripts/") && !(CODE_FILE.test(e.path) && e.path !== "SKILL.md")) continue;
     scanned++;
     if (e.bytes.includes(0)) {
       findings.push({ file: e.path, line: 0, severity: "block", what: "is a program or data file, not text a person can read" });

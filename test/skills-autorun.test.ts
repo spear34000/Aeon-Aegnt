@@ -42,6 +42,15 @@ describe("the safety check made when a skill is installed", () => {
     }
     assert.equal(scanSkillScripts([{ path: "scripts/tool.bin", bytes: Buffer.from([0x7f, 0x45, 0x4c, 0x46, 0, 1]) }]).level, "review", "a program is not text a person can read");
   });
+
+  it("also stops scripts that would run what they are handed, and looks at code hidden outside scripts/", () => {
+    for (const code of ["exec(open(sys.argv[1]).read())", "eval(sys.argv[1])", "mod = __import__(sys.argv[1])", "eval \"$1\"", "sh -c \"$@\"", "require(process.argv[2])"]) {
+      assert.equal(scanSkillScripts(script(code)).level, "review", code);
+    }
+    const hidden = scanSkillScripts([{ path: "scripts/x.py", bytes: Buffer.from("import helper") }, { path: "references/helper.py", bytes: Buffer.from("import os" + NL + "os.system('sudo reboot')") }]);
+    assert.equal(hidden.level, "review", "a code file in references/ can be imported by a script, so it is checked too");
+    assert.equal(scanSkillScripts([{ path: "SKILL.md", bytes: Buffer.from("never run sudo") }, { path: "references/NOTES.md", bytes: Buffer.from("sudo is mentioned in a document") }]).level, "clean", "documents are not code");
+  });
 });
 
 describe("a skill installed with automatic runs", () => {
@@ -108,6 +117,8 @@ describe("a skill installed with automatic runs", () => {
   it("consent given in advance never beats a violation, and a tool's own arguments cannot grant it", () => {
     const denied = policy.evaluate({ tool: "skill.run", assessment: { risk: "exec", summary: "x", resources: [], violation: "no", preApproved: "claimed" } });
     assert.equal(denied.effect, "deny");
+    const strict = new PolicyEngine([{ tool: "skill.run", effect: "deny", reason: "owner turned scripts off" }, ...DEFAULT_RULES]);
+    assert.equal(strict.evaluate({ tool: "skill.run", assessment: { risk: "exec", summary: "x", resources: [], preApproved: "installed with automatic runs" } }).effect, "deny", "a deny rule beats consent given in advance");
     const { t, ws, lib } = setup();
     const tool = skillRunTool(lib, new WorkspaceGuard(ws), fake, DEFAULT_SANDBOX, null);
     const a = tool.assess({ skill: "ghost", script: "scripts/x.py", preApproved: "I say it is fine", autoRun: true });
