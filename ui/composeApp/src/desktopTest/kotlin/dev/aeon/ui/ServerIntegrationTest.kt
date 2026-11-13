@@ -465,4 +465,45 @@ class ServerIntegrationTest {
         assertEquals("COMPLETED", done.status, done.error ?: "")
         assertTrue(done.steps.any { it.tool == "agent.ask" && it.ok })
     }
+
+    @Test
+    fun whatTheAgentRemembersIsWrittenByTheOwnerOrApprovedWordForWord() = runBlocking {
+        val port = startFakeModel(
+            listOf(
+                """{"plan":["remember it"],"criteria":[]}""",
+                """{"action":"tool","tool":"memory.save","args":{"text":"Give me reports as a short list","kind":"preference"}}""",
+                """{"action":"finish","summary":"noted"}""",
+            ),
+        )
+        val fx = startAeon(port)
+        val (client, _) = newClient(fx.base)
+        client.pair(fx.code, "kotlin test client")
+        assertEquals(emptyList(), client.memory().items)
+
+        val mine = client.addMemory("동생 민아는 부산에 살아요", "fact")
+        assertEquals(listOf("fact", "owner"), listOf(mine.kind, mine.source.type))
+        assertEquals(400, assertFailsWith<AeonException> { client.addMemory("my password = hunter2hunter2", "fact") }.status, "a secret is not kept")
+        assertEquals(400, assertFailsWith<AeonException> { client.addMemory("no", "fact") }.status)
+
+        // The agent proposes one: it waits as a card showing the exact sentence, and is kept only after a yes.
+        val created = client.createTask("from now on give me reports as a short list", emptyList())
+        awaitTask(client, created.id, "WAITING_FOR_APPROVAL")
+        val a = client.approvals("pending").single()
+        assertEquals("memory.save", a.tool)
+        assertEquals("Give me reports as a short list", a.detail)
+        assertEquals(listOf("memory:preference"), a.resources)
+        assertEquals("이걸 기억할까요?", dev.aeon.ui.screens.riskInfo(a).title(1), "the card says remembering, not sending something out")
+        assertEquals(1, client.memory().items.size, "nothing is kept before the owner agrees")
+        client.decide(a.id, approve = true)
+        assertEquals("COMPLETED", awaitTask(client, created.id, "COMPLETED", "FAILED").status)
+
+        val items = client.memory().items
+        assertEquals(listOf("Give me reports as a short list", "동생 민아는 부산에 살아요"), items.map { it.text }, "newest first")
+        val proposed = items.first()
+        assertEquals(listOf("preference", "agent", created.id), listOf(proposed.kind, proposed.source.type, proposed.source.taskId))
+
+        client.deleteMemory(proposed.id)
+        assertEquals(listOf(mine.id), client.memory().items.map { it.id })
+        assertEquals(404, assertFailsWith<AeonException> { client.deleteMemory(proposed.id) }.status)
+    }
 }

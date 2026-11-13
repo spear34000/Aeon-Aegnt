@@ -49,7 +49,7 @@ import dev.aeon.ui.platform.nowMillis
  */
 data class RiskInfo(val kind: String, val level: Int, val title: (Int) -> String)
 
-fun riskInfo(a: Approval): RiskInfo = if (a.tool == "skill.run") RiskInfo("스크립트", 2) { _ -> "스크립트를 실행할까요?" } else if (a.tool == "skill.create") RiskInfo("스킬", 2) { _ -> "스킬을 만들까요?" } else if (a.tool == "skill.update") RiskInfo("스킬", 2) { _ -> "스킬을 바꿀까요?" } else when (a.risk) {
+fun riskInfo(a: Approval): RiskInfo = if (a.tool == "skill.run") RiskInfo("스크립트", 2) { _ -> "스크립트를 실행할까요?" } else if (a.tool == "skill.create") RiskInfo("스킬", 2) { _ -> "스킬을 만들까요?" } else if (a.tool == "skill.update") RiskInfo("스킬", 2) { _ -> "스킬을 바꿀까요?" } else if (a.tool == "memory.save") RiskInfo("기억", 2) { _ -> "이걸 기억할까요?" } else when (a.risk) {
     "read" -> RiskInfo("읽기", 1) { n -> "파일 ${n}개를 읽을까요?" }
     "write" -> RiskInfo("쓰기", 2) { n -> "파일 ${n}개를 쓸까요?" }
     "delete" -> RiskInfo("삭제", 3) { n -> "파일 ${n}개를 삭제할까요?" }
@@ -84,6 +84,8 @@ fun ApprovalCard(a: Approval, seenAt: Long?, sourceLabel: String, onDecide: (Boo
     val high = if (isRun) isolation == "host" else info.level == 3 || a.irreversible
     val isFileAction = a.risk == "read" || a.risk == "write" || a.risk == "delete"
     val isSkill = a.tool == "skill.create" || a.tool == "skill.update"
+    // Remembering is not "sending out": the card shows the sentence exactly as it will be kept, and nothing else.
+    val isMemory = a.tool == "memory.save"
     val leftMs = a.expiresAt - now
     var allowReady by remember(a.id) { mutableStateOf(seenAt == null || now - seenAt >= 1000) }
     var showAll by remember(a.id) { mutableStateOf(false) }
@@ -136,6 +138,16 @@ fun ApprovalCard(a: Approval, seenAt: Long?, sourceLabel: String, onDecide: (Boo
                     }
                 }
             }
+        } else if (isMemory) {
+            val kind = if (a.resources.firstOrNull() == "memory:preference") "일하는 방식" else "나에 대해"
+            val text = a.detail?.takeIf { it.isNotBlank() } ?: a.summary.removePrefix("Remember: ")
+            Chip(kind, Tone.Neutral)
+            Column(Modifier.fillMaxWidth().background(scheme.background, RoundedCornerShape(AeonShape.CONTROL.dp)).padding(horizontal = 14.dp, vertical = 12.dp)) {
+                SelectionContainer { Text(text, style = MaterialTheme.typography.titleMedium) }
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                listOf("이 문장 그대로 저장돼요. 다른 말은 덧붙지 않아요.", "앞으로 모든 작업에서 에이전트가 참고해요.", "내 에이전트 › 기억에서 언제든 지울 수 있어요.").forEach { Text("✓ $it", style = MaterialTheme.typography.bodySmall, color = s.ok) }
+            }
         } else if (isSkill) {
             // A skill steers every later task, so the owner sees what it is called, what it is for and, one tap away, what it says.
             val name = a.resources.firstOrNull()?.removePrefix("skill:") ?: ""
@@ -175,9 +187,9 @@ fun ApprovalCard(a: Approval, seenAt: Long?, sourceLabel: String, onDecide: (Boo
         // What will run or leave this machine (a command line, a URL, a request body) is always shown as it will be
         // used: it is what the owner is approving. For file actions the names and folders above are enough, and the
         // exact request is one tap away.
-        val always = !isSkill && !isRun && (a.risk == "exec" || a.risk == "network_write" || a.risk == "external_effect" || info.kind == "확인")
-        if (!always && !isSkill && !isRun) Text(if (details) "자세히 닫기" else "자세히", color = scheme.primary, style = MaterialTheme.typography.labelLarge, modifier = Modifier.clickable { details = !details })
-        if (always || (details && !isSkill && !isRun)) {
+        val always = !isSkill && !isRun && !isMemory && (a.risk == "exec" || a.risk == "network_write" || a.risk == "external_effect" || info.kind == "확인")
+        if (!always && !isSkill && !isRun && !isMemory) Text(if (details) "자세히 닫기" else "자세히", color = scheme.primary, style = MaterialTheme.typography.labelLarge, modifier = Modifier.clickable { details = !details })
+        if (always || (details && !isSkill && !isRun && !isMemory)) {
             Column(Modifier.fillMaxWidth().background(scheme.surfaceVariant, RoundedCornerShape(AeonShape.CONTROL.dp)).padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(a.tool, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant)
                 if (isFileAction) a.resources.forEach { SelectionContainer { Text(it, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall) } }
@@ -185,9 +197,9 @@ fun ApprovalCard(a: Approval, seenAt: Long?, sourceLabel: String, onDecide: (Boo
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            AeonButton("거부", { onDecide(false) }, Modifier.weight(1f).focusRequester(denyFocus), kind = ButtonKind.Strong)
+            AeonButton(if (isMemory) "기억하지 않기" else "거부", { onDecide(false) }, Modifier.weight(1f).focusRequester(denyFocus), kind = ButtonKind.Strong)
             AeonButton(
-                if (!allowReady) "잠시만…" else if (isRun && isolation == "host") "그래도 허용" else "허용",
+                if (!allowReady) "잠시만…" else if (isRun && isolation == "host") "그래도 허용" else if (isMemory) "기억하기" else "허용",
                 { haptic.performHapticFeedback(HapticFeedbackType.LongPress); onDecide(true) },
                 Modifier.weight(1f),
                 kind = if (high) ButtonKind.Destructive else ButtonKind.Primary,

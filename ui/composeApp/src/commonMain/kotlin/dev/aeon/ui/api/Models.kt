@@ -327,6 +327,12 @@ data class FeedItem(
 @Serializable data class FeedData(val updatedAt: Double = 0.0, val interests: List<String> = emptyList(), val sections: List<FeedSection> = emptyList(), val mode: String = "rules", val modeNote: String? = null)
 @Serializable data class FeedResponse(val feed: FeedData? = null, val interests: List<String> = emptyList(), val stale: Boolean = false, val online: Boolean = true)
 
+/** Who made a memory: the owner typed it, or the agent proposed it in a task and the owner approved those exact words. */
+@Serializable data class MemorySource(val type: String = "owner", val taskId: String? = null)
+@Serializable data class MemoryItem(val id: String, val text: String, val kind: String = "fact", val source: MemorySource = MemorySource(), val createdAt: Double = 0.0, val lastUsedAt: Double? = null, val uses: Int = 0)
+@Serializable data class MemoryResponse(val items: List<MemoryItem> = emptyList(), val max: Int = 200, val textMax: Int = 300)
+@Serializable data class MemoryItemResponse(val item: MemoryItem)
+
 @Serializable data class SkillsResponse(val skills: List<SkillItem> = emptyList(), val dir: String = "", val projectDir: String? = null, val canEdit: Boolean = false)
 @Serializable data class SkillResponse(val skill: SkillItem)
 @Serializable data class HelloResponse(val name: String = "Aeon", val api: Int = 1, val pairingRequired: Boolean = true)

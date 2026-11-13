@@ -69,6 +69,7 @@ internal fun pageTitle(p: SettingsPage): String = when (p) {
     SettingsPage.Models -> "모델"
     SettingsPage.Keys -> "API 키"
     SettingsPage.Devices -> "연결된 기기"
+    SettingsPage.Memory -> "기억"
     SettingsPage.Usage -> "사용량"
     SettingsPage.Legal -> "약관 · 권한"
     SettingsPage.About -> "정보"
@@ -86,7 +87,8 @@ fun SettingsScreen(state: UiState, model: AppModel, modifier: Modifier = Modifie
             Row(Modifier.fillMaxWidth().height(60.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 CircleButton(AeonIcons.Back, "뒤로", onBack)
                 Text(pageTitle(state.settingsPage), Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
-                Spacer(Modifier.width(48.dp))
+                // The page for what the agent remembers has its "add" button where the mockup puts it.
+                if (state.settingsPage == SettingsPage.Memory && state.isAdmin) CircleButton(AeonIcons.Plus, "기억 추가", model::openMemoryDraft) else Spacer(Modifier.width(48.dp))
             }
         }
         if (state.settingsPage == SettingsPage.Personal) {
@@ -112,6 +114,7 @@ private fun SettingsTabs(state: UiState, model: AppModel, title: String) {
                 SettingsPage.Models -> "모델"
                 SettingsPage.Keys -> "API 키"
                 SettingsPage.Devices -> "기기"
+                SettingsPage.Memory -> "기억"
                 SettingsPage.Usage -> "사용량"
                 SettingsPage.Legal -> "약관·권한"
                 SettingsPage.About -> "정보"
@@ -129,6 +132,7 @@ private fun SettingsBody(state: UiState, model: AppModel) {
             SettingsPage.Models -> ModelsPage(state, model)
             SettingsPage.Keys -> KeysPage(state, model)
             SettingsPage.Devices -> DevicesPage(state, model)
+            SettingsPage.Memory -> MemoryPage(state, model)
             SettingsPage.Usage -> UsagePage(state)
             SettingsPage.Legal -> LegalPage(state, model)
             SettingsPage.About -> AboutPage(state, model)

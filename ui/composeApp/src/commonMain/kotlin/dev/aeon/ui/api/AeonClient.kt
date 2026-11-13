@@ -201,6 +201,21 @@ class AeonClient(
     /** The picture the server kept for a feed item: encoded JPEG, PNG or WebP bytes. */
     suspend fun feedImage(id: String): ByteArray = signedRaw(HttpMethod.Get, "/v1/feed/image/$id", null, "application/json")
 
+    /** What the owner wants remembered across tasks, newest first. */
+    suspend fun memory(): MemoryResponse = ApiJson.decodeFromString(signed(HttpMethod.Get, "/v1/memory"))
+
+    suspend fun addMemory(text: String, kind: String): MemoryItem {
+        val json = buildJsonObject {
+            put("text", text)
+            put("kind", kind)
+        }
+        return ApiJson.decodeFromString<MemoryItemResponse>(signed(HttpMethod.Post, "/v1/memory", json.toString())).item
+    }
+
+    suspend fun deleteMemory(id: String) {
+        signed(HttpMethod.Delete, "/v1/memory/$id")
+    }
+
     suspend fun skills(): SkillsResponse = ApiJson.decodeFromString(signed(HttpMethod.Get, "/v1/skills"))
 
     suspend fun skill(folder: String, scope: String? = null): SkillItem =

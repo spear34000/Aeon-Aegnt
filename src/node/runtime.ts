@@ -21,6 +21,8 @@ import { skillTools } from "./tools/skill-tools.ts";
 import { skillRunTool } from "./tools/skill-run-tool.ts";
 import { nodeHostRunner, type HostRunner } from "./tools/host-script-runner.ts";
 import { SkillLibrary } from "./skill-library.ts";
+import { MemoryService } from "./memory.ts";
+import { memoryTools } from "./tools/memory-tools.ts";
 import type { FetchLike } from "./skill-sources.ts";
 import { nodeVerifierEnv } from "./verifier-env.ts";
 
@@ -59,6 +61,8 @@ export interface RuntimeOptions {
   projectSkillsDir?: string;
   /** Which skills the owner trusts; defaults to `skills-lock.json` next to skillsDir. Keep it outside the workspace. */
   skillsLockFile?: string;
+  /** File of what the owner wants remembered across tasks (memory.json next to the settings). Without it the agent has no memory. */
+  memoryFile?: string;
   /** Injected transport for fetching skills from GitHub (tests). */
   skillFetch?: FetchLike;
   /**
@@ -174,6 +178,9 @@ export function createRuntime(opts: RuntimeOptions) {
     tools.register(skillRunTool(skills, guard, opts.sandboxRunner ?? dockerRunner, DEFAULT_SANDBOX, opts.hostRunner === undefined ? (process.platform === "android" ? null : nodeHostRunner) : opts.hostRunner));
   }
 
+  const memory = opts.memoryFile ? new MemoryService(opts.memoryFile, () => clock.now()) : undefined;
+  if (memory) for (const t of memoryTools(memory, redactor)) tools.register(t);
+
   const policy = new PolicyEngine(opts.policyRules ?? DEFAULT_RULES);
   const agent = new Agent({
     router, tools, policy, store, clock, redactor,
@@ -182,6 +189,8 @@ export function createRuntime(opts: RuntimeOptions) {
     ...(opts.profile ? { profile: opts.profile } : {}),
     // Only skills the owner trusts, that are switched on and follow the format, are offered to the model.
     ...(skills ? { skills: () => skills.catalog() } : {}),
+    // What the owner asked to be remembered: the few items that fit the goal go into the prompt.
+    ...(memory ? { memory: { relevant: (goal: string) => memory.relevant(goal), markUsed: (ids: string[]) => memory.markUsed(ids) } } : {}),
   });
   const engine = new WorkflowEngine({
     store,
@@ -192,5 +201,5 @@ export function createRuntime(opts: RuntimeOptions) {
     holderId: opts.holderId ?? `local-${process.pid}`,
     ...(opts.leaseTtlMs ? { leaseTtlMs: opts.leaseTtlMs } : {}),
   });
-  return { engine, store, router, tools, policy, guard, redactor, clock, skills };
+  return { engine, store, router, tools, policy, guard, redactor, clock, skills, memory };
 }

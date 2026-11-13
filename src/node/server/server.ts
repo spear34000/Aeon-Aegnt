@@ -11,6 +11,7 @@ import { loadConfig, saveConfig } from "../config-file.ts";
 import type { ConnectionService } from "../connections.ts";
 import { SkillError } from "../skills.ts";
 import { FeedService, FEED_MIN_GAP_MS } from "../feed.ts";
+import { MemoryService, MEMORY_MAX_ITEMS, MEMORY_TEXT_MAX } from "../memory.ts";
 import { articleImageFinder, ImageStore } from "../feed-images.ts";
 import type { ProviderCatalog } from "../provider-catalog.ts";
 import { isSealedBox, type ServerIdentity } from "./seal.ts";
@@ -99,6 +100,7 @@ export class AeonServer {
   private readonly o: AeonServerOptions;
   private readonly clock: Clock;
   private feedService: FeedService | null = null;
+  private memoryFallback: MemoryService | null = null;
   private readonly nonces = new NonceCache(FRESHNESS_MS * 2);
   private server: Server | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -548,6 +550,29 @@ export class AeonServer {
         const data = await feed.refresh(interests, chat, { images: loadConfig(this.o.configDir).feedImages !== false });
         return this.json(res, 200, { feed: data, interests, stale: false, online: true });
       }
+    }
+
+    // What the owner wants remembered across tasks: read by any paired device, changed only by the machine or an admin device.
+    const memoryMatch = /^\/v1\/memory(?:\/(mem_[a-f0-9]{10}))?$/.exec(path);
+    if (memoryMatch) {
+      const memory = rt.memory ?? (this.memoryFallback ??= new MemoryService(join(this.o.configDir, "memory.json"), () => this.clock.now()));
+      const id = memoryMatch[1];
+      if (!id && method === "GET") return this.json(res, 200, { items: memory.list().reverse().sort((a, b) => b.createdAt - a.createdAt), max: MEMORY_MAX_ITEMS, textMax: MEMORY_TEXT_MAX });
+      if (!id && method === "POST") {
+        if (!this.canAdmin(req, deviceId)) throw new HttpError(403, "this device is not allowed to change what is remembered");
+        const b = this.parseJson(raw);
+        const text = MemoryService.clean(b.text);
+        if (!text) throw new HttpError(400, "text must be a sentence of 3 to 300 characters");
+        if (rt.redactor.redact(text) !== text) throw new HttpError(400, "that looks like a secret (a key, token or password): it would be sent to the model with every task");
+        if (b.kind !== undefined && b.kind !== "preference" && b.kind !== "fact") throw new HttpError(400, 'kind must be "preference" or "fact"');
+        return this.json(res, 201, { item: memory.add(text, b.kind === "preference" ? "preference" : "fact", { type: "owner" }) });
+      }
+      if (id && method === "DELETE") {
+        if (!this.canAdmin(req, deviceId)) throw new HttpError(403, "this device is not allowed to change what is remembered");
+        if (!memory.remove(id)) throw new HttpError(404, "nothing remembered with that id");
+        return this.json(res, 200, { ok: true });
+      }
+      throw new HttpError(405, id ? "use DELETE" : "use GET or POST");
     }
 
     const lib = rt.skills ?? this.o.connections?.library;

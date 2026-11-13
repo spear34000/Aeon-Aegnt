@@ -2,7 +2,7 @@
 
 An open-source personal AI agent built around four ideas: **continuity** (work survives restarts and, later, moves between your cloud and your devices), **ownership** (your data, keys, models, and runtime), **verifiability** (a task is only "verified" if the real world confirms it), and **accessibility** (no cloud expertise required).
 
-> **Status: Phase 1 (Agent Core).** Automated tests use mocks; real EXAONE calls and two real end-to-end tasks were also run manually and succeeded. Single-machine runtime only. Cloud runtimes, device continuity, memory, UI and the Android app are planned (see [ROADMAP](docs/ROADMAP.md)) and **do not exist yet**.
+> **Status: Phase 1 (Agent Core).** Automated tests use mocks; real EXAONE calls and two real end-to-end tasks were also run manually and succeeded. Cloud runtimes and device continuity are planned (see [ROADMAP](docs/ROADMAP.md)) and **do not exist yet**. What exists beyond the core: a local server with device pairing, apps for Android (with the agent running on the phone), Windows, Linux and the web, Agent Skills, an interest feed, and agent behaviour built from research (self-check and repair, loop detection, notes, questions, memory across tasks: [notes](docs/research/2026-11-14-agent-behaviour.md)); each is described with what was and was not verified in [TESTING](docs/TESTING.md).
 > Every model interaction in the automated tests is mocked; see [TESTING](docs/TESTING.md) for exactly what was verified for real.
 
 ## What works today

@@ -322,6 +322,7 @@ fun AgentHubScreen(state: UiState, model: AppModel, modifier: Modifier = Modifie
         model.loadUsage()
         model.loadModels()
         model.loadSkills()
+        model.loadMemory()
         if (state.explore.installed.isEmpty()) model.loadExplore()
     }
     if (state.settingsOpen) {
@@ -367,6 +368,8 @@ fun AgentHubScreen(state: UiState, model: AppModel, modifier: Modifier = Modifie
             SettingRow(AeonIcons.Plug, "연결과 도구", if (state.explore.installed.isEmpty()) "" else "${state.explore.installed.size}개") { model.go(Section.Explore) }
             RowDivider(64.dp)
             SettingRow(AeonIcons.Book, "스킬", if (state.skills.list.isEmpty()) "" else "${state.skills.list.size}개") { model.openSkills() }
+            RowDivider(64.dp)
+            SettingRow(AeonIcons.Memory, "기억", if (state.memory.items.isEmpty()) "" else "${state.memory.items.size}개") { open(SettingsPage.Memory) }
             RowDivider(64.dp)
             SettingRow(AeonIcons.Chart, "사용량", "") { open(SettingsPage.Usage) }
             RowDivider(64.dp)

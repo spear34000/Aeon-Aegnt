@@ -320,7 +320,7 @@ async function boot(opts: { local?: boolean; maxUploadBytes?: number; feedFetch?
   const clock = new ManualClock(Date.parse("2026-11-11T03:04:05Z"));
   const workspace = join(dir, "ws");
   mkdirSync(workspace);
-  const rt = createRuntime({ workspace, providers: ["m"], providerOverrides: [new MockProvider("m", [])], fallbackAllowed: false, dataConsent: [], store: new MemoryStore(), clock, skillsDir: join(dir, "cfg", "skills"), skillsLockFile: join(dir, "cfg", "skills-lock.json") });
+  const rt = createRuntime({ workspace, providers: ["m"], providerOverrides: [new MockProvider("m", [])], fallbackAllowed: false, dataConsent: [], store: new MemoryStore(), clock, skillsDir: join(dir, "cfg", "skills"), skillsLockFile: join(dir, "cfg", "skills-lock.json"), memoryFile: join(dir, "cfg", "memory.json") });
   const registry = new DeviceRegistry(null);
   const pairing = new PairingManager(registry);
   const secrets = new MemorySecretStore();
@@ -568,6 +568,40 @@ describe("Setting things up from any paired device", () => {
     assert.equal((await call("PUT", "/v1/config", { ...cfg, profile: { interests: ["AI"] }, onlineLookups: false })).status, 200);
     assert.equal((await call("POST", "/v1/feed/refresh")).status, 403, "internet lookups off: nothing is fetched");
     assert.equal((await call("GET", "/v1/feed")).body.online, false);
+    await t.close();
+  });
+
+  it("what the owner wants remembered: any device reads it, the machine or an admin device changes it, and the agent sees it", async () => {
+    const t = await boot();
+    const call = (method: string, path: string, body?: unknown) => t.owner.call(t.base, t.clock, method, path, body);
+    const empty = await call("GET", "/v1/memory");
+    assert.deepEqual([empty.status, empty.body.items, empty.body.max, empty.body.textMax], [200, [], 200, 300]);
+    assert.equal((await call("POST", "/v1/memory", { text: "no" })).status, 400, "too short");
+    assert.equal((await call("POST", "/v1/memory", { text: "A fine sentence", kind: "secret" })).status, 400);
+    assert.equal((await call("POST", "/v1/memory", { text: "my password = hunter2hunter2" })).status, 400, "a secret would go to the model with every task");
+    const a = await call("POST", "/v1/memory", { text: "Give me reports as a short list", kind: "preference" });
+    assert.equal(a.status, 201);
+    assert.deepEqual([a.body.item.kind, a.body.item.source], ["preference", { type: "owner" }]);
+    const b = await call("POST", "/v1/memory", { text: "My sister Mina lives in Busan" });
+    assert.equal(b.body.item.kind, "fact", "fact is the default");
+    t.clock.advance(5000);
+    const c = await call("POST", "/v1/memory", { text: "Newest thing here" });
+    assert.deepEqual((await call("GET", "/v1/memory")).body.items.map((i: { id: string }) => i.id), [c.body.item.id, b.body.item.id, a.body.item.id], "newest first");
+    assert.ok(existsSync(join(t.cfgDir, "memory.json")));
+
+    const ex = clientExchange(t.owner.serverKey);
+    const code = ex.open((await call("POST", "/v1/pairing-codes", { epk: ex.epk, admin: false })).body.sealed, `pairing-code|${t.owner.id}`);
+    const tablet = new Client("tablet");
+    await tablet.pair(t.base, code);
+    assert.equal((await tablet.call(t.base, t.clock, "GET", "/v1/memory")).body.items.length, 3, "any paired device reads");
+    assert.equal((await tablet.call(t.base, t.clock, "POST", "/v1/memory", { text: "Sneaky addition" })).status, 403);
+    assert.equal((await tablet.call(t.base, t.clock, "DELETE", `/v1/memory/${a.body.item.id}`)).status, 403);
+
+    assert.equal((await call("DELETE", `/v1/memory/${a.body.item.id}`)).status, 200);
+    assert.equal((await call("DELETE", `/v1/memory/${a.body.item.id}`)).status, 404);
+    assert.equal((await call("DELETE", "/v1/memory/not-an-id")).status, 404);
+    assert.equal((await call("PUT", "/v1/memory", {})).status, 405);
+    assert.equal((await call("GET", "/v1/memory")).body.items.length, 2);
     await t.close();
   });
 

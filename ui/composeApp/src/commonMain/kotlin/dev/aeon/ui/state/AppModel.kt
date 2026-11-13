@@ -47,7 +47,7 @@ sealed interface Connection {
 /** Which main area is visible. The conversation is the default place (design: chat-first). */
 enum class Section { Chat, Feed, Explore, Tasks, Agent, Approvals, Settings }
 
-enum class SettingsPage { Personal, Models, Keys, Devices, Usage, Legal, About }
+enum class SettingsPage { Personal, Models, Keys, Devices, Memory, Usage, Legal, About }
 
 enum class ThemeMode(val label: String) { System("시스템 설정"), Light("라이트"), Dark("다크") }
 
@@ -108,6 +108,21 @@ data class SkillAddState(
     /** Scripts that pass the check run in Docker without a question each time. On unless the owner switches it off. */
     val autoRun: Boolean = true,
 )
+
+/** What the agent remembers across tasks: the list, the sheet for a new one, the one being looked at. */
+data class MemoryState(
+    val items: List<dev.aeon.ui.api.MemoryItem> = emptyList(),
+    val loaded: Boolean = false,
+    val textMax: Int = 300,
+    /** The sheet for writing a new memory, or null when closed. */
+    val draft: MemoryDraft? = null,
+    /** The memory open in its sheet, or null. */
+    val picked: dev.aeon.ui.api.MemoryItem? = null,
+    val busy: Boolean = false,
+    val error: String? = null,
+)
+
+data class MemoryDraft(val text: String = "", val kind: String = "preference")
 
 /** One skill open on its detail page, and what is being done to it. */
 data class SkillDetailState(val skill: dev.aeon.ui.api.SkillItem, val busy: Boolean = false, val error: String? = null)
@@ -231,6 +246,7 @@ data class UiState(
     val pairPrefill: PairPrefill? = null,
     val skills: SkillsState = SkillsState(),
     val feed: FeedState = FeedState(),
+    val memory: MemoryState = MemoryState(),
 ) {
     /** This device may change settings, keys, connections and devices. */
     val isAdmin: Boolean get() = status?.admin == true
@@ -333,6 +349,7 @@ class AppModel(
     fun openSettings(page: SettingsPage) {
         _state.update { it.copy(section = Section.Settings, settingsPage = page, showDetail = false, settingsOpen = true) }
         if (page == SettingsPage.Devices) scope.launch { runCatching { client.devices() }.onSuccess { d -> _state.update { it.copy(devices = d) } } }
+        if (page == SettingsPage.Memory) loadMemory()
         if (page == SettingsPage.Usage) scope.launch { runCatching { client.usage() }.onSuccess { u -> _state.update { it.copy(usage = u) } } }
     }
 
@@ -1097,6 +1114,56 @@ class AppModel(
         feedImageRequests.clear()
         feed { it.copy(images = emptyMap()) }
         refreshFeed()
+    }
+
+    // ---------------------------------------------------------------- 기억
+
+    private fun memory(change: (MemoryState) -> MemoryState) = _state.update { it.copy(memory = change(it.memory)) }
+
+    fun loadMemory() {
+        scope.launch {
+            runCatching { client.memory() }.onSuccess { r -> memory { it.copy(items = r.items, textMax = r.textMax, loaded = true) } }
+        }
+    }
+
+    fun openMemoryDraft() = memory { it.copy(draft = MemoryDraft(), picked = null, error = null) }
+
+    fun closeMemoryDraft() = memory { it.copy(draft = null, error = null) }
+
+    fun changeMemoryDraft(change: (MemoryDraft) -> MemoryDraft) = memory { m -> m.copy(draft = m.draft?.let(change)?.let { d -> d.copy(text = d.text.take(m.textMax)) }, error = null) }
+
+    fun pickMemory(item: dev.aeon.ui.api.MemoryItem?) = memory { it.copy(picked = item, draft = null, error = null) }
+
+    /** Saves what the owner wrote. The words are kept exactly as typed (the server only tidies spaces). */
+    fun saveMemory() {
+        val d = _state.value.memory.draft ?: return
+        if (d.text.trim().length < 3 || _state.value.memory.busy) return
+        scope.launch {
+            memory { it.copy(busy = true, error = null) }
+            runCatching { client.addMemory(d.text.trim(), d.kind) }
+                .onSuccess {
+                    val r = runCatching { client.memory() }.getOrNull()
+                    memory { m -> m.copy(busy = false, draft = null, items = r?.items ?: (listOf(it) + m.items), loaded = true) }
+                }
+                .onFailure { e -> memory { it.copy(busy = false, error = memoryMessage(e)) } }
+        }
+    }
+
+    fun deleteMemory(id: String) {
+        if (_state.value.memory.busy) return
+        scope.launch {
+            memory { it.copy(busy = true, error = null) }
+            runCatching { client.deleteMemory(id) }
+                .onSuccess { memory { m -> m.copy(busy = false, picked = null, items = m.items.filter { it.id != id }) } }
+                .onFailure { e -> memory { it.copy(busy = false, error = memoryMessage(e)) } }
+        }
+    }
+
+    private fun memoryMessage(e: Throwable): String = when {
+        e is AeonException && e.status == 403 -> "이 기기는 기억을 바꿀 수 없어요."
+        e is AeonException && e.status == 400 -> if (e.message?.contains("secret") == true) "키나 비밀번호처럼 보여서 저장하지 않았어요. 모든 작업에 전달되는 내용이라서요." else "3자에서 300자 사이의 문장으로 적어 주세요."
+        e is Exception -> describe(e)
+        else -> e.message ?: "error"
     }
 
     // ---------------------------------------------------------------- 스킬
