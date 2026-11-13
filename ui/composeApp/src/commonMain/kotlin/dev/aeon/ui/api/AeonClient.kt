@@ -202,15 +202,25 @@ class AeonClient(
         return ApiJson.decodeFromString<SkillPreviewResponse>(signed(HttpMethod.Post, "/v1/skill-sources/inspect", json.toString())).preview
     }
 
-    suspend fun installSkill(previewId: String, name: String, scope: String, rename: String?, replace: Boolean): SkillItem {
+    suspend fun installSkill(previewId: String, name: String, scope: String, rename: String?, replace: Boolean, autoRun: Boolean = true): SkillItem {
         val json = buildJsonObject {
             put("previewId", previewId)
             put("name", name)
             put("scope", scope)
             if (rename != null) put("rename", rename)
             if (replace) put("replace", true)
+            if (!autoRun) put("autoRun", false)
         }
         return ApiJson.decodeFromString<SkillResponse>(signed(HttpMethod.Post, "/v1/skill-sources/install", json.toString())).skill
+    }
+
+    /** Lets the scripts of an approved skill run in Docker without a question each time (only after the install-time check passed), or asks again. */
+    suspend fun setSkillAutoRun(folder: String, scope: String, enabled: Boolean): SkillItem {
+        val json = buildJsonObject {
+            put("scope", scope)
+            put("enabled", enabled)
+        }
+        return ApiJson.decodeFromString<SkillResponse>(signed(HttpMethod.Post, "/v1/skills/$folder/auto-run", json.toString())).skill
     }
 
     suspend fun setSkillEnabled(folder: String, scope: String, enabled: Boolean): SkillItem {

@@ -41,6 +41,8 @@ export class PolicyEngine {
     if (input.assessment.violation) {
       return { effect: "deny", reason: `scope violation: ${input.assessment.violation}` };
     }
+    // Consent given in advance and recorded by the tool itself (never a deny rule's business: a violation was refused above).
+    if (input.assessment.preApproved) return { effect: "allow", reason: `approved in advance: ${input.assessment.preApproved}` };
     for (const r of this.rules) {
       if (!matchesTool(r.tool, input.tool)) continue;
       if (r.risks && !r.risks.includes(input.assessment.risk)) continue;

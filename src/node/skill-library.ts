@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { skillNameProblem, type SkillSpec } from "../core/skills.ts";
 import { diffEntries, skillHash } from "./skill-hash.ts";
 import { SkillLock, type LockEntry, type SkillScope, type SkillSource } from "./skill-lock.ts";
+import { scanSkillScripts, type SafetyReport } from "./skill-scan.ts";
 import { discoverSkills, fetchGithub, parseSkillSource, readLocalFolder, renamed, sourceRecord, type Candidate, type FetchLike, type ParsedSource } from "./skill-sources.ts";
 import { SkillError, SkillStore, type SkillFull, type SkillSummary } from "./skills.ts";
 import type { Snapshot } from "./tar.ts";
@@ -12,6 +13,10 @@ import type { Snapshot } from "./tar.ts";
 export type SkillStatus = "tracked" | "modified" | "untracked";
 
 export interface LibrarySkill extends SkillSummary {
+  /** Scripts may run in the Docker sandbox without a question each time (only for an approved skill whose scripts passed the check). */
+  autoRun: boolean;
+  /** The install-time check of the scripts, for a skill that has some. */
+  safety?: SafetyReport;
   scope: SkillScope;
   status: SkillStatus;
   enabled: boolean;
@@ -38,6 +43,8 @@ export interface LibraryOptions {
 }
 
 export interface CandidateView {
+  /** The check of the scripts: what was found, and whether they may run without a question in Docker. */
+  safety: SafetyReport;
   name: string;
   dir: string;
   description: string;
@@ -136,11 +143,14 @@ export class SkillLibrary {
     return this.lock.get(scope, name, this.projectKey);
   }
 
-  private setEntry(scope: SkillScope, name: string, hash: string, source: SkillSource, version: string | undefined, enabled: boolean): void {
+  private setEntry(scope: SkillScope, name: string, hash: string, source: SkillSource, version: string | undefined, enabled: boolean, autoRun?: boolean): void {
     const before = this.entry(scope, name);
+    // Automatic runs stay only while the scripts still pass the check; a re-approval of changed scripts passes false and starts over.
+    const entries = this.store(scope).entries(name);
+    const auto = (autoRun ?? before?.autoRun ?? false) && entries !== null && scanSkillScripts(entries).level === "clean" && entries.some((e) => e.path.startsWith("scripts/"));
     this.lock.set({
       scope, ...(scope === "project" && this.projectKey ? { project: this.projectKey } : {}), name, hash, source,
-      installedAt: before?.installedAt ?? this.now(), updatedAt: this.now(), enabled, ...(version ? { version } : {}),
+      installedAt: before?.installedAt ?? this.now(), updatedAt: this.now(), enabled, ...(version ? { version } : {}), ...(auto ? { autoRun: true } : {}),
     });
   }
 
@@ -167,7 +177,8 @@ export class SkillLibrary {
         const status: SkillStatus = !e ? "untracked" : e.hash === hash ? "tracked" : "modified";
         const enabled = status === "tracked" && e!.enabled;
         const because = s.problems.length > 0 ? "it does not follow the Agent Skills format" : status === "untracked" ? "the owner has not approved it yet" : status === "modified" ? "it changed after the owner approved it" : !e!.enabled ? "it is switched off" : "";
-        out.push({ ...s, scope, status, enabled: e?.enabled ?? false, active: because === "" && enabled, inactiveBecause: because, hash, ...(e ? { source: e.source } : {}), ...(e?.version ? { version: e.version } : {}) });
+        const safety = s.scripts && entries ? scanSkillScripts(entries) : undefined;
+        out.push({ ...s, scope, status, enabled: e?.enabled ?? false, active: because === "" && enabled, inactiveBecause: because, hash, autoRun: status === "tracked" && e?.autoRun === true, ...(safety ? { safety } : {}), ...(e ? { source: e.source } : {}), ...(e?.version ? { version: e.version } : {}) });
       }
     }
     // The first active one of a name (project before user) is the one used; a lower active one is hidden by it.
@@ -259,6 +270,17 @@ export class SkillLibrary {
     return bytes.includes(0) ? { binary: true, size: bytes.length } : { text: bytes.toString("utf8"), size: bytes.length };
   }
 
+  /** Lets the scripts of an approved skill run in Docker without a question each time, or goes back to asking. */
+  setAutoRun(scope: SkillScope, name: string, on: boolean): LibrarySkill {
+    const s = this.get(scope, name);
+    if (!s) throw new SkillError(404, "skill not found");
+    if (s.status !== "tracked") throw new SkillError(409, "approve this skill first");
+    if (on && !s.scripts) throw new SkillError(400, "this skill has no scripts");
+    if (on && s.safety?.level !== "clean") throw new SkillError(409, "the check found something in the scripts that you should read first: they keep asking each time");
+    this.setEntry(scope, name, s.hash, s.source ?? { type: "legacy" }, s.version, s.enabled, on);
+    return this.get(scope, name)!;
+  }
+
   setEnabled(scope: SkillScope, name: string, enabled: boolean): LibrarySkill {
     const s = this.get(scope, name);
     if (!s) throw new SkillError(404, "skill not found");
@@ -276,7 +298,7 @@ export class SkillLibrary {
     if (!s) throw new SkillError(404, "skill not found");
     if (s.hash !== expectedHash) throw new SkillError(409, "the skill changed since you looked at it: look at it again");
     if (s.problems.length > 0) throw new SkillError(400, `it does not follow the Agent Skills format: ${s.problems.join("; ")}`);
-    this.setEntry(scope, name, s.hash, s.source ?? { type: "local", path: this.store(scope).folderPath(name) }, s.version, true);
+    this.setEntry(scope, name, s.hash, s.source ?? { type: "local", path: this.store(scope).folderPath(name) }, s.version, true, false);
     return this.get(scope, name)!;
   }
 
@@ -295,6 +317,7 @@ export class SkillLibrary {
       files: c.entries.map((e) => ({ path: e.path, size: e.bytes.length })), scripts: c.scripts, ignored: c.ignored, hash: c.hash, bytes: c.bytes,
       skillMd: c.entries.find((e) => e.path === "SKILL.md")!.bytes.toString("utf8").slice(0, 100_000),
       scriptTexts: c.entries.filter((e) => e.path.startsWith("scripts/")).slice(0, 8).map((e) => ({ path: e.path, ...text(e.bytes, 6000) })),
+      safety: scanSkillScripts(c.entries),
       existing: this.list().filter((s) => s.folder === c.name).map((s) => ({ scope: s.scope, status: s.status, ...(s.source ? { source: s.source } : {}) })),
     };
   }
@@ -312,7 +335,7 @@ export class SkillLibrary {
   }
 
   /** Installs one skill from a preview, in the owner's or the project's scope. */
-  install(o: { previewId: string; name: string; scope: SkillScope; rename?: string; replace?: boolean }): LibrarySkill {
+  install(o: { previewId: string; name: string; scope: SkillScope; rename?: string; replace?: boolean; autoRun?: boolean }): LibrarySkill {
     this.prune();
     const p = this.staged.get(o.previewId);
     if (!p) throw new SkillError(404, "that preview expired: look at the source again");
@@ -344,7 +367,9 @@ export class SkillLibrary {
       store.remove(finalName);
       throw new SkillError(500, "the installed files do not match what was previewed; nothing was kept");
     }
-    this.setEntry(o.scope, finalName, c.hash, sourceRecord(p.parsed, p.commit, c.dir), c.spec.metadata?.version, true);
+    // Installing is the owner's approval of what they were shown. If the scripts also pass the check, they may run in Docker without
+    // a question each time (unless the owner said no); anything the check flags keeps asking.
+    this.setEntry(o.scope, finalName, c.hash, sourceRecord(p.parsed, p.commit, c.dir), c.spec.metadata?.version, true, o.autoRun !== false && c.scripts && scanSkillScripts(c.entries).level === "clean");
     return this.get(o.scope, finalName)!;
   }
 

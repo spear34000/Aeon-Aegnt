@@ -105,6 +105,8 @@ data class SkillAddState(
     /** The same name exists: the sheet asking what to do is open. */
     val conflict: Boolean = false,
     val installing: Boolean = false,
+    /** Scripts that pass the check run in Docker without a question each time. On unless the owner switches it off. */
+    val autoRun: Boolean = true,
 )
 
 /** One skill open on its detail page, and what is being done to it. */
@@ -1197,6 +1199,21 @@ class AppModel(
 
     fun pickSkillCandidate(name: String) = skills { it.copy(screen = SkillScreen.Review, add = it.add.copy(pick = name, rename = name, error = null, conflict = false)) }
 
+    fun setSkillAutoRunDraft(on: Boolean) = skills { it.copy(add = it.add.copy(autoRun = on)) }
+
+    fun setSkillAutoRun(on: Boolean) {
+        val d = _state.value.skills.detail ?: return
+        scope.launch {
+            skills { it.copy(detail = it.detail?.copy(busy = true, error = null)) }
+            try {
+                client.setSkillAutoRun(d.skill.folder, d.skill.scope, on)
+                reloadSkill(d.skill.folder, d.skill.scope)
+            } catch (e: Exception) {
+                skills { it.copy(detail = it.detail?.copy(busy = false, error = skillMessage(e))) }
+            }
+        }
+    }
+
     fun setSkillInstallScope(scopeName: String) = skills { it.copy(add = it.add.copy(scope = scopeName, error = null)) }
 
     fun changeSkillRename(text: String) = skills { it.copy(add = it.add.copy(rename = text.lowercase().filter { c -> c in 'a'..'z' || c in '0'..'9' || c == '-' }.take(64), error = null)) }
@@ -1213,7 +1230,7 @@ class AppModel(
         scope.launch {
             skills { it.copy(add = it.add.copy(installing = true, error = null)) }
             try {
-                val s = client.installSkill(p.id, pick, a.scope, rename, replace)
+                val s = client.installSkill(p.id, pick, a.scope, rename, replace, a.autoRun)
                 val r = client.skills()
                 skills { it.copy(list = r.skills, dir = r.dir, projectDir = r.projectDir, add = SkillAddState(scope = a.scope), screen = SkillScreen.Detail, detail = SkillDetailState(s), fromOutside = false) }
                 loadExplore()

@@ -258,7 +258,14 @@ data class SkillItem(
     val version: String? = null,
     val scripts: Boolean = false,
     val warnings: List<String> = emptyList(),
+    /** Scripts run in Docker without a question each time (only for an approved skill whose scripts passed the check). */
+    val autoRun: Boolean = false,
+    val safety: SkillSafety? = null,
 )
+
+/** The install-time check of a skill's scripts: a fixed list of rules, not a model's opinion. */
+@Serializable data class SkillFinding(val file: String = "", val line: Int = 0, val severity: String = "note", val what: String = "")
+@Serializable data class SkillSafety(val level: String = "clean", val findings: List<SkillFinding> = emptyList(), val scanned: Int = 0)
 
 /** Where a skill came from: `agent`, `legacy`, `local` (path) or `github` (owner, repo, ref, path, commit). */
 @Serializable
@@ -284,6 +291,7 @@ data class SkillCandidate(
     val skillMd: String = "",
     val scriptTexts: List<SkillScriptText> = emptyList(),
     val existing: List<SkillExisting> = emptyList(),
+    val safety: SkillSafety = SkillSafety(),
 )
 
 @Serializable

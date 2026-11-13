@@ -28,6 +28,11 @@ export interface LockEntry {
   enabled: boolean;
   /** `metadata.version` of the installed SKILL.md, if it had one. */
   version?: string;
+  /**
+   * The owner let this skill's scripts run in the Docker sandbox without a question each time. Only ever true for a
+   * skill whose scripts passed the install-time check (skill-scan.ts); it goes with the hash, so a change turns it off.
+   */
+  autoRun?: boolean;
 }
 
 interface LockFile {

@@ -351,12 +351,26 @@ private fun SkillReviewPage(state: UiState, model: AppModel) {
         }
         if (c.scripts) {
             Label("스크립트 ${c.files.count { it.path.startsWith("scripts/") }}개")
-            Banner("설치해도 저절로 실행되지 않아요. 에이전트가 쓰려 할 때마다 코드를 보여 드리고 물어봐요.", Tone.Warn, "⚠")
+            Banner("이 스킬에는 스크립트가 있어요. 설치하기 전에 코드를 읽어 보세요. 설치해도 에이전트가 쓰려 할 때만 실행돼요.", Tone.Warn, "⚠")
             c.scriptTexts.forEach { t ->
                 Text(t.path, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 4.dp))
                 TextBlock(t.text + if (t.cut) "\n… (앞부분만 보여 줘요)" else "", fullCode, 120.dp)
             }
             if (c.scriptTexts.isNotEmpty()) SmallLink(if (fullCode) "접기" else "코드 전체 보기") { fullCode = !fullCode }
+        }
+        if (c.scripts) {
+            Label("안전 검사")
+            if (c.safety.level == "clean") {
+                Banner("스크립트 ${c.safety.scanned}개를 검사했고 위험해 보이는 점을 찾지 못했어요. 정해 둔 규칙으로 찾은 결과라서, 코드를 직접 읽는 것을 대신하지는 않아요.", Tone.Ok, "✓")
+                c.safety.findings.take(4).forEach { f -> Text("· ${f.file}:${f.line} ${f.what}", Modifier.padding(horizontal = 4.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(AeonShape.CARD.dp)).background(MaterialTheme.colorScheme.surface).padding(horizontal = 16.dp)) {
+                    AeonSwitch(a.autoRun, model::setSkillAutoRunDraft, "묻지 않고 실행 (Docker 안에서만)")
+                }
+                Text("Docker는 인터넷이 없고 읽기만 되는 상자예요. 이 컴퓨터에서 직접 돌릴 때는 계속 물어봐요.", Modifier.padding(horizontal = 4.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                Banner("읽어 봐야 할 부분을 찾았어요. 이 스크립트는 실행할 때마다 물어봐요.", Tone.Warn, "⚠")
+                c.safety.findings.filter { it.severity == "block" }.take(8).forEach { f -> Text("· ${f.file}:${f.line} ${f.what}", Modifier.padding(horizontal = 4.dp), style = MaterialTheme.typography.bodySmall, color = LocalAeonStatus.current.warn) }
+            }
         }
         Label("설치 위치")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -434,6 +448,18 @@ private fun SkillDetailPage(state: UiState, model: AppModel) {
             Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(AeonShape.CARD.dp)).background(MaterialTheme.colorScheme.surface).padding(horizontal = 16.dp)) {
                 AeonSwitch(k.enabled, { model.setSkillEnabled(it) }, "에이전트가 쓰기", enabled = canEdit)
             }
+            if (k.scripts) {
+                val sf = k.safety
+                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(AeonShape.CARD.dp)).background(MaterialTheme.colorScheme.surface).padding(horizontal = 16.dp)) {
+                    AeonSwitch(k.autoRun, { model.setSkillAutoRun(it) }, "묻지 않고 실행 (Docker 안에서만)", enabled = canEdit && sf?.level == "clean")
+                }
+                if (sf != null && sf.level != "clean") {
+                    Text("안전 검사에서 읽어 볼 점이 있어서 실행할 때마다 물어봐요.", Modifier.padding(horizontal = 4.dp), style = MaterialTheme.typography.bodySmall, color = LocalAeonStatus.current.warn)
+                    sf.findings.filter { it.severity == "block" }.take(6).forEach { f -> Text("· ${f.file}:${f.line} ${f.what}", Modifier.padding(horizontal = 4.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                } else if (k.autoRun) {
+                    Text("안전 검사를 통과해서 Docker 안에서는 묻지 않고 실행돼요. 이 컴퓨터에서 직접 돌릴 때는 계속 물어봐요.", Modifier.padding(horizontal = 4.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
             if (k.shadowedBy != null) Text("같은 이름의 ${scopeLabel(k.shadowedBy)} 스킬이 대신 쓰여요.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 4.dp))
         }
         if (newer) {
@@ -453,7 +479,7 @@ private fun SkillDetailPage(state: UiState, model: AppModel) {
             KeyValue("파일", "${k.files.size + 1}개")
             if (k.hash.isNotEmpty()) KeyValue("내용 지문", k.hash.take(6) + "…" + k.hash.takeLast(4), mono = true)
         }
-        if (k.scripts) Banner("스크립트 ${k.files.count { it.startsWith("scripts/") }}개 · 에이전트가 쓰려 할 때마다 코드를 보여 드리고 물어봐요", Tone.Warn, "⚠")
+        if (k.scripts && !k.autoRun) Banner("스크립트 ${k.files.count { it.startsWith("scripts/") }}개 · 에이전트가 쓰려 할 때마다 코드를 보여 드리고 물어봐요", Tone.Warn, "⚠")
         k.warnings.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 4.dp)) }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             AeonButton("지침 보기", model::readSkill, Modifier.weight(1f), kind = ButtonKind.Secondary)

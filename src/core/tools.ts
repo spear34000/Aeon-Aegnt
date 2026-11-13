@@ -15,6 +15,12 @@ export interface ToolAssessment {
   exfilRisk?: boolean;
   /** Longer text the owner may want to read before deciding (for example the instructions of a new skill). */
   detail?: string;
+  /**
+   * Set only when the owner approved this kind of action in advance (a skill installed with automatic runs, checked
+   * when it was installed). The text says why it needs no question now. The policy allows it, and the audit log keeps the text.
+   * A tool must set this from stored consent, never from the arguments it was given.
+   */
+  preApproved?: string;
 }
 
 export interface ToolContext {

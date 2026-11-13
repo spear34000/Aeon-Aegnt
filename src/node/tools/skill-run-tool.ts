@@ -105,7 +105,10 @@ export function skillRunTool(library: SkillLibrary, guard: WorkspaceGuard, runne
         text,
       ].join("\n");
       const where = p.isolation === "docker" ? "in the Docker sandbox" : p.kind === "node" ? "on this computer (Node permission model)" : "on this computer WITHOUT isolation";
-      return { risk: "exec", summary: `Run ${p.script} of skill ${p.skill} ${where}`.slice(0, 300), resources: [`skill:${p.skill}`, p.script, `isolation:${p.isolation}`], irreversible: true, detail };
+      // The owner let this skill run in Docker without a question when installing it, and its scripts passed the check (re-checked now,
+      // on the bytes that will run). Running on the computer itself is never decided in advance.
+      const pre = p.isolation === "docker" && o.skill.autoRun && o.skill.safety?.level === "clean" ? "the owner installed this skill with automatic runs in Docker, and its scripts passed the safety check" : undefined;
+      return { risk: "exec", summary: `Run ${p.script} of skill ${p.skill} ${where}`.slice(0, 300), resources: [`skill:${p.skill}`, p.script, `isolation:${p.isolation}`], irreversible: true, detail, ...(pre ? { preApproved: pre } : {}) };
     },
     async run(args, ctx) {
       const p = parse(args, cfg, hostAllowed);

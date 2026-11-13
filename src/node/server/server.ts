@@ -516,7 +516,7 @@ export class AeonServer {
 
     const conn = this.o.connections;
     const lib = rt.skills ?? this.o.connections?.library;
-    const skillMatch = /^\/v1\/skills(?:\/([a-z0-9][a-z0-9-]{0,63})(?:\/(enable|trust|update-preview|file))?)?$/.exec(path);
+    const skillMatch = /^\/v1\/skills(?:\/([a-z0-9][a-z0-9-]{0,63})(?:\/(enable|trust|update-preview|file|auto-run))?)?$/.exec(path);
     const sourceMatch = /^\/v1\/skill-sources\/(inspect|install|updates)$/.exec(path);
     if (lib && (skillMatch || sourceMatch)) {
       const scopeOf = (v: unknown, fallback: "user" | "project" = "user"): "user" | "project" => (v === "user" || v === "project" ? v : fallback);
@@ -541,7 +541,7 @@ export class AeonServer {
           }
           if (what === "install") {
             if (typeof b.previewId !== "string" || typeof b.name !== "string") throw new HttpError(400, "previewId and name are required");
-            const skill = lib.install({ previewId: b.previewId, name: b.name, scope: scopeOf(b.scope), ...(typeof b.rename === "string" ? { rename: b.rename } : {}), ...(b.replace === true ? { replace: true } : {}) });
+            const skill = lib.install({ previewId: b.previewId, name: b.name, scope: scopeOf(b.scope), ...(typeof b.rename === "string" ? { rename: b.rename } : {}), ...(b.replace === true ? { replace: true } : {}), ...(b.autoRun === false ? { autoRun: false } : {}) });
             return this.json(res, 201, { skill });
           }
         }
@@ -589,6 +589,7 @@ export class AeonServer {
             admin("change skills");
             const b = this.parseJson(raw);
             const sc = scopeOf(b.scope);
+            if (action === "auto-run") return this.json(res, 200, { skill: lib.setAutoRun(sc, folder, b.enabled !== false) });
             if (action === "enable") return this.json(res, 200, { skill: lib.setEnabled(sc, folder, b.enabled !== false) });
             if (action === "trust") {
               if (typeof b.hash !== "string") throw new HttpError(400, "hash is required: the hash of the skill you were shown");
