@@ -403,7 +403,9 @@ export class AeonServer {
       const b = this.parseJson(raw);
       if (b.decision !== "approved" && b.decision !== "denied") throw new HttpError(400, 'decision must be "approved" or "denied"');
       try {
-        const a = await engine.decideApproval(apprMatch[1]!, b.decision);
+        // A question is answered in words: `answer` (at most 1000 characters). Approving one without an answer is refused.
+        if (b.answer !== undefined && typeof b.answer !== "string") throw new HttpError(400, "answer must be text");
+        const a = await engine.decideApproval(apprMatch[1]!, b.decision, b.answer as string | undefined);
         void this.tick();
         return this.json(res, 200, { approval: a });
       } catch (e) {

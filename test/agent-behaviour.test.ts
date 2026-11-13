@@ -169,3 +169,88 @@ describe("notes and a history that stays short", () => {
     h.cleanup();
   });
 });
+
+describe("asking the owner (Anthropic: return to the human on a missing detail; Learning to Ask: ask rather than guess)", () => {
+  const ask = (question: string, options?: string[]) => json({ action: "ask", question, ...(options ? { options } : {}) });
+
+  it("the agent stops and asks, the answer comes back as the owner's own words, and the task goes on", async () => {
+    const m = new MockProvider("m", [planReply(["find out the day"], []), ask("Which day should the report be for?", ["Monday", "Friday"]), finishReply("Made the Friday report")]);
+    const h = harness({ providers: [m] });
+    const t = await h.engine.submit({ goal: "make the weekly report" });
+    await h.engine.runTask(t.id);
+    const waiting = await get(h, t.id);
+    assert.equal(waiting.status, "WAITING_FOR_APPROVAL");
+    const q = (await h.store.listApprovals("pending"))[0]!;
+    assert.deepEqual([q.kind, q.tool, q.summary, q.resources], ["question", "agent.ask", "Which day should the report be for?", ["Monday", "Friday"]]);
+    assert.match(waiting.note ?? "", /waiting for your answer/);
+
+    await assert.rejects(h.engine.decideApproval(q.id, "approved"), /an answer is needed/);
+    await h.engine.decideApproval(q.id, "approved", "  Friday  ");
+    await h.engine.runTask(t.id);
+    const done = await get(h, t.id);
+    assert.equal(done.status, "COMPLETED");
+    assert.equal(done.steps[0]!.tool, "agent.ask");
+    assert.equal(done.steps[0]!.output, "Friday");
+    assert.match(lastUser(m), /You asked the owner: "Which day should the report be for\?"\. The owner answered: "Friday"/);
+    assert.ok(!lastUser(m).includes("<untrusted_data source=\"agent:ask\""), "the owner's answer is not fenced as untrusted data");
+    assert.equal((await h.store.getApproval(q.id))?.answer, "Friday");
+    h.cleanup();
+  });
+
+  it("skipping a question sends the agent on without an answer", async () => {
+    const m = new MockProvider("m", [planReply(["go"], []), ask("Which folder do you mean?"), finishReply("Stopped: the folder was not named")]);
+    const h = harness({ providers: [m] });
+    const t = await h.engine.submit({ goal: "clean up the folder" });
+    await h.engine.runTask(t.id);
+    const q = (await h.store.listApprovals("pending"))[0]!;
+    await h.engine.decideApproval(q.id, "denied");
+    await h.engine.runTask(t.id);
+    assert.equal((await get(h, t.id)).status, "COMPLETED");
+    assert.match(lastUser(m), /The owner did not answer\. Go on with the most careful choice/);
+    h.cleanup();
+  });
+
+  it("an answer to something that is not a question is ignored, and a bad or fourth question is turned away without bothering the owner", async () => {
+    const m = new MockProvider("m", [planReply(["go"], []), ask("hi"), ask("Which day?"), finishReply("ok")]);
+    const h = harness({ providers: [m] });
+    const t = await h.engine.submit({ goal: "x" });
+    await h.engine.runTask(t.id);
+    const saved0 = await get(h, t.id);
+    assert.equal(saved0.status, "WAITING_FOR_APPROVAL");
+    assert.deepEqual(saved0.steps.map((s) => s.tool), ["agent.notice"], "the first, too short, never reached the owner");
+    assert.match(saved0.steps[0]!.output, /Your question was not valid/);
+    const q = (await h.store.listApprovals("pending"))[0]!;
+    await h.engine.decideApproval(q.id, "approved", "Tuesday");
+    await h.engine.runTask(t.id);
+
+    const four = new MockProvider("m", [planReply(["go"], []), ask("First question?"), ask("Second question?"), ask("Third question?"), ask("Fourth question?"), finishReply("done")]);
+    const h2 = harness({ providers: [four] });
+    const t2 = await h2.engine.submit({ goal: "y" });
+    for (let i = 0; i < 3; i++) {
+      await h2.engine.runTask(t2.id);
+      const pending = (await h2.store.listApprovals("pending"))[0]!;
+      await h2.engine.decideApproval(pending.id, "approved", `answer ${i + 1}`);
+    }
+    await h2.engine.runTask(t2.id);
+    const saved = await get(h2, t2.id);
+    assert.equal(saved.status, "COMPLETED");
+    assert.equal(saved.steps.filter((s) => s.tool === "agent.ask").length, 3);
+    assert.match(saved.steps.find((s) => s.tool === "agent.notice")?.output ?? "", /already asked 3 questions/);
+    h.cleanup();
+    h2.cleanup();
+  });
+
+  it("a question that is never answered expires like an approval and the agent goes on", async () => {
+    const m = new MockProvider("m", [planReply(["go"], []), ask("Which day should it be?"), finishReply("did what I could")]);
+    const h = harness({ providers: [m] });
+    const t = await h.engine.submit({ goal: "z" });
+    await h.engine.runTask(t.id);
+    h.clock.advance(25 * 3_600_000);
+    await h.engine.sweepApprovals();
+    await h.engine.runTask(t.id);
+    const done = await get(h, t.id);
+    assert.equal(done.status, "COMPLETED");
+    assert.equal(done.steps[0]!.ok, false);
+    h.cleanup();
+  });
+});
