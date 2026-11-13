@@ -39,6 +39,8 @@ export function memoryTools(service: MemoryService, redactor?: Redactor): Tool[]
     name: "memory.search",
     description: "Look through what the owner asked to be remembered, for a topic. Returns the best matches.",
     argsHint: '{"query":"words about the topic"}',
+    // What the owner asked to be remembered is private: once it has been shown to the model, a request that leaves the machine needs the owner's yes (the same rule as after reading a file).
+    exposesWorkspaceData: true,
     assess(args): ToolAssessment {
       const a = isObj(args) ? args : {};
       return { risk: "read", summary: "Look through remembered things", resources: [], ...(typeof a.query !== "string" || a.query.trim() === "" ? { violation: "query must be text" } : {}) };

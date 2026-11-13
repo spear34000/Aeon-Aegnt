@@ -382,7 +382,8 @@ export class Agent implements TaskRunner {
     // Judged on whether the tool actually ran, not on whether it succeeded: a failed command or a partial
     // read still shows workspace-derived text to the model.
     // `executed` is missing on steps persisted before the field existed: unknown counts as executed (fail closed).
-    const tainted = steps.some((s) => s.executed !== false && this.cfg.tools.get(s.tool)?.exposesWorkspaceData === true);
+    // The same holds when remembered facts about the owner were put in the prompt of this task (preferences about style are not private).
+    const tainted = steps.some((s) => s.executed !== false && this.cfg.tools.get(s.tool)?.exposesWorkspaceData === true) || (this.cfg.memory?.relevant(task.goal).some((m) => m.kind === "fact") ?? false);
     const decision = this.cfg.policy.evaluate({ tool: tool.name, assessment, tainted });
     await ctx.audit("tool_requested", {
       tool: tool.name,

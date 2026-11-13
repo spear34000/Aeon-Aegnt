@@ -343,7 +343,7 @@ async function boot(opts: { local?: boolean; maxUploadBytes?: number; feedFetch?
   const base = `http://127.0.0.1:${(await server.listen(0)).port}`;
   const owner = new Client("owner-phone");
   assert.equal((await owner.pair(base, pairing.newCode(clock.now()).code)).status, 201);
-  return { base, clock, dir, workspace, registry, pairing, secrets, identity, owner, changed: () => changed, cfgDir: join(dir, "cfg"), close: async () => (await server.close(), cleanup()) };
+  return { rt, base, clock, dir, workspace, registry, pairing, secrets, identity, owner, changed: () => changed, cfgDir: join(dir, "cfg"), close: async () => (await server.close(), cleanup()) };
 }
 
 describe("Setting things up from any paired device", () => {
@@ -602,6 +602,23 @@ describe("Setting things up from any paired device", () => {
     assert.equal((await call("DELETE", "/v1/memory/not-an-id")).status, 404);
     assert.equal((await call("PUT", "/v1/memory", {})).status, 405);
     assert.equal((await call("GET", "/v1/memory")).body.items.length, 2);
+    await t.close();
+  });
+
+  it("a limited device can refuse what would steer later tasks (a memory, a skill) but not approve it", async () => {
+    const t = await boot();
+    const ex = clientExchange(t.owner.serverKey);
+    const code = ex.open((await t.owner.call(t.base, t.clock, "POST", "/v1/pairing-codes", { epk: ex.epk, admin: false })).body.sealed, `pairing-code|${t.owner.id}`);
+    const tablet = new Client("tablet");
+    await tablet.pair(t.base, code);
+    const mk = (id: string, tool: string) => t.rt.store.createApproval({ id, taskId: "t_none", actionKey: id, tool, summary: "x", risk: "external_effect", resources: [], irreversible: false, status: "pending", createdAt: t.clock.now(), expiresAt: t.clock.now() + 60_000 });
+    for (const [i, tool] of ["memory.save", "skill.create", "skill.update"].entries()) await mk(`appr_s${i}`, tool);
+    await mk("appr_plain", "fs.write");
+    const decide = (who: Client, id: string, decision: string) => who.call(t.base, t.clock, "POST", `/v1/approvals/${id}/decide`, { decision });
+    for (const i of [0, 1, 2]) assert.equal((await decide(tablet, `appr_s${i}`, "approved")).status, 403, "a limited device cannot approve it");
+    assert.equal((await decide(tablet, "appr_s0", "denied")).status, 200, "but it can say no");
+    assert.equal((await decide(t.owner, "appr_s1", "approved")).status, 200, "an admin device can approve");
+    assert.equal((await decide(tablet, "appr_plain", "approved")).status, 200, "everything else is still decided from any paired device");
     await t.close();
   });
 

@@ -96,6 +96,9 @@ function taskSummary(t: Task) {
   };
 }
 
+/** Tools whose approval changes what steers every later task. */
+const STANDING_TOOLS = new Set(["memory.save", "skill.create", "skill.update"]);
+
 export class AeonServer {
   private readonly o: AeonServerOptions;
   private readonly clock: Clock;
@@ -404,6 +407,11 @@ export class AeonServer {
     if (apprMatch && method === "POST") {
       const b = this.parseJson(raw);
       if (b.decision !== "approved" && b.decision !== "denied") throw new HttpError(400, 'decision must be "approved" or "denied"');
+      // What steers every later task (a memory, a skill) is changed by the machine or an admin device, as it is through the settings routes: a limited device may refuse these but not approve them.
+      if (b.decision === "approved" && !this.canAdmin(req, deviceId)) {
+        const before = await store.getApproval(apprMatch[1]!);
+        if (before && STANDING_TOOLS.has(before.tool)) throw new HttpError(403, "this device is not allowed to approve a change to what the agent remembers or knows");
+      }
       try {
         // A question is answered in words: `answer` (at most 1000 characters). Approving one without an answer is refused.
         if (b.answer !== undefined && typeof b.answer !== "string") throw new HttpError(400, "answer must be text");

