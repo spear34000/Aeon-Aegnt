@@ -34,7 +34,8 @@ npm run test:live   # opt-in real-service tests, skipped unless enabled (see bel
 | Android and web builds | `:androidApp:assembleDebug` and `:composeApp:compileKotlinWasmJs` succeed (2026-11-13) |
 | Windows app | launched on Windows 11; window opened. Screens not inspected by automation (they share composables with the web build, which was inspected) |
 | Web UI | exercised by hand in the built-in browser against the real server: real WebCrypto pairing, task creation, wide and narrow layouts. Not automated; no DOM accessibility tree to automate against |
-| Android | **not built, not tested** |
+| Android, memory and questions (2026-11-14, emulator, hands-on) | A fresh install of the debug app paired with the real server (setup flow through to the main screen). The memory page: empty state, adding a sentence from the sheet (the keyboard lifts the sheet), the list, the item sheet and delete; the agent proposing a memory (`memory.save` card showing the exact sentence, approve) and the saved sentence reaching the model prompt on the next tasks (read from the scripted model's request log); the question card (`agent.ask`): a suggested answer sent and returned to the agent as the owner's words. The model was the scripted demo model, not a real one. **Not looked at:** the Windows, Linux and web layouts of the memory page, a physical phone, the memory page as a limited (non-admin) device, long Korean sentences wrapping in the sheet. Once an unexplained restart of the activity happened while text was typed with no field focused (state went back to the chat tab); it did not happen again with the field focused and was not investigated |
+| Android (earlier) | the rows above; before 2026-11-13 this row said "not built, not tested", which is no longer true |
 
 ## Master directive §11 mapping
 
