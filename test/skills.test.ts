@@ -6,6 +6,7 @@ import { MockProvider } from "../src/core/models/mock.ts";
 import { DEFAULT_RULES, PolicyEngine } from "../src/core/policy.ts";
 import { composeSkillMd, parseSkillMd, skillCatalogLines, skillNameProblem, skillProblems } from "../src/core/skills.ts";
 import { SkillStore } from "../src/node/skills.ts";
+import { SkillLibrary } from "../src/node/skill-library.ts";
 import { skillTools } from "../src/node/tools/skill-tools.ts";
 import { finishReply, harness, planReply, tempDir, toolReply } from "./helpers.ts";
 
@@ -81,7 +82,11 @@ describe("SkillStore", () => {
     assert.equal(store.readFile("weekly-report", "references/TEMPLATE.md"), "# Report\n");
     assert.equal(store.readFile("weekly-report", "../SKILL.md"), null);
     assert.equal(store.readFile("weekly-report", "references/missing.md"), null);
-    for (const bad of [{ "scripts/run.sh": "#!/bin/sh" }, { "references/../x": "x" }, { "/etc/passwd": "x" }, { "references/a/b.md": "x" }] as Record<string, string>[]) assert.throws(() => store.write({ ...spec, name: "other" }, true, bad), /must be references|supporting file/, JSON.stringify(Object.keys(bad)));
+    for (const bad of [{ "scripts/run.sh": "#!/bin/sh" }, { "references/../x": "x" }, { "/etc/passwd": "x" }, { "references/a/b/c/d.md": "x" }] as Record<string, string>[]) assert.throws(() => store.write({ ...spec, name: "other" }, true, bad), /must be references|cannot add scripts/, JSON.stringify(Object.keys(bad)));
+    // Folders below references/ are fine (the spec allows them), up to three levels.
+    assert.deepEqual(store.write({ ...spec, name: "nested" }, true, { "references/a/b.md": "x" }).files, ["references/a/b.md"]);
+    assert.equal(store.remove("nested"), true);
+    assert.ok(!existsSync(join(t.dir, "skills", "nested")), "removing a skill removes its folders too");
     assert.throws(() => store.write({ ...spec, name: "Bad_Name" }, true), /lower-case|folder/);
     assert.ok(!existsSync(join(t.dir, "skills", "other")), "a refused skill leaves nothing behind");
     assert.deepEqual(store.list().map((s) => s.folder), ["weekly-report"]);
@@ -107,7 +112,7 @@ describe("skill tools and the agent", () => {
 
   it("creating or changing a skill always asks the owner and shows the text; reading one is automatic", () => {
     const t = tempDir();
-    const tools = Object.fromEntries(skillTools(new SkillStore(join(t.dir, "skills"))).map((x) => [x.name, x]));
+    const tools = Object.fromEntries(skillTools(new SkillLibrary({ userDir: join(t.dir, "skills"), lockFile: join(t.dir, "skills-lock.json") })).map((x) => [x.name, x]));
     const policy = new PolicyEngine(DEFAULT_RULES);
     const create = tools["skill.create"]!.assess({ ...spec, files: { "references/F.md": "x" } });
     assert.equal(policy.evaluate({ tool: "skill.create", assessment: create }).effect, "ask");
@@ -121,7 +126,7 @@ describe("skill tools and the agent", () => {
 
   it("refuses a skill that does not follow the format, with reasons the model can act on", () => {
     const t = tempDir();
-    const tool = skillTools(new SkillStore(join(t.dir, "skills"))).find((x) => x.name === "skill.create")!;
+    const tool = skillTools(new SkillLibrary({ userDir: join(t.dir, "skills"), lockFile: join(t.dir, "skills-lock.json") })).find((x) => x.name === "skill.create")!;
     const policy = new PolicyEngine(DEFAULT_RULES);
     for (const bad of [{ ...spec, name: "Meeting Notes" }, { ...spec, description: "" }, { ...spec, body: "  " }, { ...spec, name: undefined }, "text", { ...spec, metadata: { a: 1 } }]) {
       const a = tool.assess(bad);
@@ -213,7 +218,7 @@ describe("what the owner approves is what gets trusted", () => {
 
   it("a skill too long to review in one approval is refused, with the way out", () => {
     const t = tempDir();
-    const tool = skillTools(new SkillStore(join(t.dir, "skills"))).find((x) => x.name === "skill.create")!;
+    const tool = skillTools(new SkillLibrary({ userDir: join(t.dir, "skills"), lockFile: join(t.dir, "skills-lock.json") })).find((x) => x.name === "skill.create")!;
     const long = tool.assess({ ...spec, body: "x".repeat(7001) });
     assert.match(long.violation!, /more than the owner can review in one approval.*references\//);
     assert.equal(tool.assess({ ...spec, body: "x".repeat(6900) }).violation, undefined, "just under the limit is fine");
@@ -222,7 +227,7 @@ describe("what the owner approves is what gets trusted", () => {
 
   it("supporting files are shown on the approval, and the SKILL.md part is never cut", () => {
     const t = tempDir();
-    const tool = skillTools(new SkillStore(join(t.dir, "skills"))).find((x) => x.name === "skill.create")!;
+    const tool = skillTools(new SkillLibrary({ userDir: join(t.dir, "skills"), lockFile: join(t.dir, "skills-lock.json") })).find((x) => x.name === "skill.create")!;
     const body = "y".repeat(6800);
     const a = tool.assess({ ...spec, body, metadata: { author: "aeon" }, files: { "references/NOTES.md": "SECRET-LOOKING TEXT", "references/BIG.md": "z".repeat(30_000) } });
     assert.ok(a.detail!.includes(body), "all of SKILL.md is on the card");

@@ -4,6 +4,8 @@ import dev.aeon.ui.api.AeonClient
 import dev.aeon.ui.api.Profile
 import dev.aeon.ui.platform.DesktopDeviceCrypto
 import dev.aeon.ui.platform.KeyValueStore
+import dev.aeon.ui.platform.LocalAgentHost
+import dev.aeon.ui.platform.localAgentHost
 import dev.aeon.ui.state.AppModel
 import dev.aeon.ui.state.Consents
 import dev.aeon.ui.state.INTRO_PAGES
@@ -13,6 +15,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import java.nio.file.Files
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -40,13 +45,13 @@ class SetupFlowTest {
     }
 
     /** A model whose server address answers nothing: these tests never need the network. */
-    private fun model(store: KeyValueStore): AppModel {
+    private fun model(store: KeyValueStore, agent: LocalAgentHost = localAgentHost()): AppModel {
         val dir = Files.createTempDirectory("aeon-setup").toFile()
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val http = HttpClient()
         cleanup += { scope.cancel(); http.close(); dir.deleteRecursively() }
         val crypto = DesktopDeviceCrypto(dir)
-        return AppModel(AeonClient("http://127.0.0.1:9", crypto, http), store, crypto, scope, defaultServerUrl = "").also { it.start() }
+        return AppModel(AeonClient("http://127.0.0.1:9", crypto, http), store, crypto, scope, defaultServerUrl = "", localAgent = agent).also { it.start() }
     }
 
     private val AppModel.setup get() = state.value.setup
@@ -110,6 +115,50 @@ class SetupFlowTest {
         m.chooseWhere("remote") // what its button does
         m.whereContinue()
         assertEquals("remote", m.setup.where)
+    }
+
+
+    /** An agent inside the app that does what the test says. */
+    private class FakeAgent(val startResult: String?, val code: String?, override val available: Boolean = true) : LocalAgentHost {
+        var started = 0
+        override suspend fun start(): String? { started++; return startResult }
+        override suspend fun pairingCode(): String? = code
+    }
+
+    private fun AppModel.waitForDevice() = runBlocking { withTimeout(10_000) { while (setup.deviceStarting) delay(20) } }
+
+    @Test
+    fun thisDevicePathStartsTheAgentAndSaysWhyWhenItCannot() {
+        val none = model(MapStore(), FakeAgent(null, null, available = false))
+        assertFalse(none.canRunOnDevice, "a build without the agent says so")
+
+        val broken = FakeAgent("에이전트가 시작되지 않았어요.", null)
+        val m = model(MapStore(), broken)
+        assertTrue(m.canRunOnDevice)
+        m.finishIntro(); m.beginSetup()
+        m.setConsents(Consents(service = true, data = true)); m.acceptTerms()
+        m.chooseWhere("device")
+        m.whereContinue()
+        assertEquals(SetupStep.Connect, m.setup.step)
+        m.waitForDevice()
+        assertEquals("에이전트가 시작되지 않았어요.", m.setup.deviceError, "the reason is shown, with a retry")
+        assertEquals(1, broken.started)
+
+        val noCode = FakeAgent(null, null)
+        val m2 = model(MapStore(), noCode)
+        m2.finishIntro(); m2.beginSetup()
+        m2.setConsents(Consents(service = true, data = true)); m2.acceptTerms()
+        m2.chooseWhere("device"); m2.whereContinue(); m2.waitForDevice()
+        assertEquals("이 기기의 에이전트에서 연결 코드를 받지 못했어요.", m2.setup.deviceError)
+        m2.startOnDevice(); m2.waitForDevice()
+        assertEquals(2, noCode.started, "retry starts again")
+
+        val other = FakeAgent(null, null)
+        val m3 = model(MapStore(), other)
+        m3.finishIntro(); m3.beginSetup()
+        m3.setConsents(Consents(service = true, data = true)); m3.acceptTerms()
+        m3.chooseWhere("remote"); m3.whereContinue()
+        assertEquals(0, other.started, "choosing another computer never starts the agent here")
     }
 
     @Test

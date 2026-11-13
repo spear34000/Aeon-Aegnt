@@ -12,7 +12,8 @@
     "test": "node --test \"test/*.test.ts\"",
     "typecheck": "tsc --noEmit",
     "aeon": "node src/node/cli.ts",
-    "test:live": "node --test \"test/live/*.test.ts\""
+    "test:live": "node --test \"test/live/*.test.ts\"",
+    "build:mobile": "node tools/build-mobile.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

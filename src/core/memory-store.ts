@@ -11,6 +11,16 @@ import type {
   UsageRecord,
 } from "./types.ts";
 
+/** The data of a store, for one that saves it as a file. */
+export interface StoreState {
+  tasks: Task[];
+  effects: [string, string][];
+  events: AuditEvent[];
+  approvals: Approval[];
+  usage: UsageRecord[];
+  eventSeq: number;
+}
+
 /** Reference implementation of Store. Values are cloned on the way in and out to mimic persistence. */
 export class MemoryStore implements Store {
   private tasks = new Map<string, Task>();
@@ -20,9 +30,34 @@ export class MemoryStore implements Store {
   private usage: UsageRecord[] = [];
   private eventSeq = 0;
 
+  /** Called after every change. A store that keeps its data somewhere else overrides this. */
+  protected changed(): void {}
+
+  /** Everything the store holds, as plain JSON-safe data (for a store that saves it to a file). */
+  protected exportState(): StoreState {
+    return {
+      tasks: [...this.tasks.values()],
+      effects: [...this.effects.entries()],
+      events: this.events,
+      approvals: [...this.approvals.values()],
+      usage: this.usage,
+      eventSeq: this.eventSeq,
+    };
+  }
+
+  protected importState(s: StoreState): void {
+    this.tasks = new Map(s.tasks.map((t) => [t.id, t]));
+    this.effects = new Map(s.effects);
+    this.events = s.events;
+    this.approvals = new Map(s.approvals.map((a) => [a.id, a]));
+    this.usage = s.usage;
+    this.eventSeq = s.eventSeq;
+  }
+
   async createTask(task: Task): Promise<void> {
     if (this.tasks.has(task.id)) throw new Error(`Task already exists: ${task.id}`);
     this.tasks.set(task.id, structuredClone(task));
+    this.changed();
   }
 
   async getTask(id: string): Promise<Task | null> {
@@ -45,6 +80,7 @@ export class MemoryStore implements Store {
   async claim(id: string, holder: string, ttlMs: number, now: number): Promise<ClaimResult | null> {
     const t = this.must(id);
     const token = tryClaim(t, holder, ttlMs, now);
+    if (token !== null) this.changed();
     return token === null ? null : { task: structuredClone(t), token };
   }
 
@@ -52,12 +88,14 @@ export class MemoryStore implements Store {
     const t = this.must(id);
     assertLease(t, token, now);
     t.lease!.expiresAt = now + ttlMs;
+    this.changed();
   }
 
   async commit(id: string, token: number, patch: TaskPatch, now: number): Promise<Task> {
     const t = this.must(id);
     assertLease(t, token, now);
     applyPatch(t, patch, now);
+    this.changed();
     return structuredClone(t);
   }
 
@@ -66,12 +104,14 @@ export class MemoryStore implements Store {
     assertLease(t, token, now);
     applyPatch(t, patch, now);
     t.lease = null;
+    this.changed();
     return structuredClone(t);
   }
 
   async update(id: string, patch: TaskPatch, now: number): Promise<Task> {
     const t = this.must(id);
     applyPatch(t, patch, now);
+    this.changed();
     return structuredClone(t);
   }
 
@@ -90,10 +130,12 @@ export class MemoryStore implements Store {
     const t = this.must(taskId);
     assertLease(t, token, now);
     this.effects.set(`${taskId}\u0000${key}`, value);
+    this.changed();
   }
 
   async addEvent(event: AuditEvent): Promise<void> {
     this.events.push({ ...structuredClone(event), id: ++this.eventSeq });
+    this.changed();
   }
 
   async listEvents(taskId?: string): Promise<AuditEvent[]> {
@@ -103,6 +145,7 @@ export class MemoryStore implements Store {
 
   async createApproval(approval: Approval): Promise<void> {
     this.approvals.set(approval.id, structuredClone(approval));
+    this.changed();
   }
 
   async getApproval(id: string): Promise<Approval | null> {
@@ -129,6 +172,7 @@ export class MemoryStore implements Store {
     if (a.expiresAt <= now) throw new Error(`Approval ${id} has expired`);
     a.status = status;
     a.decidedAt = now;
+    this.changed();
     return structuredClone(a);
   }
 
@@ -140,6 +184,7 @@ export class MemoryStore implements Store {
         out.push(structuredClone(a));
       }
     }
+    if (out.length > 0) this.changed();
     return out;
   }
 
@@ -150,6 +195,7 @@ export class MemoryStore implements Store {
 
   async addUsage(record: UsageRecord): Promise<void> {
     this.usage.push(structuredClone(record));
+    this.changed();
   }
 
   async listUsage(sinceMs = 0): Promise<UsageRecord[]> {

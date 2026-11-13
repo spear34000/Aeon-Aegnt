@@ -1,5 +1,5 @@
 import { mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { Agent } from "../core/agent.ts";
 import { systemClock, type Clock } from "../core/clock.ts";
 import { isLoopbackUrl, type EndpointConfig, type Profile } from "../core/config.ts";
@@ -12,13 +12,21 @@ import type { Store } from "../core/store.ts";
 import { ToolRegistry } from "../core/tools.ts";
 import { WorkflowEngine } from "../core/workflow.ts";
 import { WorkspaceGuard } from "./fs-guard.ts";
-import { SqliteStore } from "./sqlite-store.ts";
+import { FileStore } from "./file-store.ts";
 import { fsTools } from "./tools/fs-tools.ts";
 import { httpTools } from "./tools/http-tools.ts";
 import { sandboxTool, type SandboxRunner } from "./tools/sandbox-tool.ts";
 import { skillTools } from "./tools/skill-tools.ts";
-import { SkillStore } from "./skills.ts";
+import { skillRunTool } from "./tools/skill-run-tool.ts";
+import { SkillLibrary } from "./skill-library.ts";
+import type { FetchLike } from "./skill-sources.ts";
 import { nodeVerifierEnv } from "./verifier-env.ts";
+
+/**
+ * The SQLite store needs `node:sqlite` (Node 22 and later). Where it is missing, such as Node 18 inside the Android
+ * app, the file-backed store is used instead; both pass the same conformance tests.
+ */
+const SqliteStoreClass = await import("./sqlite-store.ts").then((m) => m.SqliteStore).catch(() => null);
 
 export interface RuntimeOptions {
   workspace: string;
@@ -45,6 +53,12 @@ export interface RuntimeOptions {
   profile?: Profile;
   /** Folder of skills (Agent Skills format). When set the agent can read skills and propose new ones. */
   skillsDir?: string;
+  /** Skills of this project; defaults to `<workspace>/.agents/skills`. */
+  projectSkillsDir?: string;
+  /** Which skills the owner trusts; defaults to `skills-lock.json` next to skillsDir. Keep it outside the workspace. */
+  skillsLockFile?: string;
+  /** Injected transport for fetching skills from GitHub (tests). */
+  skillFetch?: FetchLike;
 }
 
 /**
@@ -123,7 +137,7 @@ export function createRuntime(opts: RuntimeOptions) {
   const redactor = new Redactor();
   const guard = new WorkspaceGuard(opts.workspace);
   mkdirSync(join(guard.root, ".aeon"), { recursive: true });
-  const store: Store = opts.store ?? new SqliteStore(join(guard.root, ".aeon", "aeon.db"));
+  const store: Store = opts.store ?? (SqliteStoreClass ? new SqliteStoreClass(join(guard.root, ".aeon", "aeon.db")) : new FileStore(join(guard.root, ".aeon", "aeon.json")));
 
   const providers = opts.providerOverrides ?? buildProviders(opts, redactor);
   if (opts.releaseMode) {
@@ -142,15 +156,23 @@ export function createRuntime(opts: RuntimeOptions) {
   for (const t of fsTools(guard)) tools.register(t);
   for (const t of httpTools()) tools.register(t);
   tools.register(sandboxTool(guard, ...(opts.sandboxRunner ? [opts.sandboxRunner] : [])));
-  const skills = opts.skillsDir ? new SkillStore(opts.skillsDir) : undefined;
-  if (skills) for (const t of skillTools(skills)) tools.register(t);
+  const skills = opts.skillsDir
+    ? new SkillLibrary({
+        userDir: opts.skillsDir, workspace: guard.root, projectDir: opts.projectSkillsDir ?? join(guard.root, ".agents", "skills"),
+        lockFile: opts.skillsLockFile ?? join(dirname(opts.skillsDir), "skills-lock.json"), ...(opts.skillFetch ? { fetchImpl: opts.skillFetch } : {}), ...(opts.clock ? { now: () => opts.clock!.now() } : {}),
+      })
+    : undefined;
+  if (skills) {
+    for (const t of skillTools(skills)) tools.register(t);
+    tools.register(skillRunTool(skills, guard, ...(opts.sandboxRunner ? [opts.sandboxRunner] : [])));
+  }
 
   const policy = new PolicyEngine(opts.policyRules ?? DEFAULT_RULES);
   const agent = new Agent({
     router, tools, policy, store, clock, redactor,
     ...(opts.profile ? { profile: opts.profile } : {}),
-    // Only skills that follow the format are offered to the model.
-    ...(skills ? { skills: () => skills.list().filter((s) => s.problems.length === 0).map((s) => ({ name: s.name, description: s.description })) } : {}),
+    // Only skills the owner trusts, that are switched on and follow the format, are offered to the model.
+    ...(skills ? { skills: () => skills.catalog() } : {}),
   });
   const engine = new WorkflowEngine({
     store,

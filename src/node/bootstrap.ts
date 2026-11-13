@@ -47,7 +47,7 @@ export async function bootRuntime(cfgDir: string, workspace: string, ov: BootOve
       if (v) env[e.keyName] = v;
     }
   }
-  const extra = { endpoints, skillsDir: join(cfgDir, "skills"), ...(saved.profile ? { profile: saved.profile } : {}) };
+  const extra = { endpoints, skillsDir: join(cfgDir, "skills"), skillsLockFile: join(cfgDir, "skills-lock.json"), ...(saved.profile ? { profile: saved.profile } : {}) };
 
   try {
     return { runtime: createRuntime({ workspace, providers, fallbackAllowed, dataConsent, env, ...extra }), secrets: store, problem: null as string | null };

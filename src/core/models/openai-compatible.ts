@@ -1,4 +1,5 @@
 import { ModelError } from "../errors.ts";
+import { anySignal } from "./abort.ts";
 import type { Redactor } from "../redact.ts";
 import type { ChatRequest, ChatResult, ModelCapabilities, ModelProvider } from "./types.ts";
 
@@ -62,7 +63,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
     if (req.temperature !== undefined) base.temperature = req.temperature;
 
     const timeout = AbortSignal.timeout(this.cfg.timeoutMs ?? 120_000);
-    const signal = req.signal ? AbortSignal.any([req.signal, timeout]) : timeout;
+    const signal = req.signal ? anySignal([req.signal, timeout]) : timeout;
 
     const send = async (body: Record<string, unknown>): Promise<Response> => {
       try {

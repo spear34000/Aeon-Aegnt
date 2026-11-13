@@ -309,7 +309,7 @@ async function boot(opts: { local?: boolean; maxUploadBytes?: number } = {}) {
   const clock = new ManualClock(Date.parse("2026-11-11T03:04:05Z"));
   const workspace = join(dir, "ws");
   mkdirSync(workspace);
-  const rt = createRuntime({ workspace, providers: ["m"], providerOverrides: [new MockProvider("m", [])], fallbackAllowed: false, dataConsent: [], store: new MemoryStore(), clock });
+  const rt = createRuntime({ workspace, providers: ["m"], providerOverrides: [new MockProvider("m", [])], fallbackAllowed: false, dataConsent: [], store: new MemoryStore(), clock, skillsDir: join(dir, "cfg", "skills"), skillsLockFile: join(dir, "cfg", "skills-lock.json") });
   const registry = new DeviceRegistry(null);
   const pairing = new PairingManager(registry);
   const secrets = new MemorySecretStore();
@@ -471,6 +471,46 @@ describe("Setting things up from any paired device", () => {
     await limited.pair(t.base, code);
     assert.equal((await limited.call(t.base, t.clock, "PUT", "/v1/skills/old-format", { description: "d", body: "b" })).status, 403);
     assert.equal((await limited.call(t.base, t.clock, "GET", "/v1/skills")).status, 200, "reading is allowed");
+    await t.close();
+  });
+
+  it("the owner looks at a source, installs from it, switches it off and approves a skill that only appeared in the project; a limited device can do none of it", async () => {
+    const t = await boot();
+    const call = (m: string, p: string, b?: Record<string, unknown>) => t.owner.call(t.base, t.clock, m, p, b);
+    const src = join(t.dir, "src", "tidy-notes");
+    mkdirSync(join(src, "scripts"), { recursive: true });
+    writeFileSync(join(src, "SKILL.md"), "---\nname: tidy-notes\ndescription: Tidy notes. Use when notes are messy.\n---\n\nRun scripts/tidy.py.\n");
+    writeFileSync(join(src, "scripts", "tidy.py"), "print('tidy')\n");
+
+    const looked = await call("POST", "/v1/skill-sources/inspect", { source: src });
+    assert.equal(looked.status, 200);
+    const preview = looked.body.preview;
+    assert.deepEqual([preview.candidates[0].name, preview.candidates[0].scriptTexts[0].path, (await call("GET", "/v1/skills")).body.skills.length], ["tidy-notes", "scripts/tidy.py", 0], "looking installs nothing");
+    assert.equal((await call("POST", "/v1/skill-sources/install", { previewId: preview.id, name: "tidy-notes", scope: "user" })).status, 201);
+    assert.equal((await call("POST", "/v1/skill-sources/install", { previewId: preview.id, name: "tidy-notes", scope: "user" })).status, 409, "the same name is not overwritten silently");
+    const listed = (await call("GET", "/v1/skills")).body.skills as { folder: string; scope: string; status: string; active: boolean; scripts: boolean }[];
+    assert.deepEqual(listed.map((s) => [s.folder, s.scope, s.status, s.active, s.scripts]), [["tidy-notes", "user", "tracked", true, true]]);
+    assert.equal((await call("POST", "/v1/skills/tidy-notes/enable", { scope: "user", enabled: false })).body.skill.active, false);
+    assert.equal((await call("POST", "/v1/skills/tidy-notes/enable", { scope: "user", enabled: true })).body.skill.active, true);
+
+    const dropped = join(t.workspace, ".agents", "skills", "from-a-clone");
+    mkdirSync(dropped, { recursive: true });
+    writeFileSync(join(dropped, "SKILL.md"), "---\nname: from-a-clone\ndescription: Arrived with a repository. Use for anything.\n---\n\nbody\n");
+    const clone = (await call("GET", "/v1/skills")).body.skills.find((s: { folder: string }) => s.folder === "from-a-clone");
+    assert.deepEqual([clone.scope, clone.status, clone.active], ["project", "untracked", false]);
+    assert.equal((await call("POST", "/v1/skills/from-a-clone/enable", { scope: "project", enabled: true })).status, 409, "switching on is not approving");
+    assert.equal((await call("POST", "/v1/skills/from-a-clone/trust", { scope: "project" })).body.skill.active, true);
+    assert.equal((await call("GET", "/v1/skills/from-a-clone?scope=project")).body.skill.scope, "project");
+    assert.equal((await call("DELETE", "/v1/skills/from-a-clone?scope=project")).status, 204);
+
+    const ex = clientExchange(t.owner.serverKey);
+    const code = ex.open((await call("POST", "/v1/pairing-codes", { epk: ex.epk, admin: false })).body.sealed, `pairing-code|${t.owner.id}`);
+    const limited = new Client("tablet");
+    await limited.pair(t.base, code);
+    for (const [m, p, b] of [["POST", "/v1/skill-sources/inspect", { source: src }], ["POST", "/v1/skill-sources/install", { previewId: preview.id, name: "tidy-notes" }], ["POST", "/v1/skills/tidy-notes/trust", { scope: "user" }], ["POST", "/v1/skills/tidy-notes/enable", { scope: "user", enabled: false }], ["DELETE", "/v1/skills/tidy-notes", undefined]] as [string, string, Record<string, unknown> | undefined][]) {
+      assert.equal((await limited.call(t.base, t.clock, m, p, b)).status, 403, `${m} ${p}`);
+    }
+    assert.equal((await call("POST", "/v1/skill-sources/inspect", { source: "https://gitlab.com/o/r" })).status, 400);
     await t.close();
   });
 

@@ -43,7 +43,8 @@ export const DEFAULT_SANDBOX: SandboxConfig = {
 };
 
 /** Builds `docker run` args: no network, read-only root, dropped caps, only a scratch dir mounted. */
-export function buildDockerArgs(cfg: SandboxConfig, image: string, command: string[], scratchDir: string): string[] {
+export function buildDockerArgs(cfg: SandboxConfig, image: string, command: string[], scratchDir: string, extraMounts: { source: string; target: string }[] = []): string[] {
+  for (const m of extraMounts) if (/[,\u0000]/.test(m.source) || /[,\u0000]/.test(m.target)) throw new Error("a mount path must not contain a comma");
   return [
     "run",
     "--rm",
@@ -56,6 +57,8 @@ export function buildDockerArgs(cfg: SandboxConfig, image: string, command: stri
     "--pids-limit", String(cfg.pidsLimit ?? 128),
     "--tmpfs", "/tmp:rw,size=64m",
     "--mount", `type=bind,source=${scratchDir},target=/work`,
+    // Extra folders are always read-only (a skill's own files, copied from what the owner approved).
+    ...extraMounts.flatMap((m) => ["--mount", `type=bind,source=${m.source},target=${m.target},readonly`]),
     "--workdir", "/work",
     image,
     ...command,

@@ -45,13 +45,6 @@ import dev.aeon.ui.design.Tone
 import dev.aeon.ui.state.AppModel
 import dev.aeon.ui.state.UiState
 
-/**
- * Whether this build can run the agent on the device itself. It cannot yet (decision D19): the agent is TypeScript that
- * needs Node 24, and no way to run it inside the app exists. The choice is shown anyway so nobody has to guess, and it
- * says so. When a way exists this becomes true and the same path continues to the model step.
- */
-internal const val CAN_RUN_ON_THIS_DEVICE = false
-
 private val GUIDE_COMMANDS = listOf("git clone https://github.com/spear34000/Aeon-Aegnt", "cd Aeon-Aegnt", "node src/node/cli.ts serve --host 0.0.0.0")
 
 @Composable
@@ -97,7 +90,7 @@ fun WhereScreen(state: UiState, model: AppModel) {
             WhereOption(
                 AeonIcons.Phone, "이 기기에서 바로 쓰기",
                 listOf("컴퓨터 없이 이 기기 하나로 설정해요", "AI 모델 연결부터 프로필까지 이 앱 안에서 끝나요", "기록과 파일은 이 기기에만 있어요"),
-                choice == "device", chip = if (CAN_RUN_ON_THIS_DEVICE) null else "준비 중",
+                choice == "device", chip = if (model.canRunOnDevice) null else "준비 중",
             ) { model.chooseWhere("device") }
             WhereOption(
                 AeonIcons.Terminal, "내 컴퓨터에 연결",
@@ -182,17 +175,37 @@ private fun Help(q: String, a: String) {
     }
 }
 
-/** What "이 기기에서 바로 쓰기" says while the agent cannot run on the device yet: the truth, and the way that works now. */
+/**
+ * "이 기기에서 바로 쓰기": when this build contains the agent, it starts here and pairs by itself (progress, or the reason
+ * and a retry). When it does not (desktop and web builds), it says so and points to the way that works.
+ */
 @Composable
 fun DeviceScreen(state: UiState, model: AppModel) {
+    val s = state.setup
+    val here = model.canRunOnDevice
     SetupFrame(
         null, null, onBack = { model.setupBack() }, onSkip = null,
-        footer = { AeonButton("컴퓨터에 연결하기", { model.chooseWhere("remote"); model.whereContinue() }, Modifier.fillMaxWidth(), kind = ButtonKind.Primary) },
+        footer = {
+            if (here && s.deviceError != null) AeonButton("다시 시도", { model.startOnDevice() }, Modifier.fillMaxWidth(), kind = ButtonKind.Primary)
+            AeonButton("컴퓨터에 연결하기", { model.chooseWhere("remote"); model.whereContinue() }, Modifier.fillMaxWidth(), kind = if (here && s.deviceError == null) ButtonKind.Ghost else ButtonKind.Primary)
+        },
     ) {
-        StepHeading("이 기기에서 실행", "아직 만들고 있는 기능이에요.")
+        StepHeading("이 기기에서 실행", if (here) "에이전트를 이 기기에서 켜고 있어요." else "이 기기에서는 아직 쓸 수 없어요.")
         Column(Modifier.padding(top = 22.dp).fillMaxWidth().background(MaterialTheme.colorScheme.surface, RoundedCornerShape(AeonShape.CARD.dp)).padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("지금은 이렇게 쓸 수 있어요", style = MaterialTheme.typography.titleMedium)
-            Body("다른 컴퓨터에서 Aeon을 켜고 이 기기로 연결하면 이 기기에서 시키고 승인할 수 있어요. 이 기기만으로 쓰는 방법은 준비되는 대로 여기에 나와요.")
+            when {
+                !here -> {
+                    Text("지금은 이렇게 쓸 수 있어요", style = MaterialTheme.typography.titleMedium)
+                    Body("다른 컴퓨터에서 Aeon을 켜고 이 기기로 연결하면 이 기기에서 시키고 승인할 수 있어요.")
+                }
+                s.deviceError != null -> {
+                    Text("시작하지 못했어요", style = MaterialTheme.typography.titleMedium)
+                    Body(s.deviceError)
+                }
+                else -> {
+                    Text(if (s.deviceStarting) "켜는 중…" else "준비됐어요", style = MaterialTheme.typography.titleMedium)
+                    Body("처음에는 파일을 풀어서 조금 걸려요. 연결 코드는 앱이 직접 받아서 입력할 필요가 없어요.")
+                }
+            }
         }
     }
 }

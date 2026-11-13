@@ -1,3 +1,4 @@
+import "./polyfills.ts";
 import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
 import type { VerificationCriterion } from "../core/verify.ts";

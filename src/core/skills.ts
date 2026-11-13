@@ -107,10 +107,12 @@ function blockScalar(lines: string[], i: number, style: string): { text: string;
  * one-level `metadata` map); anything else is reported instead of guessed at. Without front matter the whole text is
  * the body and the problems say so.
  */
-export function parseSkillMd(text: string): { spec: Partial<SkillSpec> & { body: string }; problems: string[] } {
+export function parseSkillMd(text: string): { spec: Partial<SkillSpec> & { body: string }; problems: string[]; warnings: string[] } {
   const problems: string[] = [];
+  /** Things that do not break the skill: a field this client does not know is ignored, and said so. */
+  const warnings: string[] = [];
   const m = /^---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)([\s\S]*)$/.exec(text.replace(/^﻿/, ""));
-  if (!m) return { spec: { body: text }, problems: ["SKILL.md has no front matter (--- name and description ---)"] };
+  if (!m) return { spec: { body: text }, problems: ["SKILL.md has no front matter (--- name and description ---)"], warnings };
   const lines = m[1]!.split(/\r?\n/);
   const spec: Partial<SkillSpec> & { body: string } = { body: m[2]!.replace(/^\r?\n/, "") };
   const known = new Set(["name", "description", "license", "compatibility", "metadata", "allowed-tools"]);
@@ -159,7 +161,11 @@ export function parseSkillMd(text: string): { spec: Partial<SkillSpec> & { body:
       if (value === null) problems.push(`"${key}" is not valid text`);
     }
     i = next;
-    if (value === null || !known.has(key)) continue;
+    if (!known.has(key)) {
+      warnings.push(`front matter field "${key.slice(0, 40)}" is not part of the Agent Skills spec and is ignored`);
+      continue;
+    }
+    if (value === null) continue;
     if (key === "name") spec.name = value;
     else if (key === "description") spec.description = value;
     else if (key === "license") spec.license = value;
@@ -168,7 +174,35 @@ export function parseSkillMd(text: string): { spec: Partial<SkillSpec> & { body:
   }
   if (spec.name === undefined) problems.push("front matter has no name");
   if (spec.description === undefined) problems.push("front matter has no description");
-  return { spec, problems };
+  return { spec, problems, warnings };
+}
+
+/** Folders a skill may keep files in (the spec's optional directories). */
+export const SKILL_DIRS = ["references", "assets", "scripts"] as const;
+
+/**
+ * A supporting file of a skill: `references/…`, `assets/…` or `scripts/…`, up to three levels down, names made of plain
+ * characters. This is the only shape of path the store reads, writes or hashes, so no name can point outside the skill.
+ */
+export function skillFilePathOk(rel: string): boolean {
+  return /^(references|assets|scripts)(\/[A-Za-z0-9][A-Za-z0-9._-]{0,63}){1,3}$/.test(rel);
+}
+
+/**
+ * Files the instructions point to (Markdown links and bare `references/x`, `assets/x`, `scripts/x` paths), relative to
+ * the skill folder. Web links, anchors and anything climbing out of the folder are left out. Used to warn about a
+ * reference that does not exist.
+ */
+export function skillLinkedFiles(body: string): string[] {
+  const out = new Set<string>();
+  const take = (raw: string) => {
+    let p = raw.trim().replace(/^<|>$/g, "").replace(/^\.\//, "").split(/[#?]/)[0]!;
+    if (!p || /^[a-z][a-z0-9+.-]*:/i.test(p) || p.startsWith("/") || p.split("/").includes("..")) return;
+    if (skillFilePathOk(p)) out.add(p);
+  };
+  for (const m of body.matchAll(/\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g)) take(m[1]!);
+  for (const m of body.matchAll(/(?:^|[\s`(])((?:references|assets|scripts)\/[A-Za-z0-9._/-]+)/g)) take(m[1]!.replace(/[.,;:]+$/, ""));
+  return [...out].sort();
 }
 
 function yamlString(v: string): string {

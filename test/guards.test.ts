@@ -166,3 +166,13 @@ describe("Policy, redaction, verification primitives", () => {
     assert.deepEqual(parseCriterion({ kind: "file_exists", path: "a" }, "model"), { kind: "file_exists", path: "a", source: "model" });
   });
 });
+
+import { crc32 } from "../src/node/crc32.ts";
+import { crc32 as nativeCrc32 } from "node:zlib";
+
+describe("crc32 (own implementation, for runtimes without zlib.crc32)", () => {
+  it("matches the standard check value and Node's own", () => {
+    assert.equal(crc32(Buffer.from("123456789")), 0xcbf43926);
+    for (const s of ["", "a", "IHDR\u0000\u0000\u0000\u0001", "x".repeat(1000)]) assert.equal(crc32(Buffer.from(s)), nativeCrc32(Buffer.from(s)), s.slice(0, 10));
+  });
+});

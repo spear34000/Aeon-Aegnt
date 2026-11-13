@@ -1,3 +1,4 @@
+import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { networkInterfaces } from "node:os";
 import { createInterface } from "node:readline";
 import { buildPairLink } from "../core/pair-link.ts";
@@ -16,6 +17,11 @@ export interface ServeOptions {
   host: string;
   port: number;
   web?: string | undefined;
+  /**
+   * The app that runs this server (the Android app) reads the pairing code from this file, which only it can read, instead
+   * of someone typing it. A new code is written at start and whenever a file named like this plus `.request` appears.
+   */
+  pairingCodeFile?: string | undefined;
 }
 
 /**
@@ -67,6 +73,12 @@ export async function serveCommand(o: ServeOptions): Promise<number> {
   boundPort = port;
   const showCode = () => {
     const c = pairing.newCode(Date.now());
+    if (o.pairingCodeFile) {
+      // The code goes only to the app that started this server. Not into the log: on Android the log is readable over adb.
+      writeFileSync(o.pairingCodeFile, c.code, { mode: 0o600 });
+      console.log("\nA pairing code was written for the app that started this server.\n");
+      return;
+    }
     console.log(`\nPairing code (valid 5 minutes, single use):\n  ${PairingManager.format(c.code)}\n`);
     // A QR code is only useful when another device can reach this machine. The phone's camera opens it in the Aeon app.
     const reachable = addresses();
@@ -86,6 +98,14 @@ export async function serveCommand(o: ServeOptions): Promise<number> {
   }
   console.log("Type 'pair' + Enter for a new pairing code, 'devices' to list devices, 'quit' to stop.");
   showCode();
+  if (o.pairingCodeFile) {
+    const request = `${o.pairingCodeFile}.request`;
+    setInterval(() => {
+      if (!existsSync(request)) return;
+      rmSync(request, { force: true });
+      showCode();
+    }, 500).unref();
+  }
 
   const rl = createInterface({ input: process.stdin });
   const done = new Promise<void>((resolve) => {

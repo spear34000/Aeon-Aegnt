@@ -59,7 +59,11 @@ class ServerIntegrationTest {
         File(cfg, "config.json").writeText(
             """{"providers":["openai-compatible"],"dataConsent":["openai-compatible"],"fallbackAllowed":false,"openaiCompatBaseUrl":"http://127.0.0.1:$modelPort/v1","openaiCompatModel":"m"}""",
         )
-        val pb = ProcessBuilder("node", File(root, "src/node/cli.ts").absolutePath, "serve", "--workspace", ws.absolutePath, "--port", "0")
+        // AEON_NODE18 points at a Node 18 executable: the same tests then run against the compiled mobile bundle
+        // (`npm run build:mobile`), which is what runs inside the Android app.
+        val node18 = System.getenv("AEON_NODE18")
+        val command = if (node18 != null) listOf(node18, File(root, "dist-mobile/node/cli.js").absolutePath) else listOf("node", File(root, "src/node/cli.ts").absolutePath)
+        val pb = ProcessBuilder(command + listOf("serve", "--workspace", ws.absolutePath, "--port", "0"))
             .directory(root)
             .redirectErrorStream(true)
         pb.environment()["AEON_CONFIG_DIR"] = cfg.absolutePath
@@ -81,7 +85,7 @@ class ServerIntegrationTest {
             if (line.trim().matches(Regex("[A-Z2-7]{4}(-[A-Z2-7]{4}){3}"))) code = line.trim()
         }
         // Keep draining so the child never blocks on a full pipe.
-        Thread { runCatching { reader.forEachLine { } } }.apply { isDaemon = true }.start()
+        Thread { runCatching { reader.forEachLine { if (System.getenv("AEON_DEBUG") != null) System.err.println("[server] $it") } } }.apply { isDaemon = true }.start()
         return Fixture("http://127.0.0.1:${port ?: error("server did not start:\n${lines.joinToString("\n")}")}", code ?: error("no pairing code:\n${lines.joinToString("\n")}"), ws, cfg)
     }
 

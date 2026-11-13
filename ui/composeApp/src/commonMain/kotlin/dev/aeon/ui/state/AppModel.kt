@@ -21,6 +21,9 @@ import dev.aeon.ui.api.UsageRecord
 import dev.aeon.ui.api.parseCheck
 import dev.aeon.ui.platform.DeviceCrypto
 import dev.aeon.ui.platform.KeyValueStore
+import dev.aeon.ui.platform.LOCAL_AGENT_URL
+import dev.aeon.ui.platform.LocalAgentHost
+import dev.aeon.ui.platform.localAgentHost
 import dev.aeon.ui.platform.defaultDeviceName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -182,6 +185,7 @@ class AppModel(
     private val scope: CoroutineScope,
     private val pollMillis: Long = 2000,
     defaultServerUrl: String = "http://127.0.0.1:7421",
+    private val localAgent: LocalAgentHost = localAgentHost(),
 ) {
     private val _state = MutableStateFlow(UiState(serverUrl = defaultServerUrl))
     val state: StateFlow<UiState> = _state.asStateFlow()
@@ -202,7 +206,31 @@ class AppModel(
             client.serverKey = store.get(KEY_SERVER_KEY).orEmpty()
             _state.update { it.copy(canSeal = client.serverKey.isNotEmpty()) }
             _state.update { it.copy(connection = Connection.Connecting) }
-            startPolling()
+            // The agent that runs inside this app stops with the app: bring it back before asking it anything.
+            if (localAgent.available && dev.aeon.ui.api.PairLink.isThisDevice(url)) scope.launch {
+                localAgent.start()
+                startPolling()
+            } else startPolling()
+        }
+    }
+
+    /** True when this build of the app contains the agent, so "이 기기에서 바로 쓰기" is possible. */
+    val canRunOnDevice: Boolean get() = localAgent.available
+
+    /**
+     * Starts the agent inside this app and pairs with it, with nothing typed: the app asks the agent for a one-time code
+     * through a file only this app can read. Progress and the reason for a failure are in [SetupState.deviceStarting] and
+     * [SetupState.deviceError].
+     */
+    fun startOnDevice() {
+        if (_state.value.setup.deviceStarting) return
+        setup { it.copy(deviceStarting = true, deviceError = null) }
+        scope.launch {
+            val failure = localAgent.start() ?: localAgent.pairingCode()?.let { code ->
+                pairNow(LOCAL_AGENT_URL, code)
+                if (_state.value.connection is Connection.Connected) null else _state.value.message ?: "이 기기의 에이전트와 연결하지 못했어요."
+            } ?: "이 기기의 에이전트에서 연결 코드를 받지 못했어요."
+            setup { it.copy(deviceStarting = false, deviceError = failure) }
         }
     }
 
@@ -233,7 +261,11 @@ class AppModel(
     fun newConversation() = _state.update { it.copy(section = Section.Chat, selectedTaskId = null, selectedTask = null, showDetail = false, drawerOpen = false) }
 
     fun pair(serverUrl: String, code: String) {
-        scope.launch {
+        scope.launch { pairNow(serverUrl, code) }
+    }
+
+    private suspend fun pairNow(serverUrl: String, code: String) {
+        run {
             // Never let signed requests for the current pairing go to the address being tried: stop the poller,
             // remember the current identity, and only switch after the server has proven it knew the code.
             val previousUrl = client.baseUrl
@@ -569,6 +601,7 @@ class AppModel(
     fun whereContinue() {
         setup { it.copy(guideDone = false) }
         goStep(SetupStep.Connect)
+        if (_state.value.setup.where == "device" && localAgent.available) startOnDevice()
     }
 
     /** The guide for another device is read; the address and code form comes next. */

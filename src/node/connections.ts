@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { crc32, deflateSync } from "node:zlib";
+import { deflateSync } from "node:zlib";
+import { crc32 } from "./crc32.ts";
 import type { AeonConfig } from "../core/config.ts";
 import {
   brandCandidates,
@@ -21,7 +22,7 @@ import {
 } from "../core/connections.ts";
 import type { Tool } from "../core/tools.ts";
 import { safeFetch } from "./net-guard.ts";
-import { SkillStore } from "./skills.ts";
+import { SkillLibrary } from "./skill-library.ts";
 
 export interface Fetched {
   status: number;
@@ -168,8 +169,8 @@ interface CachedIcon {
  */
 export class ConnectionService {
   readonly skillsDir: string;
-  /** Create, edit and delete skill folders. */
-  readonly skillStore: SkillStore;
+  /** The owner's skills, used by the routes when the running agent has no skill library of its own (it always has, outside tests). */
+  readonly library: SkillLibrary;
   private readonly fetcher: Fetcher;
   private readonly registry: string;
   private readonly brands: string;
@@ -185,7 +186,7 @@ export class ConnectionService {
   constructor(o: ConnectionServiceOptions) {
     this.o = o;
     this.skillsDir = join(o.configDir, "skills");
-    this.skillStore = new SkillStore(this.skillsDir);
+    this.library = new SkillLibrary({ userDir: this.skillsDir, lockFile: join(o.configDir, "skills-lock.json") });
     this.iconDir = join(o.configDir, "cache", "icons");
     this.fetcher = o.fetcher ?? defaultFetcher;
     this.registry = o.registryUrl ?? REGISTRY;

@@ -50,6 +50,10 @@ data class SetupState(
     val where: String? = null,
     /** The guide for connecting another device has been read; the address and code form is next. */
     val guideDone: Boolean = false,
+    /** The agent inside this app is being started and paired with. */
+    val deviceStarting: Boolean = false,
+    /** Why starting the agent inside this app failed, with a way to try again. */
+    val deviceError: String? = null,
     /** The profile is saved on this device but the server has not received it yet; it is sent when the server answers. */
     val profilePending: Boolean = false,
     /** The choice about internet lookups still has to be applied to the server. */

@@ -124,6 +124,7 @@ export class AeonServer {
     this.server = createServer((req, res) => {
       this.handle(req, res).catch((e: unknown) => {
         const status = e instanceof HttpError ? e.status : 500;
+        if (!(e instanceof HttpError) && process.env.AEON_DEBUG) console.error("internal error:", e); // for the owner's console, never sent to the client
         const msg = e instanceof HttpError ? e.message : "internal error"; // never leak internals
         if (!res.headersSent) this.json(res, status, { error: msg });
         else res.end();
@@ -514,37 +515,76 @@ export class AeonServer {
     }
 
     const conn = this.o.connections;
-    const skillMatch = /^\/v1\/skills(?:\/([a-z0-9][a-z0-9-]{0,63}))?$/.exec(path);
-    if (conn && skillMatch) {
-      const folder = skillMatch[1];
+    const lib = rt.skills ?? this.o.connections?.library;
+    const skillMatch = /^\/v1\/skills(?:\/([a-z0-9][a-z0-9-]{0,63})(?:\/(enable|trust|update-preview))?)?$/.exec(path);
+    const sourceMatch = /^\/v1\/skill-sources\/(inspect|install|updates)$/.exec(path);
+    if (lib && (skillMatch || sourceMatch)) {
+      const scopeOf = (v: unknown, fallback: "user" | "project" = "user"): "user" | "project" => (v === "user" || v === "project" ? v : fallback);
+      const admin = (what: string) => {
+        if (!this.canAdmin(req, deviceId)) throw new HttpError(403, `this device is not allowed to ${what}`);
+      };
       try {
-        if (method === "GET") {
-          if (!folder) return this.json(res, 200, { skills: conn.skillStore.list(), dir: conn.skillsDir, canEdit: this.canAdmin(req, deviceId) });
-          const s = conn.skillStore.read(folder);
-          if (!s) throw new HttpError(404, "skill not found");
-          return this.json(res, 200, { skill: s });
-        }
-        if (folder && (method === "PUT" || method === "DELETE")) {
-          if (!this.canAdmin(req, deviceId)) throw new HttpError(403, "this device is not allowed to change skills");
-          if (method === "DELETE") {
-            if (!conn.skillStore.remove(folder)) throw new HttpError(404, "skill not found");
-            res.writeHead(204).end();
-            return;
+        if (sourceMatch) {
+          // The owner's acts: look at a source, install from it, check for newer versions. Nothing is installed by looking.
+          admin("install skills");
+          const what = sourceMatch[1];
+          if (what === "updates" && method === "GET") {
+            if (!this.online()) throw new HttpError(403, "internet lookups are off in the settings");
+            return this.json(res, 200, { updates: await lib.check() });
           }
-          // Skills are made by the agent (the owner approves each one). The owner can correct or delete what exists, not create one.
+          if (method !== "POST") throw new HttpError(405, "use POST");
           const b = this.parseJson(raw);
-          if (typeof b.description !== "string" || typeof b.body !== "string") throw new HttpError(400, "description and body are required");
-          const strings = (v: unknown): Record<string, string> | undefined => (v !== null && typeof v === "object" && !Array.isArray(v) && Object.values(v).every((x) => typeof x === "string") ? (v as Record<string, string>) : undefined);
-          const saved = conn.skillStore.write(
-            {
+          if (what === "inspect") {
+            if (typeof b.source !== "string") throw new HttpError(400, "source is required");
+            if (!/^(\/|\.|~|[A-Za-z]:[\\/])/.test(b.source.trim()) && !this.online()) throw new HttpError(403, "internet lookups are off in the settings");
+            return this.json(res, 200, { preview: await lib.inspect(b.source) });
+          }
+          if (what === "install") {
+            if (typeof b.previewId !== "string" || typeof b.name !== "string") throw new HttpError(400, "previewId and name are required");
+            const skill = lib.install({ previewId: b.previewId, name: b.name, scope: scopeOf(b.scope), ...(typeof b.rename === "string" ? { rename: b.rename } : {}), ...(b.replace === true ? { replace: true } : {}) });
+            return this.json(res, 201, { skill });
+          }
+        }
+        if (skillMatch) {
+          const folder = skillMatch[1];
+          const action = skillMatch[2];
+          const scope = scopeOf(url.searchParams.get("scope"));
+          if (method === "GET" && !folder) return this.json(res, 200, { skills: lib.list(), dir: lib.userDir, projectDir: lib.project?.dir ?? null, canEdit: this.canAdmin(req, deviceId) });
+          if (method === "GET" && folder && !action) {
+            const hit = lib.list().find((x) => x.folder === folder && (url.searchParams.has("scope") ? x.scope === scope : true) && (x.active || !url.searchParams.has("scope")));
+            const full = hit ? (hit.scope === "project" ? lib.project : lib.user)?.read(folder) : null;
+            if (!hit || !full) throw new HttpError(404, "skill not found");
+            return this.json(res, 200, { skill: { ...full, scope: hit.scope, status: hit.status, enabled: hit.enabled, active: hit.active, inactiveBecause: hit.inactiveBecause, ...(hit.source ? { source: hit.source } : {}), hash: hit.hash } });
+          }
+          if (folder && method === "PUT" && !action) {
+            admin("change skills");
+            // Skills are made by the agent (the owner approves each one). The owner can correct or delete what exists, not create one.
+            const b = this.parseJson(raw);
+            if (typeof b.description !== "string" || typeof b.body !== "string") throw new HttpError(400, "description and body are required");
+            const strings = (v: unknown): Record<string, string> | undefined => (v !== null && typeof v === "object" && !Array.isArray(v) && Object.values(v).every((x) => typeof x === "string") ? (v as Record<string, string>) : undefined);
+            const saved = lib.writeAsOwner({
               name: folder, description: b.description, body: b.body,
               ...(typeof b.license === "string" ? { license: b.license } : {}),
               ...(typeof b.compatibility === "string" ? { compatibility: b.compatibility } : {}),
               ...(strings(b.metadata) ? { metadata: strings(b.metadata)! } : {}),
-            },
-            false,
-          );
-          return this.json(res, 200, { skill: saved });
+            });
+            return this.json(res, 200, { skill: saved });
+          }
+          if (folder && method === "DELETE" && !action) {
+            admin("change skills");
+            if (!lib.remove(scope, folder)) throw new HttpError(404, "skill not found");
+            res.writeHead(204).end();
+            return;
+          }
+          if (folder && method === "POST" && action) {
+            admin("change skills");
+            const b = this.parseJson(raw);
+            const sc = scopeOf(b.scope);
+            if (action === "enable") return this.json(res, 200, { skill: lib.setEnabled(sc, folder, b.enabled !== false) });
+            if (action === "trust") return this.json(res, 200, { skill: lib.trust(sc, folder) });
+            if (!this.online() && lib.get(sc, folder)?.source?.type === "github") throw new HttpError(403, "internet lookups are off in the settings");
+            return this.json(res, 200, await lib.previewUpdate(sc, folder));
+          }
         }
       } catch (e) {
         if (e instanceof SkillError) throw new HttpError(e.status, e.message);
