@@ -126,6 +126,8 @@ export class Agent implements TaskRunner {
         // A new task: what is remembered and fits this goal is about to be shown to it (counted once per task).
         const shown = this.cfg.memory?.relevant(current.goal) ?? [];
         if (shown.length > 0) this.cfg.memory?.markUsed?.(shown.map((m) => m.id));
+        // Facts about the owner go to the model from the first call, so the task is marked at once and stays marked (see handlePending).
+        if (shown.some((m) => m.kind === "fact") && !current.sawOwnerFacts) current = await ctx.checkpoint({ sawOwnerFacts: true });
         const planned = await this.plan(current, ctx);
         if (planned.kind === "outcome") return planned.outcome;
         current = planned.task;
@@ -383,7 +385,10 @@ export class Agent implements TaskRunner {
     // read still shows workspace-derived text to the model.
     // `executed` is missing on steps persisted before the field existed: unknown counts as executed (fail closed).
     // The same holds when remembered facts about the owner were put in the prompt of this task (preferences about style are not private).
-    const tainted = steps.some((s) => s.executed !== false && this.cfg.tools.get(s.tool)?.exposesWorkspaceData === true) || (this.cfg.memory?.relevant(task.goal).some((m) => m.kind === "fact") ?? false);
+    // That is recorded on the task and never undone: deleting the memory later does not make the model forget what it saw. Facts that became relevant after the start count from now on.
+    const factsNow = this.cfg.memory?.relevant(task.goal).some((m) => m.kind === "fact") ?? false;
+    if (factsNow && !task.sawOwnerFacts) await ctx.checkpoint({ sawOwnerFacts: true });
+    const tainted = steps.some((s) => s.executed !== false && this.cfg.tools.get(s.tool)?.exposesWorkspaceData === true) || task.sawOwnerFacts === true || factsNow;
     const decision = this.cfg.policy.evaluate({ tool: tool.name, assessment, tainted });
     await ctx.audit("tool_requested", {
       tool: tool.name,

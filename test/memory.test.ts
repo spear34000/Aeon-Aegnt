@@ -281,4 +281,30 @@ describe("what is remembered is private: it taints a task like a file that was r
     t.cleanup();
     t2.cleanup();
   });
+
+  it("the mark stays when the memory is deleted during the task: the model has already seen the fact", async () => {
+    const t = tempDir();
+    const memoryFile = join(t.dir, "memory.json");
+    const svc = new MemoryService(memoryFile);
+    const fact = svc.add("My sister Mina lives in Busan", "fact", owner);
+    // The fact is in the prompt of the planning call; the owner deletes the memory right after; then the request that leaves the machine comes.
+    const m = new MockProvider("m", [planReply(["send"], []), getUrl, finishReply("done")]);
+    const h = harness({ providers: [m], memoryFile });
+    const task = await h.engine.submit({ goal: "write to my sister Mina" });
+    // Delete the memory right after the first model call (the plan) has been made.
+    const realChat = h.router.chat.bind(h.router);
+    let calls = 0;
+    h.router.chat = (async (...args: Parameters<typeof realChat>) => {
+      const r = await realChat(...args);
+      if (++calls === 1) svc.remove(fact.id);
+      return r;
+    }) as typeof h.router.chat;
+    await h.engine.runTask(task.id);
+    const saved = (await h.store.getTask(task.id))!;
+    assert.equal(saved.sawOwnerFacts, true);
+    assert.equal(svc.list().length, 0, "the memory really is gone");
+    assert.equal(saved.status, "WAITING_FOR_APPROVAL", "the request out still waits");
+    h.cleanup();
+    t.cleanup();
+  });
 });

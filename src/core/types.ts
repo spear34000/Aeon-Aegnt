@@ -71,6 +71,8 @@ export interface Task {
   /** Id of the approval the task is blocked on. */
   pendingApprovalId?: string;
   pendingAction?: PendingAction;
+  /** Remembered facts about the owner were shown to the model during this task. Once true it stays true, even if the memory changes later: the model has seen them. */
+  sawOwnerFacts?: boolean;
 }
 
 export type TaskPatch = Partial<
@@ -89,6 +91,7 @@ export type TaskPatch = Partial<
     | "pendingApprovalId"
     | "pendingAction"
     | "cancelRequested"
+    | "sawOwnerFacts"
   >
 >;
 
