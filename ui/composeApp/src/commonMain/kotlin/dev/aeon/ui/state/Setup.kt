@@ -10,7 +10,7 @@ import dev.aeon.ui.api.Profile
 enum class SetupStep { Intro, Welcome, Terms, Connect, Coach, Profile, Done }
 
 const val INTRO_PAGES = 4
-const val PROFILE_PAGES = 3
+const val PROFILE_PAGES = 5
 
 /**
  * What the owner agreed to on this device. [service] and [data] are required. [online] is only the choice made

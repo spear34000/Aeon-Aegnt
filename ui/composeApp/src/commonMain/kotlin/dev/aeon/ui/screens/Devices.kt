@@ -1,6 +1,12 @@
 package dev.aeon.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.height
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -162,6 +168,11 @@ private fun NewDeviceDialog(n: NewDevice, state: UiState, model: AppModel) {
                 }
                 SelectionContainer { Text(n.code.chunked(4).joinToString("-"), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.titleLarge, color = if (expired) s.fg3 else MaterialTheme.colorScheme.onSurface) }
                 if (link == null) SelectionContainer { Text(n.addresses.firstOrNull() ?: state.serverUrl, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, color = s.fg3) }
+                // The bar drains with the five minutes, so the time left can be read without the numbers.
+                val fraction by animateFloatAsState((left / 300f).coerceIn(0f, 1f), tween(1000, easing = LinearEasing), label = "codeLeft")
+                Box(Modifier.fillMaxWidth().height(4.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant)) {
+                    Box(Modifier.fillMaxWidth(fraction).height(4.dp).background(if (left < 60) s.danger else MaterialTheme.colorScheme.primary, CircleShape))
+                }
                 Text(if (expired) "만료됐어요" else "${left / 60}:${(left % 60).toString().padStart(2, '0')} 남음", style = MaterialTheme.typography.labelLarge, color = if (expired || left < 60) s.danger else s.fg3)
                 AeonSwitch(n.admin, { model.newPairingCode(it) }, "설정 변경 허용")
             }
