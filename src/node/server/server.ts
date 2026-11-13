@@ -609,6 +609,34 @@ export class AeonServer {
         }
         return this.json(res, 200, state());
       }
+      // Reactions: any paired device (it is the owner's own reading, not a setting). The taste summary is made when enough have come.
+      const postMatch = /^\/v1\/feed\/posts\/([a-f0-9]{12})\/(seen|react|move)$/.exec(path);
+      if (postMatch && method === "POST") {
+        const id = postMatch[1]!;
+        const b = postMatch[2] === "seen" ? {} : this.parseJson(raw);
+        let ok = false;
+        if (postMatch[2] === "seen") ok = feed.markSeen(id);
+        else if (postMatch[2] === "react") {
+          if (b.reaction !== "like" && b.reaction !== "unlike" && b.reaction !== "dismiss") throw new HttpError(400, 'reaction must be "like", "unlike" or "dismiss"');
+          ok = feed.react(id, b.reaction);
+          if (ok) await feed.refreshTaste(this.feedChat(rt)).catch(() => false);
+        } else {
+          if (b.to !== "top" && b.to !== "bottom") throw new HttpError(400, 'to must be "top" or "bottom"');
+          ok = feed.move(id, b.to);
+        }
+        if (!ok) throw new HttpError(404, "no such post");
+        return this.json(res, 200, state());
+      }
+      if (path === "/v1/feed/taste" && (method === "PUT" || method === "DELETE")) {
+        if (!this.canAdmin(req, deviceId)) throw new HttpError(403, "this device is not allowed to change the taste summary");
+        if (method === "DELETE") feed.setTaste(null);
+        else {
+          const b = this.parseJson(raw);
+          if (typeof b.text !== "string") throw new HttpError(400, "text must be text");
+          feed.setTaste(b.text);
+        }
+        return this.json(res, 200, state());
+      }
     }
 
     // What the owner wants remembered across tasks: read by any paired device, changed only by the machine or an admin device.

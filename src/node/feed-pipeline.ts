@@ -3,6 +3,8 @@ import { dice, longestSharedRun, numbersIn } from "./feed-text.ts";
 import { looksLikeBait, type FeedChat } from "./feed.ts";
 import type { StoredImage, ImageStore } from "./feed-images.ts";
 import type { Candidate, SourceAdapter } from "./feed-sources.ts";
+import { moveForToday } from "./feed-order.ts";
+import { makeTaste, recordReaction, tasteDue } from "./feed-taste.ts";
 import { clean, dayKey, FeedStore, MAX_POSTS, type FeedFile, type FeedPost, type RunReport } from "./feed-store.ts";
 
 /**
@@ -298,6 +300,73 @@ export class FeedPipeline {
     return report;
   }
 
+  /** The owner opened a post: it is read from now on, and its category is counted for the taste summary. False for an unknown id. */
+  markSeen(id: string): boolean {
+    return this.store.update((f) => {
+      const p = f.posts.find((x) => x.id === id);
+      if (!p) return false;
+      if (p.seenAt === undefined) {
+        p.seenAt = this.now();
+        f.opens[p.category] = Math.min(1000, (f.opens[p.category] ?? 0) + 1);
+      }
+      return true;
+    });
+  }
+
+  /** Like, take the like back, or remove a post (it is deleted, with its picture; the reaction is kept as category, kicker and title only). */
+  react(id: string, kind: "like" | "unlike" | "dismiss"): boolean {
+    const found = this.store.update((f) => {
+      const p = f.posts.find((x) => x.id === id);
+      if (!p) return false;
+      const now = this.now();
+      if (kind === "like" && p.liked !== true) {
+        p.liked = true;
+        recordReaction(f, p, "like", now);
+      } else if (kind === "unlike") delete p.liked;
+      else if (kind === "dismiss") {
+        recordReaction(f, p, "dismiss", now);
+        f.posts = f.posts.filter((x) => x.id !== id);
+        if (f.order) f.order.ids = f.order.ids.filter((x) => x !== id);
+        this.images?.prune(new Set(f.posts.filter((x) => x.image).map((x) => x.id)));
+      }
+      return true;
+    });
+    return found;
+  }
+
+  /** Puts a post first or last for today. False for an unknown id. */
+  move(id: string, to: "top" | "bottom"): boolean {
+    return this.store.update((f) => {
+      if (!f.posts.some((x) => x.id === id)) return false;
+      f.order = moveForToday(f.posts, this.now(), f.order, id, to);
+      return true;
+    });
+  }
+
+  /** Makes the taste summary again if enough new reactions came and enough time passed (by the model when it may be used, else by rules). */
+  async refreshTaste(chat?: FeedChat): Promise<boolean> {
+    const now = this.now();
+    const f = this.store.read();
+    if (!tasteDue(f, now)) return false;
+    const taste = await makeTaste(f, chat, now);
+    if (!taste) return false;
+    this.store.update((g) => {
+      if (g.taste?.source === "owner") return;
+      g.taste = taste;
+      g.tasteBasis = 0;
+    });
+    return true;
+  }
+
+  /** The owner writes the summary (kept as theirs), or clears it (null: the automatic one starts again from the next reactions). */
+  setTaste(text: string | null): void {
+    this.store.update((f) => {
+      const t = text === null ? "" : clean(text, 300);
+      f.taste = t ? { text: t, updatedAt: this.now(), source: "owner" } : null;
+      f.tasteBasis = 0;
+    });
+  }
+
   private async search(interest: string, now: number) {
     const adapter = this.adapters[0];
     return adapter ? adapter.search(interest, now) : { items: [], error: "소스가 없어요" };
@@ -308,7 +377,8 @@ export class FeedPipeline {
     const list = ordered.map((c, i) => ({ id: `c${i + 1}`, interest: c.interest, title: c.title, outlet: c.outlet, published: dayKey(c.publishedAt), text: (texts.get(c.id) ?? "").slice(0, 1200) }));
     return [
       `Owner's brief (their own words about what this feed should be): ${f.settings.brief}`,
-      ...(f.taste?.text ? [`What the owner likes and dislikes, summed up from their reactions: ${f.taste.text}`] : []),
+      // A summary the owner wrote is their own words; one made from reactions is data like any other text.
+      ...(f.taste?.text ? [f.taste.source === "owner" ? `What the owner likes and dislikes (their own words): ${f.taste.text}` : `What the owner seems to like and dislike, summed up from their reactions:\n${wrapUntrusted("feed:taste", f.taste.text)}`] : []),
       `Today: ${dayKey(now)}. Write at most ${room} posts.`,
       `Candidates:\n${wrapUntrusted("feed:candidates", JSON.stringify(list))}`,
     ].join("\n");

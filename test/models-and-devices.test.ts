@@ -611,6 +611,48 @@ describe("Setting things up from any paired device", () => {
     await t.close();
   });
 
+  it("reading, liking, removing and moving feed posts work from any paired device; the taste summary is read by all and changed by an admin only", async () => {
+    const hour = new Date(Date.parse("2026-11-11T02:00:00Z")).toUTCString();
+    const item = (n: number, title: string) => "<item><title>" + title + " - E경제</title><link>https://news.google.com/rss/articles/p" + n + "</link><pubDate>" + hour + "</pubDate><source url='https://e.example'>E경제</source></item>";
+    const body = "<rss><channel>" + item(1, "반도체 수출 두 달 연속 증가") + item(2, "항공권 평균 가격 지난달보다 4% 내려") + item(3, "신약 임상 3상 통과 소식 발표") + "</channel></rss>";
+    const t = await boot({ feedFetch: async () => new Response(body, { status: 200 }) });
+    const call = (m: string, p: string, b?: Record<string, unknown>) => t.owner.call(t.base, t.clock, m, p, b);
+    const cfg = (await call("GET", "/v1/config")).body.config;
+    await call("PUT", "/v1/config", { ...cfg, profile: { interests: ["AI"] } });
+    const made = await call("POST", "/v1/feed/generate");
+    const ids: string[] = made.body.posts.map((p: { id: string }) => p.id);
+    assert.equal(ids.length, 3);
+
+    const ex = clientExchange(t.owner.serverKey);
+    const code = ex.open((await call("POST", "/v1/pairing-codes", { epk: ex.epk, admin: false })).body.sealed, `pairing-code|${t.owner.id}`);
+    const tablet = new Client("tablet");
+    await tablet.pair(t.base, code);
+    const tcall = (m: string, p: string, b?: Record<string, unknown>) => tablet.call(t.base, t.clock, m, p, b);
+
+    assert.equal((await tcall("POST", `/v1/feed/posts/${ids[0]}/seen`)).status, 200);
+    const afterSeen = (await call("GET", "/v1/feed")).body.posts;
+    assert.equal(afterSeen.find((p: { id: string }) => p.id === ids[0]).seenAt > 0, true);
+    assert.equal(afterSeen.at(-1).id, ids[0], "a read post goes below the unread ones");
+    const liked = await tcall("POST", `/v1/feed/posts/${ids[1]}/react`, { reaction: "like" });
+    assert.equal(liked.body.posts.find((p: { id: string }) => p.id === ids[1]).liked, true);
+    assert.equal((await tcall("POST", `/v1/feed/posts/${ids[1]}/react`, { reaction: "love" })).status, 400);
+    assert.equal((await tcall("POST", `/v1/feed/posts/${"0".repeat(12)}/react`, { reaction: "like" })).status, 404);
+    const moved = await tcall("POST", `/v1/feed/posts/${ids[2]}/move`, { to: "top" });
+    assert.equal(moved.body.posts[0].id, ids[2], "the owner's order holds today");
+    assert.equal((await tcall("POST", `/v1/feed/posts/${ids[2]}/move`, { to: "sideways" })).status, 400);
+    const gone = await tcall("POST", `/v1/feed/posts/${ids[2]}/react`, { reaction: "dismiss" });
+    assert.deepEqual(gone.body.posts.map((p: { id: string }) => p.id).includes(ids[2]), false);
+
+    assert.equal((await tcall("PUT", "/v1/feed/taste", { text: "짧은 글" })).status, 403);
+    assert.equal((await tcall("DELETE", "/v1/feed/taste")).status, 403);
+    const put = await call("PUT", "/v1/feed/taste", { text: "  짧고 분명한 글을 좋아해요  " });
+    assert.deepEqual([put.body.taste.text, put.body.taste.source], ["짧고 분명한 글을 좋아해요", "owner"]);
+    assert.equal((await tcall("GET", "/v1/feed")).body.taste.text, "짧고 분명한 글을 좋아해요", "any device can read it");
+    assert.equal((await call("PUT", "/v1/feed/taste", { text: 5 })).status, 400);
+    assert.equal((await call("DELETE", "/v1/feed/taste")).body.taste, null);
+    await t.close();
+  });
+
   it("what the owner wants remembered: any device reads it, the machine or an admin device changes it, and the agent sees it", async () => {
     const t = await boot();
     const call = (method: string, path: string, body?: unknown) => t.owner.call(t.base, t.clock, method, path, body);

@@ -96,8 +96,10 @@ export interface FeedFile {
   ledger: Record<string, DayLedger>;
   reactions: Reaction[];
   taste: Taste | null;
-  /** Reactions counted into the taste summary so far, to know when enough new ones have come. */
+  /** Likes and removals since the taste summary was last made, to know when enough new ones have come. */
   tasteBasis: number;
+  /** How many posts of each category were opened. Only counts: no title, no time. */
+  opens: Record<string, number>;
   /** The order the owner chose, kept for that day only. */
   order: { day: string; ids: string[] } | null;
   lastRunAt: number;
@@ -107,7 +109,7 @@ export interface FeedFile {
 export const MAX_POSTS = 300;
 export const MAX_REACTIONS = 100;
 
-export const emptyFile = (): FeedFile => ({ version: 1, posts: [], settings: { ...DEFAULT_SETTINGS }, ledger: {}, reactions: [], taste: null, tasteBasis: 0, order: null, lastRunAt: 0, lastRun: null });
+export const emptyFile = (): FeedFile => ({ version: 1, posts: [], settings: { ...DEFAULT_SETTINGS }, ledger: {}, reactions: [], taste: null, tasteBasis: 0, opens: {}, order: null, lastRunAt: 0, lastRun: null });
 
 /** The local calendar day of a time, as YYYY-MM-DD: the unit the daily limits and the day's manual order are counted in. */
 export function dayKey(ms: number): string {
