@@ -4,10 +4,11 @@ import dev.aeon.ui.api.Profile
 
 /**
  * First-run flow, in order. Splash is not a step: it is shown briefly on every start while state is restored.
- * Connect is the existing pairing screen; it sits between the terms and the coach marks because the coach marks
+ * Where asks whether the agent runs on this device or on another one; Connect is the pairing screen (with the guide for
+ * another device in front of it); Model picks the AI when the agent has none. They sit before the coach marks because those
  * run on the real main screen and the profile is saved on the server.
  */
-enum class SetupStep { Intro, Welcome, Terms, Connect, Coach, Profile, Done }
+enum class SetupStep { Intro, Welcome, Terms, Where, Connect, Model, Coach, Profile, Done }
 
 const val INTRO_PAGES = 4
 const val PROFILE_PAGES = 5
@@ -45,6 +46,10 @@ data class SetupState(
     val profileDraft: Profile = Profile(),
     val profilePage: Int = 0,
     val coachIndex: Int = 0,
+    /** "device" or "remote": where the owner wants the agent to run. Null until chosen. */
+    val where: String? = null,
+    /** The guide for connecting another device has been read; the address and code form is next. */
+    val guideDone: Boolean = false,
     /** The profile is saved on this device but the server has not received it yet; it is sent when the server answers. */
     val profilePending: Boolean = false,
     /** The choice about internet lookups still has to be applied to the server. */

@@ -52,7 +52,7 @@ import dev.aeon.ui.state.Section
 import dev.aeon.ui.state.SettingsPage
 import dev.aeon.ui.state.UiState
 
-private enum class RootScreen { Splash, Intro, Welcome, Terms, Connect, Profile, Main }
+private enum class RootScreen { Splash, Intro, Welcome, Terms, Where, Guide, Device, Connect, Model, Profile, Main }
 
 /**
  * Decides what fills the window: the splash while state is restored, the first-run steps in order, the pairing
@@ -78,14 +78,20 @@ fun AppRoot(model: AppModel, shell: @Composable (UiState, AppModel) -> Unit) {
                     setup.step == SetupStep.Intro -> RootScreen.Intro
                     setup.step == SetupStep.Welcome -> RootScreen.Welcome
                     setup.step == SetupStep.Terms -> RootScreen.Terms
-                    state.connection is Connection.Unpaired || (setup.step == SetupStep.Connect && state.connection !is Connection.Connected) -> RootScreen.Connect
+                    setup.step == SetupStep.Where -> RootScreen.Where
+                    state.connection is Connection.Unpaired || (setup.step == SetupStep.Connect && state.connection !is Connection.Connected) ->
+                        // Before the address and code form, each way has its own page: the guide for another device, or what is possible on this one.
+                        if (setup.step == SetupStep.Connect && setup.where == "device") RootScreen.Device
+                        else if (setup.step == SetupStep.Connect && setup.where == "remote" && !setup.guideDone && state.pairPrefill == null) RootScreen.Guide
+                        else RootScreen.Connect
+                    setup.step == SetupStep.Model -> RootScreen.Model
                     setup.step == SetupStep.Profile -> RootScreen.Profile
                     else -> RootScreen.Main
                 }
                 val coaching = screen == RootScreen.Main && (setup.step == SetupStep.Coach || setup.replayCoach)
                 val canGoBack = when (screen) {
                     RootScreen.Intro -> setup.introPage > 0
-                    RootScreen.Welcome, RootScreen.Terms, RootScreen.Profile -> true
+                    RootScreen.Welcome, RootScreen.Terms, RootScreen.Profile, RootScreen.Where, RootScreen.Guide, RootScreen.Device, RootScreen.Model -> true
                     RootScreen.Connect -> setup.step == SetupStep.Connect
                     RootScreen.Main -> coaching && setup.coachIndex > 0
                     RootScreen.Splash -> false
@@ -101,6 +107,13 @@ fun AppRoot(model: AppModel, shell: @Composable (UiState, AppModel) -> Unit) {
                         RootScreen.Intro -> IntroScreen(state, model)
                         RootScreen.Welcome -> WelcomeScreen(model)
                         RootScreen.Terms -> TermsScreen(state, model)
+                        RootScreen.Where -> WhereScreen(state, model)
+                        RootScreen.Guide -> GuideScreen(state, model)
+                        RootScreen.Device -> DeviceScreen(state, model)
+                        RootScreen.Model -> Box(Modifier.fillMaxSize()) {
+                            ModelStepScreen(state, model)
+                            ModelSheetHost(state, model)
+                        }
                         RootScreen.Connect -> ConnectScreen(state, model, onBack = if (setup.step == SetupStep.Connect) ({ model.setupBack() }) else null)
                         RootScreen.Profile -> ProfileSetupScreen(state, model)
                         RootScreen.Main -> Box(Modifier.fillMaxSize()) {

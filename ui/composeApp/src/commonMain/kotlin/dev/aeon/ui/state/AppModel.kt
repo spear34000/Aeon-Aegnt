@@ -251,7 +251,7 @@ class AppModel(
                 if (client.serverKey.isNotEmpty()) store.put(KEY_SERVER_KEY, client.serverKey) else store.remove(KEY_SERVER_KEY)
                 _state.update { it.copy(serverUrl = client.baseUrl, connection = Connection.Connected(res.serverName), busy = false, canSeal = client.serverKey.isNotEmpty()) }
                 _state.update { it.copy(pairPrefill = null) }
-                if (_state.value.setup.step == SetupStep.Connect) goStep(SetupStep.Coach)
+                if (_state.value.setup.step == SetupStep.Connect) goStep(SetupStep.Model)
                 if (dev.aeon.ui.platform.supportsBackgroundCheck && _state.value.setup.consents.background) runCatching { dev.aeon.ui.platform.setBackgroundApprovalCheck(true) }
                 startPolling()
             } catch (e: Exception) {
@@ -322,7 +322,7 @@ class AppModel(
                     approvalSeenAt = seen,
                 )
             }
-            if (_state.value.setup.step == SetupStep.Connect) goStep(SetupStep.Coach)
+            if (_state.value.setup.step == SetupStep.Connect) goStep(SetupStep.Model)
             syncSetup(status.admin)
             // The greeting and the settings need the saved profile; read it once after connecting.
             if (_state.value.config == null) runCatching { client.config() }.onSuccess { cfg -> _state.update { it.copy(config = cfg, draft = it.draft ?: cfg) } }
@@ -491,6 +491,7 @@ class AppModel(
                 consents = consents,
                 profileDraft = draft ?: Profile(),
                 profilePage = read(KEY_SETUP_PROFILE_PAGE)?.toIntOrNull()?.coerceIn(0, PROFILE_PAGES - 1) ?: 0,
+                where = read(KEY_SETUP_WHERE)?.takeIf { it == "device" || it == "remote" },
                 profilePending = read(KEY_SETUP_PENDING) == "1",
                 onlinePending = read(KEY_SETUP_ONLINE_PENDING) == "1",
             )
@@ -545,11 +546,38 @@ class AppModel(
         // Agreeing again after taking the agreement back does not repeat the tour and the profile.
         goStep(
             when {
-                _state.value.connection is Connection.Unpaired -> SetupStep.Connect
+                // A scanned link already says which way: another device, with the address and code ready.
+                _state.value.connection is Connection.Unpaired && _state.value.pairPrefill != null -> {
+                    chooseWhere("remote")
+                    setup { it.copy(guideDone = true) }
+                    SetupStep.Connect
+                }
+                _state.value.connection is Connection.Unpaired -> SetupStep.Where
                 read(KEY_SETUP_COMPLETED) == "1" -> SetupStep.Done
                 else -> SetupStep.Coach
             },
         )
+    }
+
+    /** Where the agent runs: "device" or "remote". Kept on this device so closing the app resumes here. */
+    fun chooseWhere(w: String) {
+        save(KEY_SETUP_WHERE, w)
+        setup { it.copy(where = w) }
+    }
+
+    /** Leaves the choice: another device starts with its guide; this device shows what is possible now. */
+    fun whereContinue() {
+        setup { it.copy(guideDone = false) }
+        goStep(SetupStep.Connect)
+    }
+
+    /** The guide for another device is read; the address and code form comes next. */
+    fun guideContinue() = setup { it.copy(guideDone = true) }
+
+    /** Ends the model step (a model was chosen, the agent already had one, or the owner chose to do it later). */
+    fun finishModelStep() {
+        if (_state.value.setup.step != SetupStep.Model) return
+        goStep(if (read(KEY_SETUP_COMPLETED) == "1") SetupStep.Done else SetupStep.Coach)
     }
 
     /** Taking back a required agreement returns the app to the terms; nothing else is deleted. */
@@ -583,7 +611,9 @@ class AppModel(
                 goStep(SetupStep.Intro)
             }
             SetupStep.Terms -> goStep(SetupStep.Welcome)
-            SetupStep.Connect -> goStep(SetupStep.Terms)
+            SetupStep.Where -> goStep(SetupStep.Terms)
+            SetupStep.Connect -> if (s.where == "remote" && s.guideDone) setup { it.copy(guideDone = false) } else goStep(SetupStep.Where)
+            SetupStep.Model -> goStep(SetupStep.Where)
             SetupStep.Coach -> if (s.coachIndex > 0) setup { it.copy(coachIndex = it.coachIndex - 1) } else return false
             SetupStep.Profile -> if (s.profilePage > 0) setProfilePage(s.profilePage - 1) else goStep(SetupStep.Coach)
             SetupStep.Done -> return false
@@ -1001,6 +1031,7 @@ class AppModel(
         const val KEY_SETUP_CONSENTS = "setup.consents"
         const val KEY_SETUP_PROFILE = "setup.profile"
         const val KEY_SETUP_PROFILE_PAGE = "setup.profilePage"
+        const val KEY_SETUP_WHERE = "setup.where"
         const val KEY_SETUP_PENDING = "setup.profilePending"
         const val KEY_SETUP_ONLINE_PENDING = "setup.onlinePending"
     }

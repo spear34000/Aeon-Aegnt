@@ -76,11 +76,50 @@ class SetupFlowTest {
         assertEquals(SetupStep.Terms, m.setup.step, "one of two required items is not enough, whatever the optional ones say")
         m.setConsents(Consents(service = true, data = true))
         m.acceptTerms()
-        assertEquals(SetupStep.Connect, m.setup.step, "an unpaired device connects before the tour and the profile")
+        assertEquals(SetupStep.Where, m.setup.step, "an unpaired device first says where the agent runs")
         assertTrue(m.setup.consents.acceptedAt > 0)
         assertFalse(m.setup.consents.online, "optional items stay off unless chosen")
         m.setupBack()
         assertEquals(SetupStep.Terms, m.setup.step)
+    }
+
+    @Test
+    fun bothWaysAreFirstClass_anotherDeviceGetsItsGuideThenTheForm_thisDeviceSaysWhatIsPossible() {
+        val store = MapStore()
+        val m = model(store)
+        m.finishIntro(); m.beginSetup()
+        m.setConsents(Consents(service = true, data = true)); m.acceptTerms()
+        assertEquals(SetupStep.Where, m.setup.step)
+        assertEquals(null, m.setup.where, "no choice is made for the owner")
+
+        m.chooseWhere("remote")
+        assertEquals("remote", model(store).setup.where, "the choice is remembered")
+        m.whereContinue()
+        assertEquals(SetupStep.Connect to false, m.setup.step to m.setup.guideDone, "the guide comes before the address and code form")
+        m.guideContinue()
+        assertTrue(m.setup.guideDone)
+        m.setupBack()
+        assertEquals(SetupStep.Connect to false, m.setup.step to m.setup.guideDone, "back from the form returns to the guide")
+        m.setupBack()
+        assertEquals(SetupStep.Where, m.setup.step, "back from the guide returns to the choice")
+
+        m.chooseWhere("device")
+        m.whereContinue()
+        assertEquals("device", m.setup.where)
+        assertEquals(SetupStep.Connect, m.setup.step, "this device's page is part of the same step and says what works today")
+        m.chooseWhere("remote") // what its button does
+        m.whereContinue()
+        assertEquals("remote", m.setup.where)
+    }
+
+    @Test
+    fun aScannedLinkSkipsTheChoiceBecauseItAlreadyMeansAnotherDevice() {
+        val m = model(MapStore())
+        m.receivePairLink("aeon://pair?u=http%3A%2F%2F127.0.0.1%3A9&c=75KFXQWOXQGQ7VLQ")
+        m.setConsents(Consents(service = true, data = true))
+        m.acceptTerms()
+        assertEquals(SetupStep.Connect, m.setup.step)
+        assertEquals("remote" to true, m.setup.where to m.setup.guideDone, "straight to the form with the address and code filled in")
     }
 
     @Test

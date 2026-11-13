@@ -89,7 +89,7 @@ import kotlinx.coroutines.launch
 
 /** Common frame of the first-run screens: back, title with progress, skip, scrolling body and a fixed footer. */
 @Composable
-private fun SetupFrame(
+internal fun SetupFrame(
     title: String?,
     progress: String?,
     onBack: (() -> Unit)?,
@@ -537,7 +537,7 @@ internal fun ChatPreview(p: Profile, mine: String?, reply: String, modifier: Mod
 }
 
 @Composable
-private fun StepHeading(title: String, sub: String) {
+internal fun StepHeading(title: String, sub: String) {
     Text(title, Modifier.padding(top = 4.dp), style = MaterialTheme.typography.headlineMedium.copy(fontSize = 30.sp, lineHeight = 38.sp))
     Text(sub, Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
