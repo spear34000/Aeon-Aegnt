@@ -13,6 +13,7 @@ import { openAiCompatible } from "../src/core/models/providers.ts";
 import { MemorySecretStore } from "../src/core/secrets.ts";
 import { loadConfig } from "../src/node/config-file.ts";
 import { ConnectionService, type Fetched } from "../src/node/connections.ts";
+import { FeedService, type FeedFetch } from "../src/node/feed.ts";
 import { ProviderCatalog } from "../src/node/provider-catalog.ts";
 import { SkillStore } from "../src/node/skills.ts";
 import { buildProviders, createRuntime } from "../src/node/runtime.ts";
@@ -304,7 +305,7 @@ class Client {
   }
 }
 
-async function boot(opts: { local?: boolean; maxUploadBytes?: number } = {}) {
+async function boot(opts: { local?: boolean; maxUploadBytes?: number; feedFetch?: FeedFetch } = {}) {
   const { dir, cleanup } = tempDir();
   const clock = new ManualClock(Date.parse("2026-11-11T03:04:05Z"));
   const workspace = join(dir, "ws");
@@ -325,6 +326,7 @@ async function boot(opts: { local?: boolean; maxUploadBytes?: number } = {}) {
     connections: new ConnectionService({ configDir: join(dir, "cfg"), fetcher }),
     addresses: () => ["http://192.168.0.12:7421"],
     isLocalRequest: () => opts.local === true,
+    ...(opts.feedFetch ? { feed: new FeedService({ file: join(dir, "cfg", "feed.json"), fetchImpl: opts.feedFetch, now: () => clock.now() }) } : {}),
     onConfigChanged: () => void changed++,
     ...(opts.maxUploadBytes ? { maxUploadBytes: opts.maxUploadBytes } : {}),
   });
@@ -516,6 +518,33 @@ describe("Setting things up from any paired device", () => {
       assert.equal((await limited.call(t.base, t.clock, m, p, b)).status, 403, `${m} ${p}`);
     }
     assert.equal((await call("POST", "/v1/skill-sources/inspect", { source: "https://gitlab.com/o/r" })).status, 400);
+    await t.close();
+  });
+
+  it("the feed follows the owner's interests, refreshes on request, and respects the internet switch", async () => {
+    const hour = new Date(Date.parse("2026-11-11T02:00:00Z")).toUTCString();
+    const body = "<rss><channel><item><title>반도체 수출 두 달 연속 증가 - E경제</title><link>https://news.google.com/rss/articles/abc</link><pubDate>" + hour + "</pubDate><source url=\"https://e.example\">E경제</source></item></channel></rss>";
+    let asked = 0;
+    const t = await boot({ feedFetch: async () => { asked++; return new Response(body, { status: 200 }); } });
+    const call = (m: string, p: string, b?: Record<string, unknown>) => t.owner.call(t.base, t.clock, m, p, b);
+    assert.deepEqual([(await call("GET", "/v1/feed")).body.feed, (await call("GET", "/v1/feed")).body.interests], [null, []], "nothing yet, and no interests");
+    assert.equal((await call("POST", "/v1/feed/refresh")).status, 400, "pick interests first");
+
+    const cfg = (await call("GET", "/v1/config")).body.config;
+    assert.equal((await call("PUT", "/v1/config", { ...cfg, profile: { interests: ["AI", "여행"] } })).status, 200);
+    const first = await call("POST", "/v1/feed/refresh");
+    assert.equal(first.status, 200);
+    assert.deepEqual(first.body.feed.sections.map((s: { interest: string; items: unknown[] }) => [s.interest, s.items.length]), [["AI", 1], ["여행", 1]]);
+    assert.equal(first.body.feed.sections[0].items[0].url, "https://news.google.com/rss/articles/abc");
+    assert.equal(asked, 2);
+    await call("POST", "/v1/feed/refresh");
+    assert.equal(asked, 2, "a second refresh right away is answered from what is stored");
+    const got = (await call("GET", "/v1/feed")).body;
+    assert.deepEqual([got.stale, got.online, got.feed.mode], [false, true, "rules"]);
+
+    assert.equal((await call("PUT", "/v1/config", { ...cfg, profile: { interests: ["AI"] }, onlineLookups: false })).status, 200);
+    assert.equal((await call("POST", "/v1/feed/refresh")).status, 403, "internet lookups off: nothing is fetched");
+    assert.equal((await call("GET", "/v1/feed")).body.online, false);
     await t.close();
   });
 

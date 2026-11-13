@@ -10,6 +10,7 @@ import { parseCriterion } from "../../core/verify.ts";
 import { loadConfig, saveConfig } from "../config-file.ts";
 import type { ConnectionService } from "../connections.ts";
 import { SkillError } from "../skills.ts";
+import { FeedService, FEED_MIN_GAP_MS } from "../feed.ts";
 import type { ProviderCatalog } from "../provider-catalog.ts";
 import { isSealedBox, type ServerIdentity } from "./seal.ts";
 import type { createRuntime } from "../runtime.ts";
@@ -28,6 +29,8 @@ export interface AeonServerOptions {
   connections?: ConnectionService;
   /** Provider and model catalogue. Without it only the built-in providers are listed. */
   providers?: ProviderCatalog;
+  /** The interest feed. Defaults to one that keeps its result in the config folder and fetches Google News. */
+  feed?: FeedService;
   /** Sealing key. With it, paired devices can send keys and receive pairing codes encrypted. */
   identity?: ServerIdentity;
   /** Addresses other devices can use to reach this server (shown when pairing a new device). */
@@ -94,6 +97,7 @@ function taskSummary(t: Task) {
 export class AeonServer {
   private readonly o: AeonServerOptions;
   private readonly clock: Clock;
+  private feedService: FeedService | null = null;
   private readonly nonces = new NonceCache(FRESHNESS_MS * 2);
   private server: Server | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -515,6 +519,23 @@ export class AeonServer {
     }
 
     const conn = this.o.connections;
+    // The feed of the owner's interests: cached headlines, refreshed on request (internet lookups must be on).
+    if (path === "/v1/feed" || path === "/v1/feed/refresh") {
+      const feed = (this.feedService ??= this.o.feed ?? new FeedService({ file: join(this.o.configDir, "feed.json"), now: () => this.clock.now() }));
+      const interests = loadConfig(this.o.configDir).profile?.interests ?? [];
+      if (path === "/v1/feed" && method === "GET") return this.json(res, 200, { feed: feed.get(), interests, stale: feed.stale(interests), online: this.online() });
+      if (path === "/v1/feed/refresh" && method === "POST") {
+        if (!this.online()) throw new HttpError(403, "internet lookups are off in the settings");
+        if (interests.length === 0) throw new HttpError(400, "pick interests first");
+        const cached = feed.get();
+        if (cached && cached.interests.join("\u0000") === interests.join("\u0000") && this.clock.now() - cached.updatedAt < FEED_MIN_GAP_MS) return this.json(res, 200, { feed: cached, interests, stale: false, online: true });
+        // A model rewrites the headlines when one may be used; the headlines are public, and a failure keeps the originals.
+        const chat = rt.router.candidates().length === 0 ? undefined : async (system: string, user: string) => (await rt.router.chat({ messages: [{ role: "system", content: system }, { role: "user", content: user }], maxTokens: 4000, temperature: 0.2 }, { taskId: null })).content;
+        const data = await feed.refresh(interests, chat);
+        return this.json(res, 200, { feed: data, interests, stale: false, online: true });
+      }
+    }
+
     const lib = rt.skills ?? this.o.connections?.library;
     const skillMatch = /^\/v1\/skills(?:\/([a-z0-9][a-z0-9-]{0,63})(?:\/(enable|trust|update-preview|file|auto-run))?)?$/.exec(path);
     const sourceMatch = /^\/v1\/skill-sources\/(inspect|install|updates)$/.exec(path);
