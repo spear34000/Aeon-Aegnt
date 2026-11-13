@@ -27,6 +27,8 @@ export interface AeonConfig {
    * only built-in providers and what is already cached are shown.
    */
   onlineLookups?: boolean;
+  /** Article images in the feed. On unless false: each costs about a megabyte of mobile data when the feed refreshes. */
+  feedImages?: boolean;
 }
 
 export interface EndpointConfig {
@@ -220,7 +222,7 @@ const STRING_FIELDS = ["ollamaModel", "ollamaBaseUrl", "openaiCompatBaseUrl", "o
 export function parseConfig(raw: unknown): AeonConfig {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) throw new Error("config must be a JSON object");
   const o = raw as Record<string, unknown>;
-  const allowed = new Set(["providers", "dataConsent", "fallbackAllowed", "mcpServers", "endpoints", "exaoneReasoning", "profile", "onlineLookups", ...STRING_FIELDS]);
+  const allowed = new Set(["providers", "dataConsent", "fallbackAllowed", "mcpServers", "endpoints", "exaoneReasoning", "profile", "onlineLookups", "feedImages", ...STRING_FIELDS]);
   for (const k of Object.keys(o)) if (!allowed.has(k)) throw new Error(`unknown config field: ${k}`);
 
   const list = (k: string, v: unknown): string[] => {
@@ -254,6 +256,10 @@ export function parseConfig(raw: unknown): AeonConfig {
   if (o.profile !== undefined) {
     const profile = parseProfile(o.profile);
     if (Object.keys(profile).length > 0) cfg.profile = profile;
+  }
+  if (o.feedImages !== undefined) {
+    if (typeof o.feedImages !== "boolean") throw new Error("feedImages must be true or false");
+    if (o.feedImages === false) cfg.feedImages = false;
   }
   if (o.onlineLookups !== undefined) {
     if (typeof o.onlineLookups !== "boolean") throw new Error("onlineLookups must be true or false");

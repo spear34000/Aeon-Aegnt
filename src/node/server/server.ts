@@ -11,6 +11,7 @@ import { loadConfig, saveConfig } from "../config-file.ts";
 import type { ConnectionService } from "../connections.ts";
 import { SkillError } from "../skills.ts";
 import { FeedService, FEED_MIN_GAP_MS } from "../feed.ts";
+import { articleImageFinder, ImageStore } from "../feed-images.ts";
 import type { ProviderCatalog } from "../provider-catalog.ts";
 import { isSealedBox, type ServerIdentity } from "./seal.ts";
 import type { createRuntime } from "../runtime.ts";
@@ -520,9 +521,17 @@ export class AeonServer {
 
     const conn = this.o.connections;
     // The feed of the owner's interests: cached headlines, refreshed on request (internet lookups must be on).
-    if (path === "/v1/feed" || path === "/v1/feed/refresh") {
-      const feed = (this.feedService ??= this.o.feed ?? new FeedService({ file: join(this.o.configDir, "feed.json"), now: () => this.clock.now() }));
+    if (path === "/v1/feed" || path === "/v1/feed/refresh" || path.startsWith("/v1/feed/image/")) {
+      const feed = (this.feedService ??= this.o.feed ?? new FeedService({ file: join(this.o.configDir, "feed.json"), images: { store: new ImageStore(join(this.o.configDir, "feed-images")), finder: articleImageFinder() }, now: () => this.clock.now() }));
       const interests = loadConfig(this.o.configDir).profile?.interests ?? [];
+      const imageMatch = /^\/v1\/feed\/image\/([a-f0-9]{12})$/.exec(path);
+      if (imageMatch && method === "GET") {
+        const img = feed.image(imageMatch[1]!);
+        if (!img) throw new HttpError(404, "no image");
+        res.writeHead(200, { "content-type": img.type, "content-length": img.bytes.length, "cache-control": "private, max-age=86400", "x-content-type-options": "nosniff" });
+        res.end(img.bytes);
+        return;
+      }
       if (path === "/v1/feed" && method === "GET") return this.json(res, 200, { feed: feed.get(), interests, stale: feed.stale(interests), online: this.online() });
       if (path === "/v1/feed/refresh" && method === "POST") {
         if (!this.online()) throw new HttpError(403, "internet lookups are off in the settings");
@@ -531,7 +540,7 @@ export class AeonServer {
         if (cached && cached.interests.join("\u0000") === interests.join("\u0000") && this.clock.now() - cached.updatedAt < FEED_MIN_GAP_MS) return this.json(res, 200, { feed: cached, interests, stale: false, online: true });
         // A model rewrites the headlines when one may be used; the headlines are public, and a failure keeps the originals.
         const chat = rt.router.candidates().length === 0 ? undefined : async (system: string, user: string) => (await rt.router.chat({ messages: [{ role: "system", content: system }, { role: "user", content: user }], maxTokens: 4000, temperature: 0.2 }, { taskId: null })).content;
-        const data = await feed.refresh(interests, chat);
+        const data = await feed.refresh(interests, chat, { images: loadConfig(this.o.configDir).feedImages !== false });
         return this.json(res, 200, { feed: data, interests, stale: false, online: true });
       }
     }

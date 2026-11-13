@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { createHash } from "node:crypto";
+import type { ImageFinder, ImageStore } from "./feed-images.ts";
 
 /**
  * The feed of the owner's interests. Headlines come from Google News RSS (free, no key, only that host), are filtered for
@@ -18,6 +19,8 @@ export interface FeedItem {
   publishedAt: number;
   url: string;
   rewritten: boolean;
+  /** A copy of the article's image is kept (GET /v1/feed/image/<id>). Otherwise the outlet's mark is shown. */
+  image: boolean;
 }
 
 export interface FeedSection {
@@ -35,6 +38,8 @@ export interface FeedData {
   /** How the headlines were treated: by a model, or by rules only (and why). */
   mode: "model" | "rules";
   modeNote?: string;
+  /** Items an image was looked for and not found, with the time: not tried again for a day. */
+  misses?: Record<string, number>;
 }
 
 export type FeedFetch = (url: string, init?: { signal?: AbortSignal; headers?: Record<string, string> }) => Promise<Response>;
@@ -53,13 +58,14 @@ export const FEED_MIN_GAP_MS = 5 * 60_000;
 /** What to search for each interest label; anything else (a label the owner typed) is searched as written. */
 const QUERIES: Record<string, string> = {
   "개발": "소프트웨어 개발 OR 개발자", "문서 정리": "문서 작업 OR 생산성 도구", "일정": "시간 관리 OR 일정 관리 앱", "공부": "공부법 OR 교육 정책", "재테크": "재테크 OR 금리",
-  "글쓰기": "글쓰기 OR 출판", "디자인": "디자인 OR UX", "번역": "번역 기술 OR 통번역", "쇼핑": "소비자 OR 유통", "여행": "여행", "건강": "건강 OR 의료", "운동": "운동 OR 스포츠 과학",
-  "요리": "요리 OR 식품", "반려동물": "반려동물", "자동차": "자동차", "집 꾸미기": "인테리어", "게임": "게임", "음악": "음악", "영화": "영화", "사진": "사진 OR 카메라", "독서": "책 OR 출판",
+  "글쓰기": "글쓰기 OR 출판", "디자인": "디자인 OR UX", "번역": "번역 기술 OR 통번역", "쇼핑": "소비자 OR 유통", "여행": "여행 -연예 -예능 -화보", "건강": "건강 OR 의료", "운동": "운동 OR 스포츠 과학",
+  "요리": "요리 OR 식품", "반려동물": "반려동물", "자동차": "자동차", "집 꾸미기": "인테리어", "게임": "게임", "음악": "음악 -연예", "영화": "영화 개봉 OR 영화제", "사진": "사진 OR 카메라", "독서": "책 OR 출판",
   "그림": "일러스트 OR 미술", "뉴스": "주요 뉴스", "과학": "과학", "AI": "인공지능",
 };
 
 /** Headlines that sell a feeling instead of telling a fact. Matched on the original, not on the rewrite. */
 const BAIT: RegExp[] = [
+  /[♥♡❤]|\[(?:포토|화보|영상|종합)\]/,
   /충격|경악|발칵|난리|대참사|소름|멘붕|헉|ㅋㅋ|ㅠㅠ|ㄷㄷ/,
   /[!?]{2,}/,
   /알고\s*보니|이럴\s*수가|결국\s*터졌|꼭\s*봐야|이것만\s*알면|이유는\s*\?|모르면\s*손해|지금\s*당장|절대\s*하지\s*마|난리\s*난/,
@@ -185,20 +191,35 @@ async function rewrite(chat: FeedChat, groups: { interest: string; items: FeedIt
 export interface FeedOptions {
   /** Where the last result is kept. */
   file: string;
+  /** Where article images are kept and how they are found. Without it the feed has no images. */
+  images?: { store: ImageStore; finder: ImageFinder };
   fetchImpl?: FeedFetch;
   now?: () => number;
 }
+
+/** At most this many new images are looked for per refresh, the first of each interest: each costs about a megabyte of Google's page. */
+const IMAGES_PER_REFRESH = 12;
+const IMAGES_PER_INTEREST = 3;
+const IMAGE_RETRY_MS = 86_400_000;
+const IMAGE_BUDGET_MS = 60_000;
 
 export class FeedService {
   private readonly file: string;
   private readonly fetchImpl: FeedFetch;
   private readonly now: () => number;
+  private readonly images: FeedOptions["images"];
   private running: Promise<FeedData> | null = null;
 
   constructor(o: FeedOptions) {
     this.file = o.file;
     this.fetchImpl = o.fetchImpl ?? (fetch as unknown as FeedFetch);
     this.now = o.now ?? Date.now;
+    this.images = o.images;
+  }
+
+  /** The stored copy of an item's image, for the route that serves it. */
+  image(id: string) {
+    return this.images?.store.read(id) ?? null;
   }
 
   /** What was made last, or null. */
@@ -238,23 +259,61 @@ export class FeedService {
    * Fetches the headlines of each interest (at most 12), filters them, and rewrites them when [chat] is given and works.
    * One refresh runs at a time; a second call gets the same answer.
    */
-  refresh(interests: string[], chat?: FeedChat): Promise<FeedData> {
+  refresh(interests: string[], chat?: FeedChat, opts: { images?: boolean } = {}): Promise<FeedData> {
     if (this.running) return this.running;
-    const run = this.build(interests.slice(0, 12), chat).finally(() => {
+    const run = this.build(interests.slice(0, 12), chat, opts.images !== false).finally(() => {
       this.running = null;
     });
     this.running = run;
     return run;
   }
 
-  private async build(interests: string[], chat?: FeedChat): Promise<FeedData> {
+  /** Marks items that have an image; looks for a few new ones, within a budget. Returns the misses to remember. */
+  private async addImages(sections: FeedSection[], enabled: boolean, now: number): Promise<Record<string, number>> {
+    const store = this.images?.store;
+    if (!store || !this.images) return {};
+    if (!enabled) {
+      store.prune(new Set());
+      return {};
+    }
+    const misses: Record<string, number> = {};
+    const before = this.get()?.misses ?? {};
+    const todo: FeedItem[] = [];
+    for (const s of sections) {
+      s.items.forEach((item, i) => {
+        if (store.has(item.id)) item.image = true;
+        else if (i < IMAGES_PER_INTEREST) {
+          if (now - (before[item.id] ?? 0) < IMAGE_RETRY_MS) misses[item.id] = before[item.id]!;
+          else todo.push(item);
+        }
+      });
+    }
+    const queue = todo.slice(0, IMAGES_PER_REFRESH);
+    const deadline = Date.now() + IMAGE_BUDGET_MS;
+    const finder = this.images.finder;
+    const worker = async () => {
+      for (let item = queue.shift(); item; item = queue.shift()) {
+        if (Date.now() > deadline) return;
+        const img = await finder(item.url);
+        if (img) {
+          store.put(item.id, img);
+          item.image = true;
+        } else misses[item.id] = now;
+      }
+    };
+    await Promise.all([worker(), worker(), worker()]);
+    store.prune(new Set(sections.flatMap((s) => s.items.filter((i) => i.image).map((i) => i.id))));
+    return misses;
+  }
+
+  private async build(interests: string[], chat: FeedChat | undefined, withImages: boolean): Promise<FeedData> {
     const now = this.now();
     const sections: FeedSection[] = [];
     const results = await Promise.all(interests.map((i) => this.fetchInterest(i)));
     interests.forEach((interest, idx) => {
       const r = results[idx]!;
       const items = pick(r.items, now).map<FeedItem>((i) => ({
-        id: createHash("sha1").update(`${interest}\u0000${i.url}`).digest("hex").slice(0, 12), title: i.title, original: i.title, source: i.source, publishedAt: i.publishedAt, url: i.url, rewritten: false,
+        id: createHash("sha1").update(`${interest}\u0000${i.url}`).digest("hex").slice(0, 12), title: i.title, original: i.title, source: i.source, publishedAt: i.publishedAt, url: i.url, rewritten: false, image: false,
       }));
       sections.push({ interest, items, ...(r.error ? { note: r.error } : items.length === 0 ? { note: "최근 3일 안에 새 소식이 없어요" } : {}) });
     });
@@ -269,7 +328,8 @@ export class FeedService {
       }
     }
     for (const s of sections) s.items = s.items.slice(0, PER_INTEREST);
-    const data: FeedData = { updatedAt: now, interests, sections, mode, ...(modeNote ? { modeNote } : {}) };
+    const misses = await this.addImages(sections, withImages, now);
+    const data: FeedData = { updatedAt: now, interests, sections, mode, ...(modeNote ? { modeNote } : {}), ...(Object.keys(misses).length > 0 ? { misses } : {}) };
     mkdirSync(dirname(this.file), { recursive: true });
     const tmp = `${this.file}.tmp-${process.pid}`;
     writeFileSync(tmp, JSON.stringify(data));

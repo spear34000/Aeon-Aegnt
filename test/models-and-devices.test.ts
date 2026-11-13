@@ -14,6 +14,7 @@ import { MemorySecretStore } from "../src/core/secrets.ts";
 import { loadConfig } from "../src/node/config-file.ts";
 import { ConnectionService, type Fetched } from "../src/node/connections.ts";
 import { FeedService, type FeedFetch } from "../src/node/feed.ts";
+import { ImageStore, type ImageFinder } from "../src/node/feed-images.ts";
 import { ProviderCatalog } from "../src/node/provider-catalog.ts";
 import { SkillStore } from "../src/node/skills.ts";
 import { buildProviders, createRuntime } from "../src/node/runtime.ts";
@@ -294,6 +295,15 @@ class Client {
     }
     return { status: res.status, body };
   }
+  /** A signed GET whose answer is bytes (an image). */
+  async callBytes(base: string, clock: ManualClock, path: string) {
+    const ts = String(clock.now());
+    const nonce = randomBytes(12).toString("hex");
+    const signature = sign("sha256", Buffer.from(canonicalRequest("GET", path, ts, nonce, "")), this.priv).toString("base64");
+    const res = await fetch(`${base}${path}`, { headers: { "x-aeon-device": this.id, "x-aeon-timestamp": ts, "x-aeon-nonce": nonce, "x-aeon-signature": signature } });
+    return { status: res.status, type: res.headers.get("content-type"), bytes: Buffer.from(await res.arrayBuffer()) };
+  }
+
   async call(base: string, clock: ManualClock, method: string, path: string, json?: unknown, raw?: Buffer) {
     const body = raw ?? (json === undefined ? "" : JSON.stringify(json));
     const ts = String(clock.now());
@@ -305,7 +315,7 @@ class Client {
   }
 }
 
-async function boot(opts: { local?: boolean; maxUploadBytes?: number; feedFetch?: FeedFetch } = {}) {
+async function boot(opts: { local?: boolean; maxUploadBytes?: number; feedFetch?: FeedFetch; feedImages?: ImageFinder } = {}) {
   const { dir, cleanup } = tempDir();
   const clock = new ManualClock(Date.parse("2026-11-11T03:04:05Z"));
   const workspace = join(dir, "ws");
@@ -326,7 +336,7 @@ async function boot(opts: { local?: boolean; maxUploadBytes?: number; feedFetch?
     connections: new ConnectionService({ configDir: join(dir, "cfg"), fetcher }),
     addresses: () => ["http://192.168.0.12:7421"],
     isLocalRequest: () => opts.local === true,
-    ...(opts.feedFetch ? { feed: new FeedService({ file: join(dir, "cfg", "feed.json"), fetchImpl: opts.feedFetch, now: () => clock.now() }) } : {}),
+    ...(opts.feedFetch ? { feed: new FeedService({ file: join(dir, "cfg", "feed.json"), fetchImpl: opts.feedFetch, now: () => clock.now(), ...(opts.feedImages ? { images: { store: new ImageStore(join(dir, "cfg", "feed-images")), finder: opts.feedImages } } : {}) }) } : {}),
     onConfigChanged: () => void changed++,
     ...(opts.maxUploadBytes ? { maxUploadBytes: opts.maxUploadBytes } : {}),
   });
@@ -525,7 +535,9 @@ describe("Setting things up from any paired device", () => {
     const hour = new Date(Date.parse("2026-11-11T02:00:00Z")).toUTCString();
     const body = "<rss><channel><item><title>반도체 수출 두 달 연속 증가 - E경제</title><link>https://news.google.com/rss/articles/abc</link><pubDate>" + hour + "</pubDate><source url=\"https://e.example\">E경제</source></item></channel></rss>";
     let asked = 0;
-    const t = await boot({ feedFetch: async () => { asked++; return new Response(body, { status: 200 }); } });
+    const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(3000, 9)]);
+    let looked = 0;
+    const t = await boot({ feedFetch: async () => { asked++; return new Response(body, { status: 200 }); }, feedImages: async () => { looked++; return { bytes: jpeg, type: "image/jpeg" }; } });
     const call = (m: string, p: string, b?: Record<string, unknown>) => t.owner.call(t.base, t.clock, m, p, b);
     assert.deepEqual([(await call("GET", "/v1/feed")).body.feed, (await call("GET", "/v1/feed")).body.interests], [null, []], "nothing yet, and no interests");
     assert.equal((await call("POST", "/v1/feed/refresh")).status, 400, "pick interests first");
@@ -537,11 +549,22 @@ describe("Setting things up from any paired device", () => {
     assert.deepEqual(first.body.feed.sections.map((s: { interest: string; items: unknown[] }) => [s.interest, s.items.length]), [["AI", 1], ["여행", 1]]);
     assert.equal(first.body.feed.sections[0].items[0].url, "https://news.google.com/rss/articles/abc");
     assert.equal(asked, 2);
+    const item = first.body.feed.sections[0].items[0];
+    assert.equal(item.image, true, "an article image was found for the first item");
+    const img = await t.owner.callBytes(t.base, t.clock, `/v1/feed/image/${item.id}`);
+    assert.deepEqual([img.status, img.type, img.bytes.length], [200, "image/jpeg", jpeg.length], "the phone gets the image from the server, never from the publisher");
+    assert.equal((await t.owner.callBytes(t.base, t.clock, "/v1/feed/image/000000000000")).status, 404);
+    assert.ok([400, 404].includes((await t.owner.callBytes(t.base, t.clock, "/v1/feed/image/..%2F..%2Fconfig")).status), "a path that is not an image id is refused");
     await call("POST", "/v1/feed/refresh");
     assert.equal(asked, 2, "a second refresh right away is answered from what is stored");
     const got = (await call("GET", "/v1/feed")).body;
     assert.deepEqual([got.stale, got.online, got.feed.mode], [false, true, "rules"]);
 
+    const before = looked;
+    assert.equal((await call("PUT", "/v1/config", { ...cfg, profile: { interests: ["AI"] }, feedImages: false })).status, 200);
+    const noImg = await call("POST", "/v1/feed/refresh");
+    assert.deepEqual([noImg.body.feed.sections[0].items.some((i: { image: boolean }) => i.image), looked], [false, before], "with images switched off none is looked for");
+    assert.equal((await t.owner.callBytes(t.base, t.clock, `/v1/feed/image/${item.id}`)).status, 404, "and the kept copies are gone");
     assert.equal((await call("PUT", "/v1/config", { ...cfg, profile: { interests: ["AI"] }, onlineLookups: false })).status, 200);
     assert.equal((await call("POST", "/v1/feed/refresh")).status, 403, "internet lookups off: nothing is fetched");
     assert.equal((await call("GET", "/v1/feed")).body.online, false);
