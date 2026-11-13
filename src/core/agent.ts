@@ -264,7 +264,8 @@ export class Agent implements TaskRunner {
           risk: assessment.risk,
           resources: assessment.resources.map((r) => this.cfg.redactor.redact(r)).slice(0, 50),
           irreversible: assessment.irreversible === true,
-          ...(assessment.detail ? { detail: this.cfg.redactor.redact(assessment.detail.slice(0, 8000)) } : {}),
+          // Never cut silently: a tool that needs all of it shown (a skill) keeps its text inside this limit itself.
+          ...(assessment.detail ? { detail: this.cfg.redactor.redact(assessment.detail.length > 16_000 ? `${assessment.detail.slice(0, 16_000)}\n[… cut: more text exists that is not shown]` : assessment.detail) } : {}),
           status: "pending" as const,
           createdAt: now,
           expiresAt: now + (this.cfg.approvalTtlMs ?? 24 * 3_600_000),
@@ -308,10 +309,12 @@ export class Agent implements TaskRunner {
 
   /**
    * Tool output goes back as untrusted data, except a skill the owner approved: that is instructions for this task.
-   * Only a successful read of the skill store gets this; the text is fenced so it cannot pretend to end early.
+   * Only a successful read of the skill's own SKILL.md gets this (its full text was on the approval); a supporting
+   * file read with a `file` argument stays data. The text is fenced so it cannot pretend to end early.
    */
   private renderOutput(s: StepRecord): string {
-    if (s.ok && this.cfg.tools.get(s.tool)?.instructions === true) {
+    const args = s.args !== null && typeof s.args === "object" ? (s.args as Record<string, unknown>) : {};
+    if (s.ok && this.cfg.tools.get(s.tool)?.instructions === true && typeof args.file !== "string") {
       return `<skill_instructions>\n${s.output.replace(/<\/?skill_instructions>/gi, "")}\n</skill_instructions>`;
     }
     return wrapUntrusted(`tool:${s.tool}`, s.output);
