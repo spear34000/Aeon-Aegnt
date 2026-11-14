@@ -352,11 +352,22 @@ class AppModel(
      */
     fun startOnDevice() {
         if (_state.value.setup.deviceStarting) return
-        setup { it.copy(deviceStarting = true, deviceError = null) }
+        setup { it.copy(deviceStarting = true, deviceError = null, deviceStage = 0, deviceLog = emptyList()) }
+        val t0 = kotlin.time.TimeSource.Monotonic.markNow()
+        val log = { stage: Int, line: String ->
+            val ms = t0.elapsedNow().inWholeMilliseconds
+            val stamp = "${ms / 1000}.${ms % 1000 / 100}s".padStart(6)
+            setup { it.copy(deviceStage = maxOf(it.deviceStage, stage), deviceLog = (it.deviceLog + "[$stamp] $line").takeLast(300)) }
+        }
+        localAgent.onProgress = log
         scope.launch {
             // Anything thrown here (an Error included) would end the app, so it becomes the message on the screen instead.
             val failure = try {
-                localAgent.start() ?: localAgent.pairingCode()?.let { code ->
+                localAgent.start() ?: run {
+                    log(3, "연결 코드를 요청해요")
+                    localAgent.pairingCode()
+                }?.let { code ->
+                    log(4, "코드를 받았어요. 이 기기와 연결해요")
                     pairNow(LOCAL_AGENT_URL, code)
                     if (_state.value.connection is Connection.Connected) null else _state.value.message ?: "이 기기의 에이전트와 연결하지 못했어요."
                 } ?: "이 기기의 에이전트에서 연결 코드를 받지 못했어요."
@@ -364,6 +375,7 @@ class AppModel(
                 _state.update { it.copy(busy = false, connection = if (it.connection is Connection.Connecting) Connection.Unpaired else it.connection) }
                 "연결하지 못했어요: ${t.message ?: t::class.simpleName}"
             }
+            log(_state.value.setup.deviceStage, if (failure == null) "연결됐어요 ✓" else "실패: $failure")
             setup { it.copy(deviceStarting = false, deviceError = failure) }
         }
     }

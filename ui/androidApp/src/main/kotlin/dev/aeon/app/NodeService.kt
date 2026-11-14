@@ -31,6 +31,8 @@ class NodeService : Service() {
                 } catch (t: Throwable) {
                     Log.e("AeonNode", "node stopped", t)
                 } finally {
+                    // Give the app a moment to read what was just logged before this process ends.
+                    runCatching { Thread.sleep(2500) }
                     Process.killProcess(Process.myPid())
                 }
             }, "aeon-node", 8L * 1024 * 1024).start()
