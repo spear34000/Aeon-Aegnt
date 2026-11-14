@@ -6,9 +6,11 @@ plugins {
 
 val nodeMobile = file("nodejs-mobile")
 
-// A release build (the release workflow, docs/RELEASING.md) passes -PappVersion=1.2.3 -PappVersionCode=10203 and, to sign, the
-// AEON_KEYSTORE_* variables. Without them this builds as before: version 0.1.0, and a release build is left unsigned.
+// A release build (the release workflow, docs/RELEASING.md) passes -PappVersion=1.2.3 (digits only: the desktop installers
+// accept nothing else), -PappVersionName=1.2.3-rc1 (what the app shows; defaults to appVersion), -PappVersionCode=10203 and, to
+// sign, the AEON_KEYSTORE_* variables. Without them this builds as before: version 0.1.0, and a release build is left unsigned.
 val appVersion = (findProperty("appVersion") as String?) ?: "0.1.0"
+val appVersionName = (findProperty("appVersionName") as String?) ?: appVersion
 val appVersionCode = (findProperty("appVersionCode") as String?)?.toInt() ?: 1
 val keystoreFile = System.getenv("AEON_KEYSTORE_FILE")
 
@@ -21,7 +23,7 @@ android {
         minSdk = 26
         targetSdk = 36
         versionCode = appVersionCode
-        versionName = appVersion
+        versionName = appVersionName
     }
 
     signingConfigs {

@@ -75,7 +75,7 @@ jobs:
         run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-37.0" "ndk;29.0.14206865"'
       - name: Build (debug key, installable for testing)
         working-directory: ui
-        run: bash ./gradlew :androidApp:assembleDebug -PappVersion=${{ needs.version.outputs.version }} -PappVersionCode=${{ needs.version.outputs.code }} --console=plain
+        run: bash ./gradlew :androidApp:assembleDebug -PappVersion=${{ needs.version.outputs.numeric }} -PappVersionName=${{ needs.version.outputs.version }} -PappVersionCode=${{ needs.version.outputs.code }} --console=plain
       - name: Name the file
         run: cp ui/androidApp/build/outputs/apk/debug/androidApp-debug.apk "aeon-${{ needs.version.outputs.version }}-android-debug-key.apk"
       - uses: actions/upload-artifact@v4
@@ -129,7 +129,7 @@ jobs:
         run: |
           printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
           export AEON_KEYSTORE_FILE="$RUNNER_TEMP/release.jks"
-          bash ./gradlew :androidApp:assembleRelease -PappVersion=${{ needs.version.outputs.version }} -PappVersionCode=${{ needs.version.outputs.code }} --console=plain
+          bash ./gradlew :androidApp:assembleRelease -PappVersion=${{ needs.version.outputs.numeric }} -PappVersionName=${{ needs.version.outputs.version }} -PappVersionCode=${{ needs.version.outputs.code }} --console=plain
           rm -f "$RUNNER_TEMP/release.jks"
       - name: Check the signature and name the file
         if: steps.key.outputs.have == 'true'
