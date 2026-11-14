@@ -114,6 +114,8 @@ data class RoutinesState(
     val items: List<dev.aeon.ui.api.RoutineItem> = emptyList(),
     val runsToday: Int = 0,
     val cap: Int = 10,
+    /** The computer's offset from UTC in minutes, so times can be said on its clock. */
+    val utcOffsetMinutes: Int = 0,
     val loaded: Boolean = false,
     val draft: RoutineDraft? = null,
     val picked: dev.aeon.ui.api.RoutineItem? = null,
@@ -1205,7 +1207,7 @@ class AppModel(
     private fun routines(change: (RoutinesState) -> RoutinesState) = _state.update { it.copy(routines = change(it.routines)) }
 
     private fun showRoutines(r: dev.aeon.ui.api.RoutinesResponse) = routines { s ->
-        s.copy(items = r.routines, runsToday = r.runsToday, cap = r.cap, loaded = true, busy = false, error = null, picked = s.picked?.let { p -> r.routines.firstOrNull { it.id == p.id } })
+        s.copy(items = r.routines, runsToday = r.runsToday, cap = r.cap, utcOffsetMinutes = r.utcOffsetMinutes, loaded = true, busy = false, error = null, picked = s.picked?.let { p -> r.routines.firstOrNull { it.id == p.id } })
     }
 
     fun loadRoutines() {

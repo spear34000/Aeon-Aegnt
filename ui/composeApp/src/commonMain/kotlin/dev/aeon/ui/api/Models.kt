@@ -384,7 +384,8 @@ data class RoutineItem(
     val nextRunAt: Double? = null,
 )
 
-@Serializable data class RoutinesResponse(val routines: List<RoutineItem> = emptyList(), val runsToday: Int = 0, val cap: Int = 10, val routine: RoutineItem? = null, val taskId: String? = null)
+/** [utcOffsetMinutes] is the computer's offset from UTC: routine times are on its clock, which may not be this device's. */
+@Serializable data class RoutinesResponse(val routines: List<RoutineItem> = emptyList(), val runsToday: Int = 0, val cap: Int = 10, val routine: RoutineItem? = null, val taskId: String? = null, val utcOffsetMinutes: Int = 0)
 
 /** Who made a memory: the owner typed it, or the agent proposed it in a task and the owner approved those exact words. */
 @Serializable data class MemorySource(val type: String = "owner", val taskId: String? = null)

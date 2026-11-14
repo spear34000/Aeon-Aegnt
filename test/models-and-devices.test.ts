@@ -706,7 +706,7 @@ describe("Setting things up from any paired device", () => {
     const t = await boot();
     const call = (m: string, p: string, b?: Record<string, unknown>) => t.owner.call(t.base, t.clock, m, p, b);
     const hhmm = (ms: number) => `${String(new Date(ms).getHours()).padStart(2, "0")}:${String(new Date(ms).getMinutes()).padStart(2, "0")}`;
-    assert.deepEqual((await call("GET", "/v1/routines")).body, { routines: [], runsToday: 0, cap: 10 });
+    assert.deepEqual((await call("GET", "/v1/routines")).body, { routines: [], runsToday: 0, cap: 10, utcOffsetMinutes: -new Date(t.clock.now()).getTimezoneOffset() }, "the computer's offset from UTC is given so the app can say times on the computer's clock");
     assert.equal((await call("POST", "/v1/routines", { title: "x", schedule: { repeat: "daily", time: "09:00" } })).status, 400);
     assert.equal((await call("POST", "/v1/routines", { title: "Sum up my notes", schedule: { repeat: "daily", time: "9am" } })).status, 400);
     // Due thirty minutes after it was made.

@@ -60,11 +60,29 @@ internal fun scheduleText(s: RoutineSchedule): String {
     return "$when_ ${clockText(s.time)}"
 }
 
-/** The next run in words: "오늘 오후 6:30", "내일 오전 9:00", or the date. */
-private fun nextText(item: RoutineItem, now: Long): String {
+/** A moment on the computer's clock: its day number (days since 1970) and minutes into that day. */
+private fun onComputer(millis: Long, offsetMinutes: Int): Pair<Long, Int> {
+    val minutes = millis.floorDiv(60_000L) + offsetMinutes
+    return minutes.floorDiv(1440L) to minutes.mod(1440L).toInt()
+}
+
+/** "오늘", "내일", or the weekday, for a moment, counted on the computer's calendar. */
+private fun dayWord(millis: Long, now: Long, offsetMinutes: Int): String {
+    val day = onComputer(millis, offsetMinutes).first
+    val diff = day - onComputer(now, offsetMinutes).first
+    return when (diff) { 0L -> "오늘"; 1L -> "내일"; else -> "${DAY_NAMES[(day + 4).mod(7L).toInt()]}요일" }
+}
+
+/** "오후 6:30" for a moment on the computer's clock. */
+private fun computerClock(millis: Long, offsetMinutes: Int): String {
+    val m = onComputer(millis, offsetMinutes).second
+    return clockText("${(m / 60).toString().padStart(2, '0')}:${(m % 60).toString().padStart(2, '0')}")
+}
+
+/** The next run in words, on the computer's clock: "다음은 내일 오전 9:00". */
+private fun nextText(item: RoutineItem, now: Long, offsetMinutes: Int): String {
     val next = item.nextRunAt ?: return "꺼져 있어요"
-    val prefix = koreanDayPrefix(next.toLong(), now)
-    return "다음은 " + (if (prefix.isNotEmpty()) prefix else "${shortDate(next)} ") + koreanClock(next.toLong())
+    return "다음은 ${dayWord(next.toLong(), now, offsetMinutes)} ${clockText(item.schedule.time)}"
 }
 
 /** A card at the top of the task list: how many routines there are and when the next one starts. */
@@ -76,7 +94,7 @@ internal fun RoutinesEntry(state: UiState, model: AppModel) {
     val line = when {
         !r.loaded -> ""
         r.items.isEmpty() -> "정해 둔 시간에 에이전트가 알아서 시작해요"
-        else -> "${r.items.size}개" + (next?.let { " · 다음은 ${koreanDayPrefix(it.toLong(), now).ifEmpty { shortDate(it) + " " }}${koreanClock(it.toLong())}" } ?: " · 모두 꺼져 있어요")
+        else -> "${r.items.size}개" + (r.items.filter { it.nextRunAt != null }.minByOrNull { it.nextRunAt!! }?.let { " · " + nextText(it, now, r.utcOffsetMinutes) } ?: " · 모두 꺼져 있어요")
     }
     Row(
         Modifier.fillMaxWidth().padding(top = 6.dp).clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surface).clickable { model.openSettings(SettingsPage.Routines) }.padding(horizontal = 16.dp, vertical = 12.dp),
@@ -120,7 +138,7 @@ fun RoutinesPage(state: UiState, model: AppModel) {
                     }
                     Column(Modifier.weight(1f)) {
                         Text(item.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text("${scheduleText(item.schedule)} · ${nextText(item, now)}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("${scheduleText(item.schedule)} · ${nextText(item, now, r.utcOffsetMinutes)}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     AeonSwitch(item.enabled, { model.setRoutineEnabled(item.id, it) }, "${item.title} 켜기", enabled = state.isAdmin && !r.busy, showLabel = false)
                 }
@@ -180,9 +198,9 @@ private fun RoutineSheet(item: RoutineItem, state: UiState, model: AppModel) {
         Text(scheduleText(item.schedule), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
         Text(item.title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 2.dp))
         ListSurface(Modifier.padding(top = 6.dp)) {
-            RoutineFact("다음", nextText(item, now).removePrefix("다음은 "))
+            RoutineFact("다음", nextText(item, now, r.utcOffsetMinutes).removePrefix("다음은 "))
             RowDivider(16.dp)
-            RoutineFact("마지막", item.lastRunAt?.let { "${koreanDayPrefix(it.toLong(), now).ifEmpty { shortDate(it) + " " }}${koreanClock(it.toLong())}" } ?: "아직 없어요")
+            RoutineFact("마지막", item.lastRunAt?.let { "${dayWord(it.toLong(), now, r.utcOffsetMinutes)} ${computerClock(it.toLong(), r.utcOffsetMinutes)}" } ?: "아직 없어요")
         }
         r.error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = s.danger) }
         if (state.isAdmin) Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

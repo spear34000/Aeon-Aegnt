@@ -235,7 +235,7 @@ fun AeonSwitch(on: Boolean, onChange: (Boolean) -> Unit, label: String, modifier
         modifier.defaultMinSize(minHeight = 48.dp).clickable(enabled = enabled) { onChange(!on) },
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (showLabel) Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, color = if (enabled) scheme.onSurface else LocalAeonStatus.current.fg3) else Spacer(Modifier.weight(1f))
+        if (showLabel) Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, color = if (enabled) scheme.onSurface else LocalAeonStatus.current.fg3)
         Text(if (on) "켬" else "끔", style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant)
         Spacer(Modifier.width(10.dp))
         Box(
