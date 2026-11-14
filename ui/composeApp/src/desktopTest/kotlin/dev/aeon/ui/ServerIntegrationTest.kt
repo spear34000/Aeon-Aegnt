@@ -396,7 +396,7 @@ class ServerIntegrationTest {
     }
 
     @Test
-    fun theFeedStatesFollowTheServerAndNothingIsFetchedWhenLookupsAreOff() = runBlocking {
+    fun theFeedShowsWrittenPostsAndTheOwnerReadsLikesMovesAndRemovesThemAndSetsItsLimits() = runBlocking {
         val fx = startAeon(startFakeModel(emptyList()))
         val (client, crypto) = newClient(fx.base)
         val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
@@ -411,34 +411,72 @@ class ServerIntegrationTest {
         m.pair(fx.base, fx.code)
         waitFor { m.state.value.connection is dev.aeon.ui.state.Connection.Connected }
         val f = { m.state.value.feed }
+        val posts = { f().data?.posts.orEmpty().map { it.id } }
 
         m.loadFeed()
         waitFor(label = "empty feed loaded") { f().loaded }
-        assertEquals(emptyList(), f().interests, "no interests in the profile yet: the screen asks for them")
-        assertTrue(f().online && f().data == null)
+        assertEquals(emptyList(), f().data!!.interests, "no interests in the profile yet: the screen asks for them")
+        assertTrue(f().data!!.online && f().data!!.posts.isEmpty())
 
-        // Interests chosen, internet lookups off: the server fetches nothing and the screen says why.
-        val cfg = client.config()
-        client.saveConfig(cfg.copy(profile = dev.aeon.ui.api.Profile(interests = listOf("AI", "여행")), onlineLookups = false))
+        // Posts as the pipeline leaves them (it needs the open web to make new ones, so the file is written here).
+        val now = System.currentTimeMillis()
+        fun post(id: String, category: String, title: String, written: Boolean, ageHours: Int, extra: String = "") =
+            """{"id":"$id","kicker":"$category","title":"$title","body":"${if (written) "본문이 있는 글입니다. 사실만 적었습니다." else ""}","category":"$category","sources":[{"title":"$title","outlet":"예시경제","url":"https://news.example/$id","publishedAt":$now}],"reason":"관심사 ‘$category’의 소식이에요","written":$written,"image":false,"createdAt":${now - ageHours * 3_600_000L}$extra}"""
+        File(fx.cfgDir, "feed-posts.json").writeText(
+            """{"version":1,"posts":[${post("aaaaaaaaaaaa", "재테크", "한국은행 기준금리 동결", true, 1)},${post("bbbbbbbbbbbb", "AI", "AI 기본법 시행령 의견 접수", true, 2, ""","deadline":${now + 86_400_000L},"actionable":true""")},${post("cccccccccccc", "여행", "항공권 가격 하락", false, 3)}]}""",
+        )
+        client.saveConfig(client.config().copy(profile = dev.aeon.ui.api.Profile(interests = listOf("재테크", "AI", "여행")), onlineLookups = false))
         m.loadFeed()
-        waitFor(label = "interests") { f().interests == listOf("AI", "여행") }
-        assertEquals(false, f().online)
-        assertEquals(null, f().data)
-        m.refreshFeed()
-        waitFor(label = "refresh answered") { !f().refreshing }
-        assertEquals(false, f().online, "a refused refresh keeps the screen on the 'lookups are off' message")
+        waitFor(label = "posts") { posts().size == 3 }
+        assertEquals(listOf("bbbbbbbbbbbb", "aaaaaaaaaaaa", "cccccccccccc"), posts(), "soon-due and to-do first, then unread, newest first")
+        assertEquals(false, f().data!!.posts.last().written)
+        assertEquals(false, f().data!!.online, "lookups off: the screen says new posts are not made")
+
+        m.openPost("aaaaaaaaaaaa")
+        waitFor(label = "read") { f().data!!.posts.first { it.id == "aaaaaaaaaaaa" }.seenAt != null }
+        assertEquals(listOf("bbbbbbbbbbbb", "cccccccccccc", "aaaaaaaaaaaa"), posts(), "a read post goes below the unread ones")
+        m.likePost("aaaaaaaaaaaa", true)
+        waitFor(label = "liked") { f().data!!.posts.first { it.id == "aaaaaaaaaaaa" }.liked }
+        m.movePost("aaaaaaaaaaaa", "top")
+        waitFor(label = "moved") { posts().first() == "aaaaaaaaaaaa" }
+        m.removePost("aaaaaaaaaaaa")
+        waitFor(label = "removed") { "aaaaaaaaaaaa" !in posts() }
+        assertEquals(null, f().openId, "removing a post closes its sheet")
+
+        // A run that may not start is a report, not an error: lookups are off.
+        m.generateFeed()
+        waitFor(label = "run answered") { !f().generating && f().report != null }
+        assertEquals(listOf("skipped", "offline"), listOf(f().report!!.status, f().report!!.reason))
+
+        // The brief, the limits and the taste summary.
+        m.editBrief("경제 소식만 짧게")
+        m.saveBrief()
+        waitFor(label = "brief saved") { f().data!!.settings.brief == "경제 소식만 짧게" && f().briefDraft == null }
+        m.setFeedDailyRuns(2)
+        m.setFeedAuto(false)
+        waitFor(label = "limits saved") { f().data!!.settings.dailyRuns == 2 && !f().data!!.settings.auto }
+        assertEquals(listOf("재테크", "AI", "여행"), f().data!!.queries.map { it.interest })
+        m.editTaste("짧고 숫자가 분명한 글을 좋아해요")
+        m.saveTaste()
+        waitFor(label = "taste saved") { f().data!!.taste?.source == "owner" }
+        m.clearTaste()
+        waitFor(label = "taste cleared") { f().data!!.taste == null }
 
         m.setFeedFilter("AI")
         m.loadFeed()
         waitFor(label = "filter kept") { f().filter == "AI" && f().loaded }
         client.saveConfig(client.config().copy(profile = dev.aeon.ui.api.Profile(interests = listOf("여행")), onlineLookups = false))
         m.loadFeed()
-        waitFor(label = "filter dropped") { f().interests == listOf("여행") }
+        waitFor(label = "filter dropped") { f().data!!.interests == listOf("여행") }
         assertEquals(null, f().filter, "a filter for an interest that is gone is dropped")
         assertEquals("방금", dev.aeon.ui.screens.agoText(1_000_000.0, 1_030_000))
         assertEquals("5분 전", dev.aeon.ui.screens.agoText(1_000_000.0, 1_000_000 + 5 * 60_000))
         assertEquals("3시간 전", dev.aeon.ui.screens.agoText(1_000_000.0, 1_000_000 + 3 * 3_600_000))
         assertEquals("어제", dev.aeon.ui.screens.agoText(1_000_000.0, 1_000_000 + 30 * 3_600_000))
+        assertEquals("마감 지남" to false, dev.aeon.ui.screens.deadlineText(1_000_000.0, 2_000_000))
+        assertEquals("오늘 마감" to true, dev.aeon.ui.screens.deadlineText(2_000_000.0 + 3_600_000, 2_000_000))
+        assertEquals("마감 3일 남음" to true, dev.aeon.ui.screens.deadlineText(2_000_000.0 + 2 * 86_400_000L + 1_000, 2_000_000))
+        assertEquals("마감 8일 남음" to false, dev.aeon.ui.screens.deadlineText(2_000_000.0 + 7 * 86_400_000L + 1_000, 2_000_000))
         m.stop()
     }
 

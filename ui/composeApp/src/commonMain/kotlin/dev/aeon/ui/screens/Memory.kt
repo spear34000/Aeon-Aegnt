@@ -56,7 +56,7 @@ private fun usedLabel(i: MemoryItem) = if (i.uses <= 0) "아직 안 쓰였어요
  * screen whatever scrolls underneath, and rises with the keyboard.
  */
 @Composable
-private fun SheetDialog(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+internal fun SheetDialog(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
     val scheme = MaterialTheme.colorScheme
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Box(

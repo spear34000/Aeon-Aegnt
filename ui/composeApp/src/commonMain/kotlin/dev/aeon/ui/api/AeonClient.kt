@@ -195,8 +195,40 @@ class AeonClient(
     /** The stored feed of the profile's interests, and whether it should be refreshed. */
     suspend fun feed(): FeedResponse = ApiJson.decodeFromString(signed(HttpMethod.Get, "/v1/feed"))
 
-    /** Fetches new headlines (the server answers from what it has when asked again within five minutes). */
-    suspend fun refreshFeed(): FeedResponse = ApiJson.decodeFromString(signed(HttpMethod.Post, "/v1/feed/refresh", "{}"))
+    /** One run of the pipeline now. A run that may not start (limit, gap, internet off) comes back as a report with status "skipped", not as an error. */
+    suspend fun generateFeed(): FeedResponse = ApiJson.decodeFromString(signed(HttpMethod.Post, "/v1/feed/generate", "{}"))
+
+    suspend fun saveFeedSettings(brief: String? = null, auto: Boolean? = null, intervalMinutes: Int? = null, dailyRuns: Int? = null, dailyPosts: Int? = null): FeedResponse {
+        val json = buildJsonObject {
+            if (brief != null) put("brief", brief)
+            if (auto != null) put("auto", auto)
+            if (intervalMinutes != null) put("intervalMinutes", intervalMinutes)
+            if (dailyRuns != null) put("dailyRuns", dailyRuns)
+            if (dailyPosts != null) put("dailyPosts", dailyPosts)
+        }
+        return ApiJson.decodeFromString(signed(HttpMethod.Put, "/v1/feed/settings", json.toString()))
+    }
+
+    suspend fun markPostSeen(id: String): FeedResponse = ApiJson.decodeFromString(signed(HttpMethod.Post, "/v1/feed/posts/$id/seen", "{}"))
+
+    /** [reaction] is "like", "unlike" or "dismiss" (which removes the post). */
+    suspend fun reactToPost(id: String, reaction: String): FeedResponse {
+        val json = buildJsonObject { put("reaction", reaction) }
+        return ApiJson.decodeFromString(signed(HttpMethod.Post, "/v1/feed/posts/$id/react", json.toString()))
+    }
+
+    /** [to] is "top" or "bottom": for today only. */
+    suspend fun movePost(id: String, to: String): FeedResponse {
+        val json = buildJsonObject { put("to", to) }
+        return ApiJson.decodeFromString(signed(HttpMethod.Post, "/v1/feed/posts/$id/move", json.toString()))
+    }
+
+    suspend fun saveFeedTaste(text: String): FeedResponse {
+        val json = buildJsonObject { put("text", text) }
+        return ApiJson.decodeFromString(signed(HttpMethod.Put, "/v1/feed/taste", json.toString()))
+    }
+
+    suspend fun clearFeedTaste(): FeedResponse = ApiJson.decodeFromString(signed(HttpMethod.Delete, "/v1/feed/taste"))
 
     /** The picture the server kept for a feed item: encoded JPEG, PNG or WebP bytes. */
     suspend fun feedImage(id: String): ByteArray = signedRaw(HttpMethod.Get, "/v1/feed/image/$id", null, "application/json")

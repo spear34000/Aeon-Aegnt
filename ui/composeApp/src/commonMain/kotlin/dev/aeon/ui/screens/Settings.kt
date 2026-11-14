@@ -69,6 +69,7 @@ internal fun pageTitle(p: SettingsPage): String = when (p) {
     SettingsPage.Models -> "모델"
     SettingsPage.Keys -> "API 키"
     SettingsPage.Devices -> "연결된 기기"
+    SettingsPage.Feed -> "피드 설정"
     SettingsPage.Memory -> "기억"
     SettingsPage.Usage -> "사용량"
     SettingsPage.Legal -> "약관 · 권한"
@@ -114,6 +115,7 @@ private fun SettingsTabs(state: UiState, model: AppModel, title: String) {
                 SettingsPage.Models -> "모델"
                 SettingsPage.Keys -> "API 키"
                 SettingsPage.Devices -> "기기"
+                SettingsPage.Feed -> "피드"
                 SettingsPage.Memory -> "기억"
                 SettingsPage.Usage -> "사용량"
                 SettingsPage.Legal -> "약관·권한"
@@ -132,6 +134,7 @@ private fun SettingsBody(state: UiState, model: AppModel) {
             SettingsPage.Models -> ModelsPage(state, model)
             SettingsPage.Keys -> KeysPage(state, model)
             SettingsPage.Devices -> DevicesPage(state, model)
+            SettingsPage.Feed -> FeedSettingsPage(state, model)
             SettingsPage.Memory -> MemoryPage(state, model)
             SettingsPage.Usage -> UsagePage(state)
             SettingsPage.Legal -> LegalPage(state, model)

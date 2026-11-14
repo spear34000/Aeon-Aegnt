@@ -98,7 +98,7 @@ fun PersonalPage(state: UiState, model: AppModel, modifier: Modifier = Modifier)
             Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(scheme.surface).padding(horizontal = 16.dp)) {
                 dev.aeon.ui.design.AeonSwitch(state.config?.feedImages != false, { model.setFeedImages(it) }, "기사 사진 보여 주기")
             }
-            Text("켜면 새로 고칠 때 기사 사진을 가져와서 데이터를 더 써요. 사진 하나를 찾는 데 1MB쯤 들어요. 끄면 언론사 표시만 보여 주고, 가져온 사진은 지워요.", Modifier.padding(start = 4.dp, end = 4.dp, top = 8.dp), style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
+            Text("켜면 글을 만들 때 기사 사진을 같이 가져와서 데이터를 더 써요. 기사 하나를 열어 보는 데 1MB쯤 들어요. 끄면 사진 없이 보여 주고, 가져온 사진은 지워요.", Modifier.padding(start = 4.dp, end = 4.dp, top = 8.dp), style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
 
             GroupHeader("말투")
             Text("언어", Modifier.padding(start = 4.dp, bottom = 8.dp), style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant)

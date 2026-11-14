@@ -45,6 +45,10 @@ object AeonIcons {
     val Info by lazy { stroke("info", "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 11v6M12 7.5v.01") }
     val Shield by lazy { stroke("shield", "M12 3l7 3v5.5c0 4.3-2.9 7.6-7 9.5-4.1-1.9-7-5.2-7-9.5V6z") }
     val Plug by lazy { stroke("plug", "M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4") }
+    val Heart by lazy { stroke("heart", "M12 20s-7-4.4-7-10a4 4 0 017-2.6A4 4 0 0119 10c0 5.6-7 10-7 10z") }
+    val ArrowUp by lazy { stroke("up", "M12 19V5M6 11l6-6 6 6", 2f) }
+    val ArrowDown by lazy { stroke("down", "M12 5v14M6 13l6 6 6-6", 2f) }
+    val Sliders by lazy { stroke("sliders", "M4 7h10M18 7h2M4 17h2M10 17h10M14 4v6M6 14v6") }
     val Memory by lazy { stroke("memory", "M7 4h10v16l-5-4-5 4zM10 9h4") }
     val Book by lazy { stroke("book", "M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3zM5 17a3 3 0 0 1 3-3h11") }
     val Moon by lazy { stroke("moon", "M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z") }

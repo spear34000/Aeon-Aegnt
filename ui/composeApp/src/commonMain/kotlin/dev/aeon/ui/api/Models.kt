@@ -310,22 +310,63 @@ data class SkillPreview(val id: String, val source: String = "", val commit: Str
 @Serializable data class SkillUpdatePreview(val preview: SkillPreview, val install: SkillInstallHint, val diff: SkillFileDiff = SkillFileDiff())
 @Serializable data class SkillFileResponse(val path: String = "", val text: String? = null, val binary: Boolean = false, val size: Long = 0)
 
-/** One headline of the feed. [title] is what is shown (rewritten, or the original); [image] means the server kept the article's picture. */
+/** Where a post's facts come from. The address was filled in by the server from the articles it read, never typed by a model. */
+@Serializable data class PostSource(val title: String = "", val outlet: String = "", val url: String = "", val publishedAt: Double = 0.0)
+
+/** One post of the feed. [body] is empty and [written] false when it is only the outlet's headline. */
 @Serializable
-data class FeedItem(
+data class FeedPost(
     val id: String,
+    val kicker: String = "",
     val title: String,
-    val original: String = "",
-    val source: String = "",
-    val publishedAt: Double = 0.0,
-    val url: String = "",
-    val rewritten: Boolean = false,
+    val body: String = "",
+    val category: String = "",
+    val sources: List<PostSource> = emptyList(),
+    val reason: String = "",
+    val written: Boolean = true,
     val image: Boolean = false,
+    val createdAt: Double = 0.0,
+    val deadline: Double? = null,
+    val actionable: Boolean = false,
+    val seenAt: Double? = null,
+    val liked: Boolean = false,
 )
 
-@Serializable data class FeedSection(val interest: String, val items: List<FeedItem> = emptyList(), val note: String? = null)
-@Serializable data class FeedData(val updatedAt: Double = 0.0, val interests: List<String> = emptyList(), val sections: List<FeedSection> = emptyList(), val mode: String = "rules", val modeNote: String? = null)
-@Serializable data class FeedResponse(val feed: FeedData? = null, val interests: List<String> = emptyList(), val stale: Boolean = false, val online: Boolean = true)
+@Serializable data class FeedSettings(val brief: String = "", val auto: Boolean = true, val intervalMinutes: Int = 360, val dailyRuns: Int = 4, val dailyPosts: Int = 8)
+@Serializable data class FeedToday(val runs: Int = 0, val posts: Int = 0, val lookups: Int = 0)
+@Serializable data class FeedCaps(val runs: Int = 4, val posts: Int = 8)
+@Serializable data class FeedRejected(val title: String = "", val why: String = "")
+
+/** What one run of the pipeline did: [status] made, nothing or skipped; [mode] written by a model or plain headlines. */
+@Serializable
+data class RunReport(
+    val at: Double = 0.0,
+    val status: String = "",
+    val reason: String? = null,
+    val message: String? = null,
+    val made: Int = 0,
+    val candidates: Int = 0,
+    val lookups: Int = 0,
+    val mode: String = "written",
+    val rejected: List<FeedRejected> = emptyList(),
+)
+
+@Serializable data class FeedStatus(val today: FeedToday = FeedToday(), val caps: FeedCaps = FeedCaps(), val lastRunAt: Double = 0.0, val lastRun: RunReport? = null, val nextRunAt: Double? = null)
+@Serializable data class FeedQuery(val interest: String = "", val query: String = "")
+@Serializable data class FeedTaste(val text: String = "", val updatedAt: Double = 0.0, val source: String = "auto")
+
+/** Everything the feed screen needs, in the order the server wants the posts shown. [report] is only there after a manual run. */
+@Serializable
+data class FeedResponse(
+    val posts: List<FeedPost> = emptyList(),
+    val settings: FeedSettings = FeedSettings(),
+    val status: FeedStatus = FeedStatus(),
+    val interests: List<String> = emptyList(),
+    val queries: List<FeedQuery> = emptyList(),
+    val taste: FeedTaste? = null,
+    val online: Boolean = true,
+    val report: RunReport? = null,
+)
 
 /** Who made a memory: the owner typed it, or the agent proposed it in a task and the owner approved those exact words. */
 @Serializable data class MemorySource(val type: String = "owner", val taskId: String? = null)

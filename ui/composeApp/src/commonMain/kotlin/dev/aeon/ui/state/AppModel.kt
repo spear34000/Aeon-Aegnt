@@ -47,7 +47,7 @@ sealed interface Connection {
 /** Which main area is visible. The conversation is the default place (design: chat-first). */
 enum class Section { Chat, Feed, Explore, Tasks, Agent, Approvals, Settings }
 
-enum class SettingsPage { Personal, Models, Keys, Devices, Memory, Usage, Legal, About }
+enum class SettingsPage { Personal, Models, Keys, Devices, Feed, Memory, Usage, Legal, About }
 
 enum class ThemeMode(val label: String) { System("시스템 설정"), Light("라이트"), Dark("다크") }
 
@@ -147,13 +147,19 @@ data class SkillUpdateState(
     val error: String? = null,
 )
 
-/** The feed of the owner's interests (headlines of the last refresh, and the pictures decoded so far). */
+/** The feed (D25): the written posts in the server's order, what the last run did, and the pictures decoded so far. */
 data class FeedState(
-    val data: dev.aeon.ui.api.FeedData? = null,
-    val interests: List<String> = emptyList(),
-    val online: Boolean = true,
+    val data: dev.aeon.ui.api.FeedResponse? = null,
     val loaded: Boolean = false,
-    val refreshing: Boolean = false,
+    /** A run is under way (the owner asked for new posts). */
+    val generating: Boolean = false,
+    /** What the owner's last run said; shown until dismissed. */
+    val report: dev.aeon.ui.api.RunReport? = null,
+    /** The post open in its sheet. */
+    val openId: String? = null,
+    /** The brief and the taste summary while the owner is editing them (null: not editing). */
+    val briefDraft: String? = null,
+    val tasteDraft: String? = null,
     val error: String? = null,
     /** One interest shown alone, or null for all of them. */
     val filter: String? = null,
@@ -350,6 +356,7 @@ class AppModel(
         _state.update { it.copy(section = Section.Settings, settingsPage = page, showDetail = false, settingsOpen = true) }
         if (page == SettingsPage.Devices) scope.launch { runCatching { client.devices() }.onSuccess { d -> _state.update { it.copy(devices = d) } } }
         if (page == SettingsPage.Memory) loadMemory()
+        if (page == SettingsPage.Feed) loadFeed()
         if (page == SettingsPage.Usage) scope.launch { runCatching { client.usage() }.onSuccess { u -> _state.update { it.copy(usage = u) } } }
     }
 
@@ -1063,33 +1070,84 @@ class AppModel(
 
     private val feedImageRequests = mutableSetOf<String>()
 
-    /** Shows what the server has, and refreshes when it is old (needs interests in the profile and internet lookups on). */
+    private fun showFeed(r: dev.aeon.ui.api.FeedResponse) = feed { it.copy(data = r.copy(report = null), loaded = true, error = null, filter = it.filter?.takeIf { f -> f in r.interests }) }
+
+    /** Shows what the server has. New posts are made by the server's own timer or when the owner asks: opening the tab never starts a run. */
     fun loadFeed() {
         scope.launch {
             runCatching { client.feed() }
-                .onSuccess { r ->
-                    feed { it.copy(data = r.feed, interests = r.interests, online = r.online, loaded = true, error = null, filter = it.filter?.takeIf { f -> f in r.interests }) }
-                    if (r.stale && r.online && r.interests.isNotEmpty()) refreshFeed()
-                }
+                .onSuccess { r -> showFeed(r) }
                 .onFailure { e -> feed { it.copy(loaded = true, error = describe(e as? Exception ?: Exception(e.message))) } }
         }
     }
 
-    fun refreshFeed() {
-        if (_state.value.feed.refreshing) return
+    /** Asks for new posts now. The answer says what was made, what the reviewer refused, or why nothing could be done. */
+    fun generateFeed() {
+        if (_state.value.feed.generating) return
         scope.launch {
-            feed { it.copy(refreshing = true, error = null) }
+            feed { it.copy(generating = true, error = null, report = null) }
             try {
-                val r = client.refreshFeed()
-                feed { it.copy(data = r.feed, interests = r.interests, online = true, refreshing = false, loaded = true) }
+                val r = client.generateFeed()
+                feed { it.copy(data = r.copy(report = null), report = r.report, generating = false, loaded = true, filter = it.filter?.takeIf { f -> f in r.interests }) }
             } catch (e: Exception) {
-                val msg = when {
-                    e is AeonException && e.status == 403 -> null
-                    e is AeonException && e.status == 400 -> null
-                    else -> "새 소식을 가져오지 못했어요. 잠시 뒤에 다시 해 보세요."
-                }
-                feed { it.copy(refreshing = false, online = if (e is AeonException && e.status == 403) false else it.online, error = msg) }
+                feed { it.copy(generating = false, error = "새 글을 만들지 못했어요. 잠시 뒤에 다시 해 보세요.") }
             }
+        }
+    }
+
+    fun dismissFeedReport() = feed { it.copy(report = null) }
+
+    /** Opens a post in its sheet and marks it read. */
+    fun openPost(id: String) {
+        feed { it.copy(openId = id) }
+        scope.launch { runCatching { client.markPostSeen(id) }.onSuccess { r -> feed { f -> f.copy(data = r.copy(report = null)) } } }
+    }
+
+    fun closePost() = feed { it.copy(openId = null) }
+
+    private fun postAction(close: Boolean = false, call: suspend () -> dev.aeon.ui.api.FeedResponse) {
+        scope.launch {
+            runCatching { call() }
+                .onSuccess { r -> feed { it.copy(data = r.copy(report = null), openId = if (close) null else it.openId, error = null) } }
+                .onFailure { e -> feed { it.copy(error = if (e is AeonException && e.status == 404) "그 글은 이미 없어요." else "처리하지 못했어요. 잠시 뒤에 다시 해 보세요.") } }
+        }
+    }
+
+    fun likePost(id: String, like: Boolean) = postAction { client.reactToPost(id, if (like) "like" else "unlike") }
+    fun removePost(id: String) = postAction(close = true) { client.reactToPost(id, "dismiss") }
+    fun movePost(id: String, to: String) = postAction { client.movePost(id, to) }
+
+    // The feed settings: the brief, automatic runs and the daily limits, and the taste summary. Changing them needs the machine or an admin device.
+    private fun feedSettings(brief: String? = null, auto: Boolean? = null, runs: Int? = null, posts: Int? = null) {
+        scope.launch {
+            runCatching { client.saveFeedSettings(brief = brief, auto = auto, dailyRuns = runs, dailyPosts = posts) }
+                .onSuccess { r -> feed { it.copy(data = r.copy(report = null), briefDraft = null, error = null) } }
+                .onFailure { e -> feed { it.copy(error = if (e is AeonException && e.status == 403) "이 기기는 피드 설정을 바꿀 수 없어요." else "저장하지 못했어요. 잠시 뒤에 다시 해 보세요.") } }
+        }
+    }
+
+    fun editBrief(text: String) = feed { it.copy(briefDraft = text.take(600)) }
+    fun revertBrief() = feed { it.copy(briefDraft = null) }
+    fun saveBrief() { _state.value.feed.briefDraft?.let { feedSettings(brief = it) } }
+    fun setFeedAuto(on: Boolean) = feedSettings(auto = on)
+    fun setFeedDailyRuns(n: Int) = feedSettings(runs = n)
+    fun setFeedDailyPosts(n: Int) = feedSettings(posts = n)
+
+    fun editTaste(text: String) = feed { it.copy(tasteDraft = text.take(300)) }
+    fun revertTaste() = feed { it.copy(tasteDraft = null) }
+    fun saveTaste() {
+        val t = _state.value.feed.tasteDraft ?: return
+        scope.launch {
+            runCatching { if (t.isBlank()) client.clearFeedTaste() else client.saveFeedTaste(t) }
+                .onSuccess { r -> feed { it.copy(data = r.copy(report = null), tasteDraft = null, error = null) } }
+                .onFailure { e -> feed { it.copy(error = if (e is AeonException && e.status == 403) "이 기기는 취향 요약을 바꿀 수 없어요." else "저장하지 못했어요.") } }
+        }
+    }
+    fun clearTaste() {
+        scope.launch {
+            runCatching { client.clearFeedTaste() }
+                .onSuccess { r -> feed { it.copy(data = r.copy(report = null), tasteDraft = null, error = null) } }
+                .onFailure { e -> feed { it.copy(error = if (e is AeonException && e.status == 403) "이 기기는 취향 요약을 바꿀 수 없어요." else "지우지 못했어요.") } }
         }
     }
 
@@ -1113,7 +1171,7 @@ class AppModel(
         _state.update { it.copy(config = saved, draft = saved) }
         feedImageRequests.clear()
         feed { it.copy(images = emptyMap()) }
-        refreshFeed()
+        loadFeed()
     }
 
     // ---------------------------------------------------------------- 기억
