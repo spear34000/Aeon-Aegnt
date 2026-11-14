@@ -31,7 +31,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
-      - run: npm test
+      # A per-test limit and a live reporter, so a hanging test is named in the log instead of the job running until it is cancelled.
+      - run: npm test -- --test-reporter=spec --test-timeout=180000
 
   apps:
     name: Apps (Kotlin)
