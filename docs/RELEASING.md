@@ -8,8 +8,8 @@ A release is a **draft** GitHub release made from a tag. Nothing is published un
 |---|---|---|
 | `aeon-<version>-android.apk` | Linux runner | with the release key, **once the secrets below exist** |
 | `aeon-<version>-android-debug-key.apk` | Linux runner | with the debug key: installs for testing, cannot be updated by a later release-key build. Left out of the release when the signed one exists |
-| `Aeon-<version>.msi`, `Aeon-<version>.exe` | Windows runner | not signed (Windows SmartScreen will warn) |
-| `aeon_<version>-1_amd64.deb` | Linux runner | not signed |
+| `Aeon-<1.2.3>.msi`, `Aeon-<1.2.3>.exe` (about 70 MB each) | Windows runner | not signed (Windows SmartScreen will warn) |
+| `aeon_<1.2.3>_amd64.deb` (about 65 MB) | Linux runner | not signed |
 | `aeon-<version>-web.zip` | Linux runner | the web app; start the server with `--web <folder>` |
 | `SHA256SUMS.txt` | | checksums of all of the above |
 
@@ -57,4 +57,4 @@ Until the secrets exist the workflow still works: the signed job says so and the
 
 ## What has and has not been tried
 
-See decision D30 in [DECISIONS.md](DECISIONS.md) for the state of the first real run.
+The dry run of pull request #17 (2026-11-14) built the debug-key APK (version `0.1.0-test`, code 100, read back with `aapt2`), the msi, the exe, the deb and the web zip on GitHub's runners. **Not run yet:** the signed Android job (no key exists), the approval step, and the job that creates the draft release; a signed `assembleRelease` was only run on a computer with a throwaway key (`apksigner` accepted it, version 0.2.0, code 200). See decision D30 in [DECISIONS.md](DECISIONS.md).
