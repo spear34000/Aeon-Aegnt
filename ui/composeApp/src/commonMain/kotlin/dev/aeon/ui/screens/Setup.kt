@@ -342,7 +342,7 @@ fun WelcomeScreen(model: AppModel) {
                 Text("Aeon", Modifier.padding(top = 28.dp), style = MaterialTheme.typography.headlineMedium)
                 Text("내 기기에서 일하는 내 에이전트", Modifier.padding(top = 8.dp), style = MaterialTheme.typography.titleLarge, textAlign = TextAlign.Center)
             }
-            AeonButton("시작하기", { haptic.performHapticFeedback(HapticFeedbackType.LongPress); model.beginSetup() }, Modifier.padding(bottom = 24.dp).fillMaxWidth(), kind = ButtonKind.Primary)
+            AeonButton("시작하기", { haptic.performHapticFeedback(HapticFeedbackType.LongPress); model.startIntro() }, Modifier.padding(bottom = 24.dp).fillMaxWidth(), kind = ButtonKind.Primary)
         }
     }
 }
