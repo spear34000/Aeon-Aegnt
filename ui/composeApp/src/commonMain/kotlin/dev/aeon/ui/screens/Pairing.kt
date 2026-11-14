@@ -88,9 +88,9 @@ fun ConnectScreen(state: UiState, model: AppModel, modifier: Modifier = Modifier
     ) {
         Column(Modifier.widthIn(max = 440.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             if (onBack != null) CircleButton(dev.aeon.ui.design.AeonIcons.Back, "이전", onBack)
-            Text("Aeon 서버에 연결", style = MaterialTheme.typography.headlineMedium)
+            Text("내 컴퓨터의 Aeon에 연결", style = MaterialTheme.typography.headlineMedium)
             Text(
-                "서버를 켠 컴퓨터의 화면에 나온 QR 코드를 폰 카메라로 스캔하거나, 주소와 코드를 입력하세요.",
+                "컴퓨터의 Aeon 화면에 나온 QR 코드를 카메라로 스캔하거나, 주소와 코드를 입력하세요.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -98,8 +98,8 @@ fun ConnectScreen(state: UiState, model: AppModel, modifier: Modifier = Modifier
                 // Any app can send a link, so the address it brought is named, and the owner connects only if it is theirs.
                 val shown = prefill.address ?: prefill.addresses.firstOrNull()
                 val text = when {
-                    prefill.probing -> "서버를 찾는 중이에요…"
-                    shown != null -> "QR 코드에서 받은 주소: ${shown.substringAfter("://")}. 내 서버가 맞는지 확인하고 연결하세요."
+                    prefill.probing -> "컴퓨터를 찾는 중이에요…"
+                    shown != null -> "QR 코드에서 받은 주소: ${shown.substringAfter("://")}. 내 컴퓨터가 맞는지 확인하고 연결하세요."
                     else -> "QR 코드에서 코드를 받았어요. 주소를 입력하세요."
                 }
                 Banner(text, if (prefill.address != null) Tone.Ok else Tone.Warn, if (prefill.address != null) "✓" else "⚠")
@@ -107,7 +107,7 @@ fun ConnectScreen(state: UiState, model: AppModel, modifier: Modifier = Modifier
             AeonTextField(
                 value = url,
                 onValueChange = { url = it },
-                label = "서버 주소",
+                label = "컴퓨터 주소",
                 placeholder = "http://192.168.0.12:7421",
                 help = null,
                 error = if (url.isNotBlank() && !url.startsWith("http")) "주소 앞에 http:// 를 붙여 주세요." else null,

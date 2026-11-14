@@ -75,7 +75,7 @@ import kotlin.io.encoding.ExperimentalEncodingApi
 import org.jetbrains.compose.resources.ExperimentalResourceApi
 import org.jetbrains.compose.resources.decodeToImageBitmap
 
-private val KINDS = listOf<Pair<String?, String>>(null to "전체", "integration" to "연동", "mcp" to "MCP 서버", "skill" to "스킬", "builtin" to "기본 도구")
+private val KINDS = listOf<Pair<String?, String>>(null to "전체", "integration" to "연동", "mcp" to "외부 도구", "skill" to "스킬", "builtin" to "기본 도구")
 
 /** Korean names for Aeon's own tool namespaces. Anything else shows the id the server sent. */
 private fun builtinTitle(id: String): String = when (id) {
@@ -99,7 +99,7 @@ private fun subtitle(c: ConnectionItem): String = when (c.kind) {
     }
     "skill" -> c.description.ifBlank { "스킬" }
     "integration" -> "연동"
-    else -> "MCP 서버"
+    else -> "외부 도구"
 }
 
 @Composable
@@ -276,7 +276,7 @@ fun ExploreScreen(state: UiState, model: AppModel, modifier: Modifier = Modifier
                             when {
                                 q.isNotEmpty() -> "연결된 항목에는 없어요."
                                 kind == "integration" -> "추가한 연동이 없어요."
-                                kind == "mcp" -> "추가한 MCP 서버가 없어요."
+                                kind == "mcp" -> "추가한 외부 도구가 없어요."
                                 else -> "불러오는 중이에요."
                             },
                         )
@@ -296,7 +296,7 @@ fun ExploreScreen(state: UiState, model: AppModel, modifier: Modifier = Modifier
                     when {
                         e.error != null -> Banner(e.error, Tone.Warn, "⚠")
                         e.loading && catalog.isEmpty() -> Hint("찾는 중이에요.")
-                        catalog.isEmpty() -> Hint(if (e.query.isBlank()) "항목이 없어요." else "찾는 서버가 없어요. 영문 이름으로 검색해 보세요.")
+                        catalog.isEmpty() -> Hint(if (e.query.isBlank()) "항목이 없어요." else "찾는 항목이 없어요. 영문 이름으로 검색해 보세요.")
                         else -> ConnectionList(catalog, e, model, installed = false)
                     }
                 }
@@ -374,7 +374,7 @@ private fun ConnectionSheet(c: ConnectionItem, state: UiState, model: AppModel) 
                 if (c.tools.isNotEmpty()) InfoLine(AeonIcons.Plug, "도구", c.tools.joinToString(", "))
                 if (c.kind == "skill") InfoLine(AeonIcons.Book, "폴더", c.id.removePrefix("skill:"))
             }
-            if (c.kind == "integration") Note("에이전트가 이 서버를 쓰는 기능은 아직 준비 중이에요.")
+            if (c.kind == "integration") Note("에이전트가 이 연동을 쓰는 기능은 아직 준비 중이에요.")
             if (c.kind == "integration" && !e.canEdit) Note("이 기기는 설정을 바꿀 수 없어요.")
         }
         Column(Modifier.padding(top = 12.dp, bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {

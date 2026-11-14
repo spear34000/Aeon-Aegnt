@@ -258,7 +258,7 @@ class SetupFlowTest {
         val m = model(MapStore(mutableMapOf("serverUrl" to "http://127.0.0.1:9", "deviceId" to "dev_0123456789abcdef01")))
         m.receivePairLink("aeon://pair?c=75KFXQWOXQGQ7VLQ")
         assertEquals(null, m.state.value.pairPrefill)
-        assertTrue(m.state.value.message!!.contains("이미 서버에 연결"))
+        assertTrue(m.state.value.message!!.contains("이미 컴퓨터에 연결"))
     }
 
     @Test

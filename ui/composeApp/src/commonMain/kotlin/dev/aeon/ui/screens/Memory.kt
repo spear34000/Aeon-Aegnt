@@ -125,7 +125,7 @@ fun MemoryPage(state: UiState, model: AppModel) {
             MemoryRows(m.past, model, past = true)
             Text("기간이 지난 기억은 쓰이지 않고, 30일 뒤에 사라져요.", Modifier.padding(horizontal = 4.dp), style = MaterialTheme.typography.bodySmall, color = s.fg3)
         }
-        if (m.items.isNotEmpty()) Text("일하는 방식은 매번 에이전트에게 전해져요. 나에 대한 내용은 작업과 관련이 있을 때만 전해져요. 지우면 바로 사라져요.", Modifier.padding(horizontal = 4.dp), style = MaterialTheme.typography.bodySmall, color = s.fg3)
+        if (m.items.isNotEmpty()) Text("일하는 방식은 항상, 나에 대한 내용은 관련 있을 때만 에이전트에게 전해져요. 지우면 바로 사라져요.", Modifier.padding(horizontal = 4.dp), style = MaterialTheme.typography.bodySmall, color = s.fg3)
     }
 
     m.draft?.let { MemoryDraftSheet(state, model) }

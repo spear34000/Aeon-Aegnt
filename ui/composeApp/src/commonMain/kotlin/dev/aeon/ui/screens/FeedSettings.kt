@@ -51,7 +51,7 @@ fun FeedSettingsPage(state: UiState, model: AppModel) {
 
     Text("이런 피드를 만들어 줘요", style = MaterialTheme.typography.labelMedium)
     val brief = f.briefDraft ?: set.brief
-    AeonTextField(brief, model::editBrief, "피드 설명", singleLine = false, minHeight = 96.dp, enabled = can, help = "무엇을, 어떤 말투로, 무엇을 피할지 적어 주세요. 이 글은 글을 쓰는 모델에게만 가요. (${brief.length}/600)")
+    AeonTextField(brief, model::editBrief, "피드 설명", singleLine = false, minHeight = 96.dp, enabled = can, help = "어떤 소식을 어떤 말투로 받을지 적어 주세요. (${brief.length}/600)")
     if (f.briefDraft != null && f.briefDraft != set.brief) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             AeonButton("되돌리기", model::revertBrief, Modifier.weight(1f), kind = ButtonKind.Secondary)
@@ -65,13 +65,13 @@ fun FeedSettingsPage(state: UiState, model: AppModel) {
         UseBox("새 글", "${data.status.today.posts} / ${data.status.caps.posts}개", Modifier.weight(1f))
     }
     ListSurface {
-        Box(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) { AeonSwitch(set.auto, { model.setFeedAuto(it) }, "자동으로 만들기 · ${set.intervalMinutes / 60}시간마다, 알림은 보내지 않아요", enabled = can) }
+        Box(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) { AeonSwitch(set.auto, { model.setFeedAuto(it) }, "자동으로 만들기 · ${set.intervalMinutes / 60}시간마다", enabled = can) }
         RowDivider(16.dp)
         Stepper("하루 만드는 횟수", set.dailyRuns, 1, 12, "번", can) { model.setFeedDailyRuns(it) }
         RowDivider(16.dp)
         Stepper("하루 새 글", set.dailyPosts, 1, 30, "개", can) { model.setFeedDailyPosts(it) }
     }
-    FeedHint("글을 만들 때마다 모델을 한 번 쓰고, 기사 몇 개를 내려받아요. 한도에 닿으면 그날은 멈춰요. 앱이 꺼져 있으면 만들지 못해요.")
+    FeedHint("글을 만들 때마다 AI를 한 번 쓰고 기사 몇 개를 내려받아요. 한도에 닿으면 그날은 쉬어요. 앱이 꺼져 있으면 만들지 못해요.")
     if (!can) FeedHint("이 기기는 피드 설정을 바꿀 수 없어요.")
 
     GroupHeader("찾아보는 말")
@@ -98,7 +98,7 @@ fun FeedSettingsPage(state: UiState, model: AppModel) {
         }
     } else {
         Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surface).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(taste?.text ?: "아직 요약이 없어요. 글에 좋아요를 누르거나 지우면 다섯 번쯤 뒤에 만들어요.", style = MaterialTheme.typography.bodyMedium, color = if (taste == null) s.fg3 else MaterialTheme.colorScheme.onSurface)
+            Text(taste?.text ?: "아직 없어요. 글에 좋아요를 누르거나 지우면 만들어져요.", style = MaterialTheme.typography.bodyMedium, color = if (taste == null) s.fg3 else MaterialTheme.colorScheme.onSurface)
             if (taste != null) Text(if (taste.source == "owner") "내가 쓴 요약이에요" else "좋아요와 지우기에서 뽑은 요약이에요", style = MaterialTheme.typography.labelMedium, color = s.fg3)
             if (can) Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
                 AeonButton("고치기", { model.editTaste(taste?.text ?: "") }, Modifier.weight(1f), kind = ButtonKind.Secondary)

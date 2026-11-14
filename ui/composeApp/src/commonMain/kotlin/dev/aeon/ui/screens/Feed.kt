@@ -120,7 +120,7 @@ fun FeedScreen(state: UiState, model: AppModel, modifier: Modifier = Modifier) {
                             }
                         }
                     }
-                    FeedHint("글은 기사 내용에서만 쓰고, 출처를 달아요. 숫자와 날짜는 출처에 있는 것만 남겨요. 누르면 출처와 이유가 보여요.")
+                    FeedHint("글은 기사 내용에서만 쓰고 출처를 달아요.")
                 }
             }
         }

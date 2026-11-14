@@ -364,9 +364,9 @@ private fun SkillReviewPage(state: UiState, model: AppModel) {
                 Banner("스크립트 ${c.safety.scanned}개를 검사했고 위험해 보이는 점을 찾지 못했어요. 정해 둔 규칙으로 찾은 결과라서, 코드를 직접 읽는 것을 대신하지는 않아요.", Tone.Ok, "✓")
                 c.safety.findings.take(4).forEach { f -> Text("· ${f.file}:${f.line} ${f.what}", Modifier.padding(horizontal = 4.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(AeonShape.CARD.dp)).background(MaterialTheme.colorScheme.surface).padding(horizontal = 16.dp)) {
-                    AeonSwitch(a.autoRun, model::setSkillAutoRunDraft, "묻지 않고 실행 (Docker 안에서만)")
+                    AeonSwitch(a.autoRun, model::setSkillAutoRunDraft, "묻지 않고 실행 (격리된 상자 안에서만)")
                 }
-                Text("Docker는 인터넷이 없고 읽기만 되는 상자예요. 이 컴퓨터에서 직접 돌릴 때는 계속 물어봐요.", Modifier.padding(horizontal = 4.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("격리된 상자(Docker)는 인터넷이 없고 읽기만 돼요. 이 컴퓨터에서 직접 돌릴 때는 계속 물어봐요.", Modifier.padding(horizontal = 4.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
                 Banner("읽어 봐야 할 부분을 찾았어요. 이 스크립트는 실행할 때마다 물어봐요.", Tone.Warn, "⚠")
                 c.safety.findings.filter { it.severity == "block" }.take(8).forEach { f -> Text("· ${f.file}:${f.line} ${f.what}", Modifier.padding(horizontal = 4.dp), style = MaterialTheme.typography.bodySmall, color = LocalAeonStatus.current.warn) }
@@ -457,7 +457,7 @@ private fun SkillDetailPage(state: UiState, model: AppModel) {
                     Text("안전 검사에서 읽어 볼 점이 있어서 실행할 때마다 물어봐요.", Modifier.padding(horizontal = 4.dp), style = MaterialTheme.typography.bodySmall, color = LocalAeonStatus.current.warn)
                     sf.findings.filter { it.severity == "block" }.take(6).forEach { f -> Text("· ${f.file}:${f.line} ${f.what}", Modifier.padding(horizontal = 4.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 } else if (k.autoRun) {
-                    Text("안전 검사를 통과해서 Docker 안에서는 묻지 않고 실행돼요. 이 컴퓨터에서 직접 돌릴 때는 계속 물어봐요.", Modifier.padding(horizontal = 4.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("안전 검사를 통과해서 격리된 상자 안에서는 묻지 않고 실행돼요. 이 컴퓨터에서 직접 돌릴 때는 계속 물어봐요.", Modifier.padding(horizontal = 4.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
             if (k.shadowedBy != null) Text("같은 이름의 ${scopeLabel(k.shadowedBy)} 스킬이 대신 쓰여요.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 4.dp))

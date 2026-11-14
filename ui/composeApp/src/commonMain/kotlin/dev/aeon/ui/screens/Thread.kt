@@ -70,10 +70,10 @@ fun ConversationScreen(state: UiState, model: AppModel, wide: Boolean, modifier:
         // On the phone the top bar already says who this is; the title row appears only once a task is open.
         if (wide || state.selectedTaskId != null) ConversationHeader(summary?.goal, wide, onDetail = { state.selectedTaskId?.let { model.selectTask(it, asDetail = true) } }, hasTask = state.selectedTaskId != null)
         if (offline) {
-            Banner("서버에 연결할 수 없습니다. Aeon 서버가 켜져 있고 같은 네트워크에 있는지 확인하세요.", Tone.Danger, "⚠", null)
+            Banner("에이전트에 연결할 수 없어요. 컴퓨터가 켜져 있고 같은 와이파이에 있는지 확인해 주세요.", Tone.Danger, "⚠", null)
         }
         state.status?.setupProblem?.let {
-            Banner("지금 고른 모델은 키가 없어 쓸 수 없습니다. 입력창의 모델 버튼에서 키를 넣거나 다른 모델을 고르세요.", Tone.Warn, "•")
+            Banner("지금 고른 모델은 키가 없어서 쓸 수 없어요. 입력창의 모델 버튼에서 키를 넣거나 다른 모델을 골라 주세요.", Tone.Warn, "•")
         }
         state.message?.let { Banner(it, Tone.Neutral, "·", model::dismissMessage) }
 
@@ -127,7 +127,7 @@ fun ConversationScreen(state: UiState, model: AppModel, wide: Boolean, modifier:
                         "COMPLETED" -> item(key = "result-${detail.id}") { ResultBlock(detail) }
                         "FAILED" -> item(key = "failed-${detail.id}") {
                             AgentMessage("작업이 끝나지 않았습니다.") {
-                                Text(detail.error ?: "원인을 알 수 없습니다.", color = LocalAeonStatus.current.danger, style = MaterialTheme.typography.bodyMedium)
+                                Text(detail.error?.let { friendlyError(it) } ?: "원인을 알 수 없어요.", color = LocalAeonStatus.current.danger, style = MaterialTheme.typography.bodyMedium)
                             }
                         }
                         "CANCELLED" -> item(key = "cancel-${detail.id}") { Chip("중단됨", Tone.Neutral) }
@@ -203,7 +203,7 @@ private fun QuotaCard(d: TaskDetail, model: AppModel) {
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(d.note ?: "모델 사용 한도에 걸렸어요. 잠시 뒤 이어서 합니다.", style = MaterialTheme.typography.bodyMedium)
+        Text("모델 사용 한도에 걸렸어요. 잠시 뒤 이어서 할게요.", style = MaterialTheme.typography.bodyMedium)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             AeonButton("작업 정지", { model.cancel(d.id) }, kind = ButtonKind.Secondary)
             AeonButton("설정 바꾸기", { model.openSettings(dev.aeon.ui.state.SettingsPage.Models) }, kind = ButtonKind.Ghost)

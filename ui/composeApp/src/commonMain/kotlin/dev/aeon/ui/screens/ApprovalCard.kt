@@ -117,7 +117,7 @@ fun ApprovalCard(a: Approval, seenAt: Long?, sourceLabel: String, onDecide: (Boo
             val (label, tone) = when {
                 isolation == "docker" -> "Docker 안에서 실행" to Tone.Ok
                 noIsolation -> "이 컴퓨터에서 직접 · 격리 없음" to Tone.Danger
-                else -> "이 컴퓨터 · Node 권한 제한" to Tone.Warn
+                else -> "이 컴퓨터 · 권한 제한" to Tone.Warn
             }
             Chip(label, tone)
             Column(Modifier.fillMaxWidth().background(scheme.background, RoundedCornerShape(AeonShape.CONTROL.dp)).padding(horizontal = 14.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -126,9 +126,9 @@ fun ApprovalCard(a: Approval, seenAt: Long?, sourceLabel: String, onDecide: (Boo
             }
             when {
                 noIsolation -> Banner("격리가 없어요. 이 스크립트는 내 계정 권한으로 이 컴퓨터에서 직접 돌아요. 파일을 읽고 지우고 인터넷으로 보낼 수 있어요. 코드를 읽어 본 뒤에만 허용하세요.", Tone.Danger, "⚠")
-                isolation == "host" -> Banner("이 컴퓨터에서 Node 권한 모델로 돌아요. 실수를 막는 안전장치일 뿐 악의적인 코드를 막지는 못하고, 인터넷도 막지 않아요. 코드를 읽어 본 뒤에 허용하세요.", Tone.Warn, "⚠")
+                isolation == "host" -> Banner("이 컴퓨터에서 권한을 제한해 돌려요. 실수를 막는 안전장치일 뿐 악의적인 코드를 막지는 못하고, 인터넷도 막지 않아요. 코드를 읽어 본 뒤에 허용하세요.", Tone.Warn, "⚠")
                 else -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    listOf("인터넷 없이, 읽기만 되는 Docker 상자 안에서 돌아요", "이 스킬의 복사본과 임시 폴더만 보여요. 내 파일은 안 보여요", "60초가 지나면 멈춰요").forEach { Text("✓ $it", style = MaterialTheme.typography.bodySmall, color = s.ok) }
+                    listOf("인터넷 없이, 읽기만 되는 격리된 상자(Docker) 안에서 돌아요", "이 스킬의 복사본과 임시 폴더만 보여요. 내 파일은 안 보여요", "60초가 지나면 멈춰요").forEach { Text("✓ $it", style = MaterialTheme.typography.bodySmall, color = s.ok) }
                 }
             }
             if (!a.detail.isNullOrBlank()) {

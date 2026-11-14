@@ -409,7 +409,7 @@ class AppModel(
                         serverUrl = previousUrl,
                         busy = false,
                         message = when {
-                            e is AeonException && e.status == 403 -> "코드가 맞지 않거나 만료됐어요. 서버에서 새 코드를 받으세요."
+                            e is AeonException && e.status == 403 -> "코드가 맞지 않거나 만료됐어요. 컴퓨터에서 새 코드를 받으세요."
                             e is AeonException && e.status == 429 -> "시도가 너무 많아요. 잠시 뒤에 다시 해 주세요."
                             else -> describe(e)
                         },
@@ -829,7 +829,7 @@ class AppModel(
                 pushProfile(draft)
                 goStep(SetupStep.Done)
             } catch (e: Exception) {
-                setup { it.copy(saving = false, error = "서버에 저장하지 못했습니다. ${describe(e)}") }
+                setup { it.copy(saving = false, error = "저장하지 못했어요. ${describe(e)}") }
             }
         }
     }
@@ -905,7 +905,7 @@ class AppModel(
             return
         }
         if (_state.value.connection !is Connection.Unpaired) {
-            _state.update { it.copy(message = "이미 서버에 연결되어 있어요. 다른 서버에 연결하려면 먼저 연결을 끊으세요.") }
+            _state.update { it.copy(message = "이미 컴퓨터에 연결되어 있어요. 다른 컴퓨터에 연결하려면 먼저 연결을 끊으세요.") }
             return
         }
         // Nothing is contacted yet: the addresses are only remembered, and the connect screen shows them for the owner to check.
@@ -1057,7 +1057,7 @@ class AppModel(
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
-            val text = if (e is AeonException && e.status == 502) "목록을 가져오지 못했습니다. Aeon 서버의 인터넷 연결을 확인하세요." else describe(e)
+            val text = if (e is AeonException && e.status == 502) "목록을 가져오지 못했어요. 컴퓨터의 인터넷 연결을 확인해 주세요." else describe(e)
             explore { it.copy(catalog = emptyList(), loading = false, error = text) }
         }
     }
@@ -1581,8 +1581,19 @@ class AppModel(
         }
     }
 
+    /** What went wrong, in words an ordinary user can act on. The server's own (English) message and the status number are not shown. */
+    private fun plainError(e: AeonException): String = when {
+        e.status == 0 -> e.message ?: "연결에 문제가 생겼어요."
+        e.status == 401 || e.status == 403 -> "이 기기에서는 할 수 없어요."
+        e.status == 404 -> "찾을 수 없어요."
+        e.status == 409 -> "지금은 할 수 없어요."
+        e.status == 413 -> "파일이 너무 커요."
+        e.status >= 500 -> "에이전트가 응답하지 않아요. 잠시 뒤에 다시 해 보세요."
+        else -> "처리하지 못했어요. 입력한 내용을 확인해 주세요."
+    }
+
     private fun describe(e: Exception): String = when (e) {
-        is AeonException -> if (e.status == 0) e.message ?: "error" else "${e.message} (HTTP ${e.status})"
+        is AeonException -> plainError(e)
         else -> e.message ?: e::class.simpleName ?: "error"
     }
 

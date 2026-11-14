@@ -107,3 +107,16 @@ Kotlin 2.4.21 · Compose Multiplatform 1.12.2 · Gradle 9.9.0 · Ktor 3.6.1 · k
 - **Bundle size:** the web build is about 15 MB (two Wasm files plus a source map); first load is slower than a typical web page.
 - **Desktop secrets/keys:** on non-Windows desktops the device key is a file created with owner-only permissions (not encrypted).
 - UI dependencies (Kotlin, Compose, Ktor, coroutines, serialization) are third-party and increase the supply-chain surface; the Node agent core still has zero runtime dependencies.
+
+
+## Copy rules (what the app says to an ordinary user)
+
+Applied to old and new screens alike (2026-11-15):
+
+1. Plain, friendly Korean (해요체). No developer words where an everyday one exists: "컴퓨터" instead of "서버", "외부 도구" instead of "MCP 서버", "격리된 상자 (Docker)" where the isolation matters.
+2. One sentence says what happened or what will happen. A second line is kept only if the owner needs it to decide or to avoid a surprise (cost, privacy, what is deleted). Hints that restate the screen are removed.
+3. **Text the owner decides on is not softened or shortened**: the exact command or request on an approval card, "격리 없음" and its warning, what leaves the computer, what a memory or skill will steer. Removing filler never removes decision information.
+4. Errors say what the owner can do, not the status number. The server's own (English) message and "HTTP 403" are not shown; a task that stopped shows a Korean sentence for the known reasons (`friendlyError`) and, for an unknown one, a plain sentence followed by the original text.
+5. Tests that match Korean strings verbatim are changed in the same commit as the string.
+
+Not covered: the terms and data notices (Legal), which are written as agreements; the setup guide for the computer (`Where`), which has to name commands; the English summaries on approval cards, which are the exact request.

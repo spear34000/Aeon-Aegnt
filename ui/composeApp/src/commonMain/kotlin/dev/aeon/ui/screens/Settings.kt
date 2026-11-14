@@ -215,7 +215,7 @@ private fun UsagePage(state: UiState) {
     val ok = state.usage.filter { it.ok }
     Card {
         Text("모델 호출", style = MaterialTheme.typography.titleMedium)
-        Text("${ok.size}번 · 입력+출력 ${ok.sumOf { it.inputTokens + it.outputTokens }} 토큰", style = MaterialTheme.typography.bodyLarge)
+        Text("${ok.size}번 · ${ok.sumOf { it.inputTokens + it.outputTokens }} 토큰", style = MaterialTheme.typography.bodyLarge)
         Text("추론 토큰 ${ok.sumOf { it.reasoningTokens }}", style = MaterialTheme.typography.bodySmall, color = s.fg3)
     }
     if (state.usage.isEmpty()) Text("아직 모델을 호출하지 않았습니다.", style = MaterialTheme.typography.bodySmall, color = s.fg3)
@@ -225,7 +225,7 @@ private fun UsagePage(state: UiState) {
 private fun AboutPage(state: UiState, model: AppModel) {
     val s = LocalAeonStatus.current
     Card {
-        Text("서버", style = MaterialTheme.typography.titleMedium)
+        Text("연결된 컴퓨터", style = MaterialTheme.typography.titleMedium)
         Text(state.serverUrl, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
         state.status?.let { Text("작업 ${state.tasks.size}개 · 키 저장 위치: ${it.secretsBackend}", style = MaterialTheme.typography.bodySmall, color = s.fg3) }
     }

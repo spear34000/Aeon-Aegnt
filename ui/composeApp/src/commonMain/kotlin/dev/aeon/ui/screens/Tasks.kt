@@ -110,7 +110,7 @@ fun TaskDetailPanel(state: UiState, model: AppModel, onBack: () -> Unit, modifie
             Spacer(Modifier.weight(1f))
             Text(koreanClock(d.updatedAt), style = MaterialTheme.typography.bodySmall, color = s.fg3)
         }
-        val report = d.result?.takeIf { it.isNotBlank() } ?: d.error?.takeIf { it.isNotBlank() }
+        val report = d.result?.takeIf { it.isNotBlank() } ?: d.error?.takeIf { it.isNotBlank() }?.let { friendlyError(it) }
         if (report != null) {
             Card {
                 Text(if (d.status == "FAILED") "실패 이유" else "에이전트 보고", style = MaterialTheme.typography.labelLarge, color = s.fg3)

@@ -166,7 +166,7 @@ private fun ChatTopBar(state: UiState, model: AppModel) {
     val s = LocalAeonStatus.current
     val busy = state.tasks.any { it.status == "RUNNING" || it.status == "PENDING" || it.status == "RETRY_WAIT" }
     val (dot, text) = when {
-        state.connection !is Connection.Connected -> s.danger to "서버에 연결되지 않음"
+        state.connection !is Connection.Connected -> s.danger to "연결되지 않음"
         state.pendingCount > 0 -> s.warn to "승인을 기다리는 중"
         busy -> MaterialTheme.colorScheme.primary to "작업 중"
         else -> s.ok to state.connectedText
@@ -353,7 +353,7 @@ fun AgentHubScreen(state: UiState, model: AppModel, modifier: Modifier = Modifie
         }
         Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             StatCard("모델 호출", "${ok.size}번", Modifier.weight(1f))
-            StatCard("입력+출력 토큰", "${ok.sumOf { it.inputTokens + it.outputTokens }}", Modifier.weight(1f))
+            StatCard("사용한 토큰", "${ok.sumOf { it.inputTokens + it.outputTokens }}", Modifier.weight(1f))
         }
         GroupHeader("설정")
         ListSurface {
