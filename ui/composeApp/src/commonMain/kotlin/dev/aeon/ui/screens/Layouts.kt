@@ -90,11 +90,11 @@ fun AppRoot(model: AppModel, shell: @Composable (UiState, AppModel) -> Unit) {
                 }
                 val coaching = screen == RootScreen.Main && (setup.step == SetupStep.Coach || setup.replayCoach)
                 val canGoBack = when (screen) {
-                    RootScreen.Intro -> setup.introPage > 0
-                    RootScreen.Welcome, RootScreen.Terms, RootScreen.Profile, RootScreen.Where, RootScreen.Guide, RootScreen.Device, RootScreen.Model -> true
+                    RootScreen.Intro -> setup.introPage > 0 || !setup.replayIntro
+                    RootScreen.Terms, RootScreen.Profile, RootScreen.Where, RootScreen.Guide, RootScreen.Device, RootScreen.Model -> true
                     RootScreen.Connect -> setup.step == SetupStep.Connect
                     RootScreen.Main -> coaching && setup.coachIndex > 0
-                    RootScreen.Splash -> false
+                    RootScreen.Splash, RootScreen.Welcome -> false
                 }
                 PlatformBackHandler(enabled = canGoBack) { if (coaching) model.setCoachIndex(setup.coachIndex - 1) else model.setupBack() }
                 AnimatedContent(

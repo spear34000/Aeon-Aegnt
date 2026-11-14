@@ -1,3 +1,4 @@
+import { NOT_WORD, NOT_WORD_OR_SPACE } from "../core/word-chars.ts";
 /**
  * Text helpers for the feed pipeline: reading an article page (with its character set), and the plain checks the reviewer
  * relies on. Nothing here calls a model: each check is a fixed rule that can be tested with a fixed input.
@@ -62,7 +63,7 @@ export function numbersIn(s: string): Set<string> {
   return new Set((plain.match(/\d+(?:\.\d+)?/g) ?? []).map((n) => String(Number(n))));
 }
 
-const letters = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+const letters = (s: string) => s.toLowerCase().replace(NOT_WORD, "");
 
 /** Sørensen–Dice similarity of two texts by pairs of characters, 0 to 1. Spaces and punctuation do not count. */
 export function dice(a: string, b: string): number {
@@ -86,7 +87,7 @@ export function dice(a: string, b: string): number {
 
 /** The longest stretch a text takes over from a source: in consecutive words, and in characters (spaces ignored). */
 export function longestSharedRun(text: string, source: string): { words: number; chars: number } {
-  const words = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter(Boolean);
+  const words = (s: string) => s.toLowerCase().replace(NOT_WORD_OR_SPACE, " ").split(/\s+/).filter(Boolean);
   const a = words(text);
   const b = words(source);
   let w = 0;
