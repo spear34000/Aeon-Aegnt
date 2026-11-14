@@ -20,7 +20,12 @@ if (!res.ok || !res.body) throw new Error(`download failed: ${res.status}`);
 await pipeline(res.body, createWriteStream(zip));
 if (statSync(zip).size !== SIZE) throw new Error(`unexpected size ${statSync(zip).size}, expected ${SIZE}`);
 mkdirSync(join(work, "x"));
-execFileSync("tar", ["-xf", zip, "-C", join(work, "x")], { stdio: "inherit" });
+// Windows and macOS ship a tar that reads zip files; GNU tar (Linux) does not, so unzip takes over there.
+try {
+  execFileSync("tar", ["-xf", zip, "-C", join(work, "x")], { stdio: "ignore" });
+} catch {
+  execFileSync("unzip", ["-q", zip, "-d", join(work, "x")], { stdio: "inherit" });
+}
 rmSync(dest, { recursive: true, force: true });
 mkdirSync(join(dest, "bin"), { recursive: true });
 cpSync(join(work, "x", "include"), join(dest, "include"), { recursive: true });
