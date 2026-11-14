@@ -615,7 +615,7 @@ export class AeonServer {
         if (!this.canAdmin(req, deviceId)) throw new HttpError(403, "this device is not allowed to change routines");
       };
       const now = this.clock.now();
-      const view = () => ({ routines: store.list().map((r) => ({ ...r, nextRunAt: r.enabled ? nextDueAt(r.schedule, now) : null })), runsToday: store.runsToday(now), cap: DAILY_RUN_CAP, utcOffsetMinutes: -new Date(now).getTimezoneOffset() });
+      const view = () => ({ routines: store.list().map((r) => ({ ...r, nextRunAt: r.enabled ? nextDueAt(r.schedule, now) : null })), runsToday: store.runsToday(now), cap: DAILY_RUN_CAP, utcOffsetMinutes: 0 - new Date(now).getTimezoneOffset() });
       if (!id && method === "GET") return this.json(res, 200, view());
       if (!id && method === "POST") {
         admin();
