@@ -36,4 +36,15 @@ internal fun friendlyProblem(raw: String): Problem {
 
 internal fun friendlyError(raw: String): String = friendlyProblem(raw).text
 
+/**
+ * Why the agent cannot use an AI yet, as the server words it (`Provider 'exaone' needs EXAONE_API_KEY in the environment.`).
+ * That names environment variables and commands, which mean nothing to most people: they are told what is missing and where to fix it.
+ */
+internal fun friendlySetupProblem(raw: String): String = when {
+    "KEY" in raw.uppercase() || "needs" in raw -> "AI 서비스에 연결할 접속 키가 아직 없어요. AI 설정에서 키를 넣어 주세요."
+    "consent" in raw.lowercase() -> "이 AI에 내용을 보내도 되는지 허락이 필요해요. AI 설정에서 허락해 주세요."
+    raw.any { it in '가'..'힣' } -> raw
+    else -> "아직 쓸 수 있는 AI가 없어요. AI 설정에서 하나를 골라 주세요."
+}
+
 private val MODEL_ERROR = Regex("^[A-Za-z0-9._-]+: (auth|consent_required|bad_request|network|timeout|server|unavailable|invalid_response|truncated|rate_limited|quota_exhausted): ")

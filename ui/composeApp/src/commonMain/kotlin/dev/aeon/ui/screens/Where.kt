@@ -304,8 +304,8 @@ fun ModelStepScreen(state: UiState, model: AppModel) {
             AeonButton("나중에 하기", { model.finishModelStep() }, Modifier.fillMaxWidth(), kind = ButtonKind.Ghost)
         },
     ) {
-        StepHeading("어떤 AI를 쓸까요?", "에이전트가 쓸 모델을 골라요. 키는 이 기기와 에이전트 사이에서만 암호화해서 보내요.")
-        state.status?.setupProblem?.let { Text(it, Modifier.padding(top = 16.dp), style = MaterialTheme.typography.bodySmall, color = LocalAeonStatus.current.fg3) }
+        StepHeading("어떤 AI를 쓸까요?", "에이전트가 쓸 AI를 골라요. 접속 키는 이 기기에서 에이전트로 안전하게 보내요.")
+        state.status?.setupProblem?.let { Text(friendlySetupProblem(it), Modifier.padding(top = 16.dp), style = MaterialTheme.typography.bodySmall, color = LocalAeonStatus.current.fg3) }
         Spacer(Modifier.height(16.dp))
     }
 }

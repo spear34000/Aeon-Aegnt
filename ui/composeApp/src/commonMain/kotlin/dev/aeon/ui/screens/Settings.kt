@@ -232,7 +232,7 @@ private fun AboutPage(state: UiState, model: AppModel) {
         Text(state.serverUrl, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
         state.status?.let { Text("작업 ${state.tasks.size}개 · 키 저장 위치: ${it.secretsBackend}", style = MaterialTheme.typography.bodySmall, color = s.fg3) }
     }
-    state.status?.setupProblem?.let { Banner("설정 필요: $it", Tone.Warn, "•") }
+    state.status?.setupProblem?.let { Banner(friendlySetupProblem(it), Tone.Warn, "•") }
     AeonButton("이 기기 연결 끊기", { model.unpair() }, kind = ButtonKind.Secondary, modifier = Modifier.widthIn(min = 200.dp))
     
 }

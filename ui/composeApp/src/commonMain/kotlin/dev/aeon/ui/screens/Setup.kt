@@ -263,11 +263,11 @@ private val INTRO = listOf(
         }
         ArtLabel("내 컴퓨터")
         ArtRow(AeonIcons.File, "작업 폴더", "내 문서")
-        ArtRow(AeonIcons.Key, "API 키", "암호화 보관")
+        ArtRow(AeonIcons.Key, "접속 키", "안전하게 보관")
         ArtRow(AeonIcons.Shield, "기록", "내 컴퓨터에만")
     },
-    IntroPage("모델과 도구는\n내가 골라요", "쓸 모델과 연동, 스킬을 직접 고르고 만들어요.") {
-        Text("모델", style = MaterialTheme.typography.titleLarge)
+    IntroPage("AI와 도구는\n내가 골라요", "쓸 AI와 연동, 스킬을 직접 고르고 만들어요.") {
+        Text("AI", style = MaterialTheme.typography.titleLarge)
         ArtRow(AeonIcons.Cpu, "Solar Pro 4", "쓰는 중", ok = true)
         Segmented(listOf<Pair<String?, String>>("auto" to "자동", "low" to "낮음", "mid" to "보통", "high" to "높음"), "high") {}
         ArtRow(AeonIcons.Cpu, "Solar Mini 4")

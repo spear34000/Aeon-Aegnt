@@ -5,6 +5,7 @@ import dev.aeon.ui.screens.GOAL_LIMIT
 import dev.aeon.ui.screens.friendlyError
 import dev.aeon.ui.screens.goalTooLong
 import dev.aeon.ui.screens.friendlyProblem
+import dev.aeon.ui.screens.friendlySetupProblem
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -38,6 +39,16 @@ class CopyTest {
         }
         assertEquals("인터넷에 연결되지 않아 AI 서비스에 닿지 못했어요. 연결을 확인하고 다시 해 보세요.", friendlyError("exaone: network: network error: fetch failed"))
         assertTrue(friendlyError("exaone: weird: x").startsWith("문제가 생겨서 멈췄어요."), "an unknown kind is not mistaken for a known one")
+    }
+
+    @Test
+    fun aMissingAiIsExplainedWithoutEnvironmentVariablesOrCommands() {
+        for (raw in listOf("Provider 'exaone' needs EXAONE_API_KEY in the environment.", "Provider 'Upstage' needs AEON_EP_UPSTAGE_KEY.")) {
+            val t = friendlySetupProblem(raw)
+            assertTrue("키" in t && "_KEY" !in t && "environment" !in t, t)
+        }
+        assertTrue("허락" in friendlySetupProblem("no model provider is permitted: consent is missing"))
+        assertTrue(friendlySetupProblem("Unknown provider: x").any { it in '가'..'힣' })
     }
 
     @Test
