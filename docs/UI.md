@@ -111,7 +111,7 @@ Kotlin 2.4.21 · Compose Multiplatform 1.12.2 · Gradle 9.9.0 · Ktor 3.6.1 · k
 
 ## Copy rules (what the app says to an ordinary user)
 
-Applied to old and new screens alike (2026-11-15):
+Applied to old and new screens alike (2026-11-14):
 
 1. Plain, friendly Korean (해요체). No developer words where an everyday one exists: "컴퓨터" instead of "서버", "외부 도구" instead of "MCP 서버", "격리된 상자 (Docker)" where the isolation matters.
 2. One sentence says what happened or what will happen. A second line is kept only if the owner needs it to decide or to avoid a surprise (cost, privacy, what is deleted). Hints that restate the screen are removed.
