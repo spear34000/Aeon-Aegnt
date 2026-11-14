@@ -458,6 +458,7 @@ export class AeonServer {
     if (path === "/v1/tasks" && method === "POST") {
       const b = this.parseJson(raw);
       if (typeof b.goal !== "string" || b.goal.trim().length === 0 || b.goal.length > 4000) throw new HttpError(400, "goal must be a non-empty string (max 4000 chars)");
+      if (b.criteria !== undefined && !Array.isArray(b.criteria)) throw new HttpError(400, "criteria must be a list");
       const criteria = (Array.isArray(b.criteria) ? b.criteria : []).map((c) => parseCriterion(c, "user"));
       if (criteria.some((c) => c === null)) throw new HttpError(400, "invalid criteria");
       let runAfter: number | undefined;

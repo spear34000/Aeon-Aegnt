@@ -54,7 +54,9 @@ export class ModelError extends Error {
       this.kind === "server" ||
       this.kind === "network" ||
       this.kind === "timeout" ||
-      this.kind === "unavailable"
+      this.kind === "unavailable" ||
+      // A reply that is not the expected JSON (a half-sent body, an error page from a proxy) is nearly always a passing fault.
+      this.kind === "invalid_response"
     );
   }
 }

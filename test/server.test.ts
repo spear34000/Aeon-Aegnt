@@ -236,7 +236,7 @@ describe("Tasks, approvals and events through the API", () => {
   it("validates task input", async () => {
     const t = await boot();
     const d = await pairedDevice(t);
-    for (const body of [{}, { goal: "" }, { goal: 5 }, { goal: "x", criteria: [{ kind: "rm_rf" }] }, { goal: "x", runAfter: "soon" }]) {
+    for (const body of [{}, { goal: "" }, { goal: 5 }, { goal: "x", criteria: [{ kind: "rm_rf" }] }, { goal: "x", criteria: "file_exists" }, { goal: "x", criteria: {} }, { goal: "x", runAfter: "soon" }]) {
       assert.equal((await d.call(t.base, t.clock, "POST", "/v1/tasks", body)).status, 400, JSON.stringify(body));
     }
     assert.equal((await d.call(t.base, t.clock, "GET", "/v1/tasks/task_doesnotexist")).status, 404);

@@ -135,8 +135,10 @@ export class Agent implements TaskRunner {
       return await this.act(current, ctx);
     } catch (e) {
       if (e instanceof QuotaWaitError) {
-        await ctx.audit("quota_wait", { until: e.until, providers: e.providers });
-        return { kind: "wait_quota", until: e.until, note: `waiting for model quota (${e.providers.join(", ")})` };
+        await ctx.audit("quota_wait", { until: e.until, providers: e.providers, reason: e.reason });
+        // The apps read the first word: `busy` (the service turned the call away for now) or `limit` (an allowance is used up).
+        const note = e.reason === "limit" ? "limit: the model's allowance is used up for now" : "busy: the model service is busy; trying again soon";
+        return { kind: "wait_quota", until: e.until, note };
       }
       if (e instanceof ModelError) {
         const msg = this.cfg.redactor.redact(`${e.provider}: ${e.kind}: ${e.message}`);
@@ -195,6 +197,7 @@ export class Agent implements TaskRunner {
       "another way or finish and explain.",
       "If a detail you need is missing and you cannot find it with your tools, ask the owner ONE short question instead of guessing: {\"action\":\"ask\",\"question\":\"...\",\"options\":[\"likely answer\",\"another\"]}.",
       "Do not ask what you can find out yourself, what the owner already told you, or for permission (approvals are asked separately). At most 3 questions.",
+      "Write every text meant for the owner (questions, the final summary) in the language the owner's goal is written in, unless the owner preferences below name another language.",
       "Available tools:",
       toolLines || "(none)",
       ...skillCatalogLines(this.cfg.skills?.() ?? []),

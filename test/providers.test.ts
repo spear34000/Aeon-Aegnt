@@ -265,3 +265,76 @@ describe("ModelRouter: consent, fallback, quotas", () => {
     assert.equal((await router.chat({ messages: [] }, { taskId: null })).content, "3");
   });
 });
+
+describe("ModelRouter: a busy service (a 429 that names no time to wait)", () => {
+  // The real EXAONE service answers "service is busy, too many concurrent requests" to about every second call.
+  const busy = (id: string) => new ModelError("rate_limited", id, "HTTP 429: service is busy, too many concurrent requests");
+  const mk = (a: MockProvider, waits: number[]) => {
+    const clock = new ManualClock();
+    const store = new MemoryStore();
+    const router = new ModelRouter({
+      providers: [a],
+      fallbackAllowed: false,
+      dataConsent: new Set([a.id]),
+      store,
+      clock,
+      busyRetry: { attempts: 4, baseMs: 1000, maxMs: 8000, jitter: 0 },
+      sleep: async (ms) => void waits.push(ms),
+    });
+    return { clock, store, router };
+  };
+
+  it("tries again right away, a little later each time, and the caller never notices", async () => {
+    const waits: number[] = [];
+    const a = new MockProvider("a", [busy("a"), busy("a"), "fine"]);
+    const { router, store } = mk(a, waits);
+    assert.equal((await router.chat({ messages: [] }, { taskId: "t" })).content, "fine");
+    assert.deepEqual(waits, [1000, 2000]);
+    assert.equal(a.calls.length, 3);
+    assert.deepEqual((await store.listUsage()).map((u) => u.ok), [true], "only the answer is recorded as a call");
+  });
+
+  it("after the tries are used up the task pauses for 20 seconds, not a minute, and the provider is left alone meanwhile", async () => {
+    const waits: number[] = [];
+    const a = new MockProvider("a", [busy("a"), busy("a"), busy("a"), busy("a"), busy("a"), "later"]);
+    const { router, clock } = mk(a, waits);
+    await assert.rejects(router.chat({ messages: [] }, { taskId: "t" }), (e: unknown) => {
+      assert.ok(e instanceof QuotaWaitError);
+      assert.equal(e.until, clock.now() + 20_000);
+      assert.equal(e.reason, "busy");
+      return true;
+    });
+    assert.deepEqual(waits, [1000, 2000, 4000, 8000]);
+    assert.equal(a.calls.length, 5);
+    await assert.rejects(router.chat({ messages: [] }, { taskId: "t" }), QuotaWaitError);
+    assert.equal(a.calls.length, 5, "not called again while it is pausing");
+    clock.advance(20_000);
+    assert.equal((await router.chat({ messages: [] }, { taskId: "t" })).content, "later");
+  });
+
+  it("a 429 that names a time is honoured, not retried in place", async () => {
+    const waits: number[] = [];
+    const a = new MockProvider("a", [new ModelError("rate_limited", "a", "429", { retryAfterMs: 30_000 })]);
+    const { router, clock } = mk(a, waits);
+    await assert.rejects(router.chat({ messages: [] }, { taskId: "t" }), (e: unknown) => e instanceof QuotaWaitError && e.until === clock.now() + 30_000);
+    assert.deepEqual(waits, []);
+    assert.equal(a.calls.length, 1);
+  });
+
+  it("a used-up daily allowance is reported as a limit, not as a busy service", async () => {
+    const waits: number[] = [];
+    const a = new MockProvider("a", [new ModelError("quota_exhausted", "a", "429 day window used up")]);
+    const { router } = mk(a, waits);
+    await assert.rejects(router.chat({ messages: [] }, { taskId: "t" }), (e: unknown) => e instanceof QuotaWaitError && e.reason === "limit");
+    assert.deepEqual(waits, []);
+  });
+
+  it("other failures are not retried in place", async () => {
+    const waits: number[] = [];
+    const a = new MockProvider("a", [new ModelError("server", "a", "HTTP 500")]);
+    const { router } = mk(a, waits);
+    await assert.rejects(router.chat({ messages: [] }, { taskId: "t" }), ModelError);
+    assert.deepEqual(waits, []);
+    assert.equal(a.calls.length, 1);
+  });
+});
