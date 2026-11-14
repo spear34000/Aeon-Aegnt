@@ -96,7 +96,8 @@ compose.desktop {
             // jpackage builds only for the machine it runs on: Windows x64/ARM64 give msi/exe, Linux gives deb/rpm.
             targetFormats(TargetFormat.Msi, TargetFormat.Exe, TargetFormat.Deb, TargetFormat.Rpm)
             packageName = "Aeon"
-            packageVersion = "0.1.0"
+            // The release workflow passes the numeric part of the tag (-PappVersion=1.2.3); jpackage accepts only MAJOR.MINOR.PATCH.
+            packageVersion = (findProperty("appVersion") as String?) ?: "0.1.0"
         }
     }
 }

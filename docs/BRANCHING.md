@@ -32,6 +32,7 @@ Decision D28. The aim: `main` always works, every change reaches it through a sh
 - **Merging:** squash and merge commit are allowed, rebase-merge is off. Merged branches are deleted automatically.
 - **Code owners** (`.github/CODEOWNERS`) are asked to review changes to the policy engine, the sandbox and file/network guards, the server, skills, memory, the decision log, the threat model and CI.
 - **Pull requests from forks** need the maintainer's approval before their workflows run, and workflows get a read-only token.
+- **Releases** (decision D30, [RELEASING.md](RELEASING.md)): `v*` tags can be created by administrators only; the release workflow's signing key sits in an environment that needs the owner's approval.
 - **Security:** private vulnerability reporting, secret scanning with push protection, Dependabot alerts and updates are on.
 
 What is *not* enforced: that every pull request has a test or a doc update (the template asks, a reviewer checks), and anything about contributors' machines.
