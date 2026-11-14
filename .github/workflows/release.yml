@@ -72,7 +72,7 @@ jobs:
       - name: Node.js for Mobile (the agent that runs on the phone)
         run: node tools/fetch-nodejs-mobile.mjs
       - name: Android SDK pieces the build asks for
-        run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-37" "ndk;29.0.14206865"'
+        run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-37.0" "ndk;29.0.14206865"'
       - name: Build (debug key, installable for testing)
         working-directory: ui
         run: bash ./gradlew :androidApp:assembleDebug -PappVersion=${{ needs.version.outputs.version }} -PappVersionCode=${{ needs.version.outputs.code }} --console=plain
@@ -117,7 +117,7 @@ jobs:
         run: node tools/fetch-nodejs-mobile.mjs
       - name: Android SDK pieces the build asks for
         if: steps.key.outputs.have == 'true'
-        run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-37" "ndk;29.0.14206865"'
+        run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-37.0" "ndk;29.0.14206865"'
       - name: Build and sign
         if: steps.key.outputs.have == 'true'
         working-directory: ui
