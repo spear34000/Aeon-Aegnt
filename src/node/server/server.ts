@@ -103,7 +103,7 @@ function taskSummary(t: Task) {
 }
 
 /** Tools whose approval changes what steers every later task. */
-const STANDING_TOOLS = new Set(["memory.save", "skill.create", "skill.update"]);
+const STANDING_TOOLS = new Set(["memory.save", "memory.forget", "skill.create", "skill.update"]);
 
 export class AeonServer {
   private readonly o: AeonServerOptions;
@@ -640,26 +640,95 @@ export class AeonServer {
     }
 
     // What the owner wants remembered across tasks: read by any paired device, changed only by the machine or an admin device.
-    const memoryMatch = /^\/v1\/memory(?:\/(mem_[a-f0-9]{10}))?$/.exec(path);
+    // The agent only suggests (proposals); nothing it suggests is kept or used before the owner accepts it here.
+    const memoryMatch = /^\/v1\/memory(?:\/(mem_[a-f0-9]{10})|\/proposals\/(prop_[a-f0-9]{10})(?:\/(accept))?)?$/.exec(path);
     if (memoryMatch) {
       const memory = rt.memory ?? (this.memoryFallback ??= new MemoryService(join(this.o.configDir, "memory.json"), () => this.clock.now()));
       const id = memoryMatch[1];
-      if (!id && method === "GET") return this.json(res, 200, { items: memory.list().reverse().sort((a, b) => b.createdAt - a.createdAt), max: MEMORY_MAX_ITEMS, textMax: MEMORY_TEXT_MAX });
-      if (!id && method === "POST") {
+      const proposalId = memoryMatch[2];
+      const accept = memoryMatch[3] === "accept";
+      const deny = () => {
         if (!this.canAdmin(req, deviceId)) throw new HttpError(403, "this device is not allowed to change what is remembered");
+      };
+      /** A period for a memory: a date as YYYY-MM-DD (end of that day), null for no end, or undefined for "leave as it is". */
+      const until = (v: unknown): number | null | undefined => {
+        if (v === undefined) return undefined;
+        if (v === null) return null;
+        const m = typeof v === "string" ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(v) : null;
+        const t = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 23, 59, 59).getTime() : NaN;
+        if (!Number.isFinite(t) || new Date(t).getDate() !== Number(m![3])) throw new HttpError(400, 'expires must be a date as "YYYY-MM-DD" or null');
+        return t;
+      };
+      const view = () => {
+        memory.purgePast();
+        const all = memory.list();
+        const at = this.clock.now();
+        const newest = (xs: typeof all) => xs.reverse().sort((x, y) => y.createdAt - x.createdAt);
+        return {
+          items: newest(all.filter((i) => !memory.isPast(i, at))),
+          past: newest(all.filter((i) => memory.isPast(i, at))),
+          proposals: memory.proposals().reverse(),
+          tidy: memory.tidy(),
+          max: MEMORY_MAX_ITEMS, textMax: MEMORY_TEXT_MAX,
+        };
+      };
+      if (!id && !proposalId && method === "GET") return this.json(res, 200, view());
+      if (!id && !proposalId && method === "POST") {
+        deny();
         const b = this.parseJson(raw);
         const text = MemoryService.clean(b.text);
         if (!text) throw new HttpError(400, "text must be a sentence of 3 to 300 characters");
         if (rt.redactor.redact(text) !== text) throw new HttpError(400, "that looks like a secret (a key, token or password): it would be sent to the model with every task");
         if (b.kind !== undefined && b.kind !== "preference" && b.kind !== "fact") throw new HttpError(400, 'kind must be "preference" or "fact"');
-        return this.json(res, 201, { item: memory.add(text, b.kind === "preference" ? "preference" : "fact", { type: "owner" }) });
+        const end = until(b.expires);
+        return this.json(res, 201, { item: memory.add(text, b.kind === "preference" ? "preference" : "fact", { type: "owner" }, end ? { expiresAt: end } : {}) });
+      }
+      if (id && method === "PATCH") {
+        deny();
+        const b = this.parseJson(raw);
+        const patch: { text?: string; kind?: "preference" | "fact"; expiresAt?: number | null } = {};
+        if (b.text !== undefined) {
+          const text = MemoryService.clean(b.text);
+          if (!text) throw new HttpError(400, "text must be a sentence of 3 to 300 characters");
+          if (rt.redactor.redact(text) !== text) throw new HttpError(400, "that looks like a secret (a key, token or password): it would be sent to the model with every task");
+          patch.text = text;
+        }
+        if (b.kind !== undefined) {
+          if (b.kind !== "preference" && b.kind !== "fact") throw new HttpError(400, 'kind must be "preference" or "fact"');
+          patch.kind = b.kind;
+        }
+        const end = until(b.expires);
+        if (end !== undefined) patch.expiresAt = end;
+        const item = memory.update(id, patch);
+        if (!item) throw new HttpError(404, "nothing remembered with that id");
+        return this.json(res, 200, { item, ...view() });
       }
       if (id && method === "DELETE") {
-        if (!this.canAdmin(req, deviceId)) throw new HttpError(403, "this device is not allowed to change what is remembered");
+        deny();
         if (!memory.remove(id)) throw new HttpError(404, "nothing remembered with that id");
         return this.json(res, 200, { ok: true });
       }
-      throw new HttpError(405, id ? "use DELETE" : "use GET or POST");
+      if (proposalId && accept && method === "POST") {
+        deny();
+        const b = this.parseJson(raw);
+        let text: string | undefined;
+        if (b.text !== undefined) {
+          const t = MemoryService.clean(b.text);
+          if (!t) throw new HttpError(400, "text must be a sentence of 3 to 300 characters");
+          if (rt.redactor.redact(t) !== t) throw new HttpError(400, "that looks like a secret (a key, token or password): it would be sent to the model with every task");
+          text = t;
+        }
+        const end = until(b.expires);
+        const item = memory.accept(proposalId, text, end ?? undefined);
+        if (!item) throw new HttpError(404, "no such suggestion");
+        return this.json(res, 200, { item, ...view() });
+      }
+      if (proposalId && !accept && method === "DELETE") {
+        deny();
+        if (!memory.ignore(proposalId)) throw new HttpError(404, "no such suggestion");
+        return this.json(res, 200, view());
+      }
+      throw new HttpError(405, "that method is not allowed here");
     }
 
     const lib = rt.skills ?? this.o.connections?.library;

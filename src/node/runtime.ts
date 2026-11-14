@@ -179,7 +179,9 @@ export function createRuntime(opts: RuntimeOptions) {
   }
 
   const memory = opts.memoryFile ? new MemoryService(opts.memoryFile, () => clock.now()) : undefined;
-  if (memory) for (const t of memoryTools(memory, redactor)) tools.register(t);
+  // Earlier tasks (finished ones) can be searched, read only, through memory.search.
+  const pastTasks = async () => (await store.listTasks({ status: ["COMPLETED"] })).map((t) => ({ goal: t.goal, result: t.result ?? "", at: t.updatedAt }));
+  if (memory) for (const t of memoryTools(memory, redactor, pastTasks, () => clock.now())) tools.register(t);
 
   const policy = new PolicyEngine(opts.policyRules ?? DEFAULT_RULES);
   const agent = new Agent({
@@ -200,6 +202,8 @@ export function createRuntime(opts: RuntimeOptions) {
     redactor,
     holderId: opts.holderId ?? `local-${process.pid}`,
     ...(opts.leaseTtlMs ? { leaseTtlMs: opts.leaseTtlMs } : {}),
+    // What a finished task suggests keeping waits in the memory page for the owner; nothing is kept and no task sees it until accepted.
+    ...(memory ? { afterDone: (task: { id: string }, done: { remember: unknown }) => void memory.propose(done.remember, task.id, (text: string) => redactor.redact(text) !== text) } : {}),
   });
   return { engine, store, router, tools, policy, guard, redactor, clock, skills, memory };
 }

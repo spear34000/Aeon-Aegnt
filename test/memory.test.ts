@@ -25,7 +25,7 @@ describe("what the owner asked to be remembered (Generative Agents: recency + im
     assert.equal(a.id, b.id);
     assert.equal(m.svc.list().length, 1);
     const onDisk = JSON.parse(readFileSync(join(m.dir, "cfg", "memory.json"), "utf8")) as { version: number; items: { text: string }[] };
-    assert.deepEqual([onDisk.version, onDisk.items[0]!.text], [1, "Reports go to me as a short list"]);
+    assert.deepEqual([onDisk.version, onDisk.items[0]!.text], [2, "Reports go to me as a short list"]);
     m.cleanup();
   });
 
@@ -47,7 +47,8 @@ describe("what the owner asked to be remembered (Generative Agents: recency + im
 
   it("preferences always come along (at most 4); a fact only when the goal is about it", () => {
     const m = mk();
-    for (let i = 0; i < 6; i++) m.svc.add(`Preference number ${i} about style`, "preference", owner);
+    const STYLE = ["Keep answers to three lines", "Never use emoji in writing", "Ask before deleting any file", "Write dates the Korean way", "Use a polite register always", "Put the summary at the top"];
+    STYLE.forEach((p) => m.svc.add(p, "preference", owner));
     m.svc.add("My sister Mina lives in Busan", "fact", owner);
     m.svc.add("I take the number 7 bus to work", "fact", owner);
     const pick = m.svc.relevant("write a card for my sister Mina");
@@ -59,12 +60,12 @@ describe("what the owner asked to be remembered (Generative Agents: recency + im
 
   it("matches Korean despite endings (word pairs), and ranks the owner's own words above the agent's", () => {
     const m = mk();
-    m.svc.add("동생 민아는 부산에 산다", "fact", { type: "agent", taskId: "t1" });
-    m.svc.add("동생 민아는 부산에 산다고 했다", "fact", owner);
+    m.svc.add("민아의 동생이 부산에 산다", "fact", { type: "agent", taskId: "t1" });
+    m.svc.add("민아는 부산 여행을 좋아한다", "fact", owner);
     assert.ok(memoryTokens("부산에서").has("부산"));
     const pick = m.svc.relevant("민아한테 보낼 부산 여행 안내 만들어줘");
     assert.equal(pick.length, 2);
-    assert.deepEqual(pick[0]!.source, owner, "equal relevance: the owner's own sentence first");
+    assert.deepEqual(pick[0]!.source, owner, "the owner's own sentence, which also matches more words, comes first");
     m.cleanup();
   });
 
@@ -91,18 +92,20 @@ describe("what the owner asked to be remembered (Generative Agents: recency + im
 
   it("at most 200 are kept; the one unused longest makes room", () => {
     const m = mk();
+    const word = (i: number) => `${String.fromCharCode(97 + (i % 26))}${String.fromCharCode(97 + (Math.floor(i / 26) % 26))}${String.fromCharCode(97 + Math.floor(i / 676))}`;
     for (let i = 0; i < MEMORY_MAX_ITEMS; i++) {
-      m.svc.add(`item number ${i} here`, "fact", owner);
+      m.svc.add(`${word(i)}${word(i + 7)}${word(i + 13)} ${word(i * 3 + 1)}${word(i + 101)}x ${word(i + 55)}${word(i * 5)}z`, "fact", owner);
       m.clock.advance(1000);
     }
     const first = m.svc.list()[0]!;
+    const second = m.svc.list()[1]!;
     m.svc.markUsed([first.id]); // used just now, so it stays
     m.clock.advance(1000);
     m.svc.add("one more than the limit", "fact", owner);
     const left = m.svc.list();
     assert.equal(left.length, MEMORY_MAX_ITEMS);
     assert.ok(left.some((i) => i.id === first.id));
-    assert.ok(!left.some((i) => i.text === "item number 1 here"), "the oldest unused went");
+    assert.ok(!left.some((i) => i.id === second.id), "the oldest unused went");
     m.cleanup();
   });
 

@@ -653,6 +653,51 @@ describe("Setting things up from any paired device", () => {
     await t.close();
   });
 
+  it("memory suggestions, corrections and past memories: any device reads them, only the machine or an admin device changes them", async () => {
+    const t = await boot();
+    const call = (m: string, p: string, b?: Record<string, unknown>) => t.owner.call(t.base, t.clock, m, p, b);
+    const kept = (await call("POST", "/v1/memory", { text: "My sister Mina lives in Busan", expires: "2099-01-01" })).body.item;
+    assert.ok(kept.expiresAt > 0, "a memory can be added with an end date");
+    assert.equal((await call("POST", "/v1/memory", { text: "A fine sentence", expires: "tomorrow" })).status, 400);
+    const memory = t.rt.memory!;
+    const [fix, extra] = memory.propose([{ text: "My sister Mina lives in Daegu now" }, { text: "I am allergic to peanuts" }], "task_1");
+    const got = (await call("GET", "/v1/memory")).body;
+    assert.deepEqual([got.proposals.length, got.proposals.map((p: { replaces?: string }) => p.replaces).sort()], [2, [kept.id, undefined].sort()], "a close suggestion says which memory it corrects");
+
+    const ex = clientExchange(t.owner.serverKey);
+    const code = ex.open((await call("POST", "/v1/pairing-codes", { epk: ex.epk, admin: false })).body.sealed, `pairing-code|${t.owner.id}`);
+    const tablet = new Client("tablet");
+    await tablet.pair(t.base, code);
+    const tcall = (m: string, p: string, b?: Record<string, unknown>) => tablet.call(t.base, t.clock, m, p, b);
+    assert.equal((await tcall("GET", "/v1/memory")).body.proposals.length, 2, "any paired device reads");
+    for (const [m, p, b] of [["PATCH", `/v1/memory/${kept.id}`, { text: "Sneaky" }], ["POST", `/v1/memory/proposals/${fix!.id}/accept`, {}], ["DELETE", `/v1/memory/proposals/${extra!.id}`, undefined], ["POST", "/v1/memory", { text: "Sneaky addition" }]] as const) {
+      assert.equal((await tcall(m, p, b as Record<string, unknown> | undefined)).status, 403, `${m} ${p}`);
+    }
+    assert.equal(memory.proposals().length, 2, "nothing changed");
+
+    const acc = await call("POST", `/v1/memory/proposals/${fix!.id}/accept`, {});
+    assert.deepEqual([acc.status, acc.body.item.id, acc.body.item.text, acc.body.item.history[0].text, acc.body.proposals.length], [200, kept.id, "My sister Mina lives in Daegu now", "My sister Mina lives in Busan", 1]);
+    const ign = await call("DELETE", `/v1/memory/proposals/${extra!.id}`);
+    assert.deepEqual([ign.status, ign.body.proposals.length], [200, 0]);
+    assert.deepEqual(memory.propose([{ text: "I am allergic to peanuts" }], "task_2"), [], "a turned-down suggestion is not offered again");
+    assert.equal((await call("POST", "/v1/memory/proposals/prop_ffffffffff/accept", {})).status, 404);
+
+    const edit = await call("PATCH", `/v1/memory/${kept.id}`, { text: "My sister Mina lives in Ulsan", expires: null });
+    assert.deepEqual([edit.status, edit.body.item.expiresAt, edit.body.item.source, edit.body.item.history.length], [200, undefined, { type: "owner" }, 2]);
+    assert.equal((await call("PATCH", `/v1/memory/${kept.id}`, { text: "my password = hunter2hunter2" })).status, 400);
+    assert.equal((await call("PATCH", `/v1/memory/${kept.id}`, { kind: "love" })).status, 400);
+    assert.equal((await call("PATCH", "/v1/memory/mem_ffffffffff", { text: "Nothing here" })).status, 404);
+
+    // A memory that ran out is listed as past, then removed.
+    await call("PATCH", `/v1/memory/${kept.id}`, { expires: new Date(t.clock.now() + 86_400_000).toISOString().slice(0, 10) });
+    t.clock.advance(3 * 86_400_000);
+    const past = (await call("GET", "/v1/memory")).body;
+    assert.deepEqual([past.items.length, past.past.map((i: { id: string }) => i.id)], [0, [kept.id]]);
+    t.clock.advance(40 * 86_400_000);
+    assert.deepEqual((await call("GET", "/v1/memory")).body.past, [], "removed after thirty days");
+    await t.close();
+  });
+
   it("what the owner wants remembered: any device reads it, the machine or an admin device changes it, and the agent sees it", async () => {
     const t = await boot();
     const call = (method: string, path: string, body?: unknown) => t.owner.call(t.base, t.clock, method, path, body);
@@ -694,10 +739,10 @@ describe("Setting things up from any paired device", () => {
     const tablet = new Client("tablet");
     await tablet.pair(t.base, code);
     const mk = (id: string, tool: string) => t.rt.store.createApproval({ id, taskId: "t_none", actionKey: id, tool, summary: "x", risk: "external_effect", resources: [], irreversible: false, status: "pending", createdAt: t.clock.now(), expiresAt: t.clock.now() + 60_000 });
-    for (const [i, tool] of ["memory.save", "skill.create", "skill.update"].entries()) await mk(`appr_s${i}`, tool);
+    for (const [i, tool] of ["memory.save", "skill.create", "skill.update", "memory.forget"].entries()) await mk(`appr_s${i}`, tool);
     await mk("appr_plain", "fs.write");
     const decide = (who: Client, id: string, decision: string) => who.call(t.base, t.clock, "POST", `/v1/approvals/${id}/decide`, { decision });
-    for (const i of [0, 1, 2]) assert.equal((await decide(tablet, `appr_s${i}`, "approved")).status, 403, "a limited device cannot approve it");
+    for (const i of [0, 1, 2, 3]) assert.equal((await decide(tablet, `appr_s${i}`, "approved")).status, 403, "a limited device cannot approve it");
     assert.equal((await decide(tablet, "appr_s0", "denied")).status, 200, "but it can say no");
     assert.equal((await decide(t.owner, "appr_s1", "approved")).status, 200, "an admin device can approve");
     assert.equal((await decide(tablet, "appr_plain", "approved")).status, 200, "everything else is still decided from any paired device");
