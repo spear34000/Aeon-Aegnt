@@ -1,18 +1,18 @@
-# Code owners are asked to review a pull request that touches their files.
-# Everything: the maintainer.
-*                         @spear34000
+# Code owners review a pull request that touches their files; the branch rule needs one approval from a code owner who did not push last.
+# Everything: the two maintainers.
+*                         @spear34000 @sampple-korea
 
 # What decides what the agent may do, and what it may reach: changes here need the maintainer's eyes.
-/src/core/policy.ts       @spear34000
-/src/node/fs-guard.ts     @spear34000
-/src/node/net-guard.ts    @spear34000
-/src/node/server/         @spear34000
-/src/node/skill-*.ts      @spear34000
-/src/node/tools/          @spear34000
-/src/node/memory.ts       @spear34000
+/src/core/policy.ts       @spear34000 @sampple-korea
+/src/node/fs-guard.ts     @spear34000 @sampple-korea
+/src/node/net-guard.ts    @spear34000 @sampple-korea
+/src/node/server/         @spear34000 @sampple-korea
+/src/node/skill-*.ts      @spear34000 @sampple-korea
+/src/node/tools/          @spear34000 @sampple-korea
+/src/node/memory.ts       @spear34000 @sampple-korea
 
 # Decisions, threat model and the CI itself.
-/docs/DECISIONS.md        @spear34000
-/docs/THREAT_MODEL.md     @spear34000
-/.github/                 @spear34000
-/LICENSE                  @spear34000
+/docs/DECISIONS.md        @spear34000 @sampple-korea
+/docs/THREAT_MODEL.md     @spear34000 @sampple-korea
+/.github/                 @spear34000 @sampple-korea
+/LICENSE                  @spear34000 @sampple-korea

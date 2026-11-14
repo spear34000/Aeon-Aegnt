@@ -30,8 +30,10 @@ Decision D28. The aim: `main` always works, every change reaches it through a sh
 - **CI** (`.github/workflows/ci.yml`) runs on every pull request and on `main`: typecheck and tests of the core on Linux and Windows, and the Kotlin desktop tests plus the web compile. All three must pass to merge.
 - **`main` is protected:** changes arrive by pull request only, with one approval, resolved conversations and a branch that is up to date; no force-push, no deletion. The repository owner can override this for their own pull requests (administrator bypass); nobody else can.
 - **Merging:** squash and merge commit are allowed, rebase-merge is off. Merged branches are deleted automatically.
-- **Code owners** (`.github/CODEOWNERS`) are asked to review changes to the policy engine, the sandbox and file/network guards, the server, skills, memory, the decision log, the threat model and CI.
+- **Code owners** (`.github/CODEOWNERS`, the two maintainers) review changes to files they own, and the branch rule needs one approval from a code owner, not from whoever pushed last. They cover the policy engine, the sandbox and file/network guards, the server, skills, memory, the decision log, the threat model and CI.
 - **Pull requests from forks** need the maintainer's approval before their workflows run, and workflows get a read-only token.
+- **Releases** (decision D30, [RELEASING.md](RELEASING.md)): `v*` tags can be created by administrators only; the release workflow's signing key sits in an environment that needs the owner's approval.
+- **Actions** may use GitHub's own actions and `gradle/actions/*` only (anything else is refused until a maintainer allows it); **CodeQL** scans the Kotlin, TypeScript and workflow code.
 - **Security:** private vulnerability reporting, secret scanning with push protection, Dependabot alerts and updates are on.
 
 What is *not* enforced: that every pull request has a test or a doc update (the template asks, a reviewer checks), and anything about contributors' machines.
