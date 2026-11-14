@@ -69,6 +69,8 @@ jobs:
           distribution: temurin
           java-version: 21
       - uses: gradle/actions/setup-gradle@v4
+      - name: Node packages (the compiler for the agent that runs on the phone)
+        run: npm ci
       - name: Node.js for Mobile (the agent that runs on the phone)
         run: node tools/fetch-nodejs-mobile.mjs
       - name: Android SDK pieces the build asks for
@@ -112,6 +114,9 @@ jobs:
           java-version: 21
       - uses: gradle/actions/setup-gradle@v4
         if: steps.key.outputs.have == 'true'
+      - name: Node packages
+        if: steps.key.outputs.have == 'true'
+        run: npm ci
       - name: Node.js for Mobile
         if: steps.key.outputs.have == 'true'
         run: node tools/fetch-nodejs-mobile.mjs
@@ -156,7 +161,9 @@ jobs:
         include:
           - os: windows-latest
             tasks: ":composeApp:packageMsi :composeApp:packageExe"
-            files: "ui/composeApp/build/compose/binaries/main/msi/*.msi ui/composeApp/build/compose/binaries/main/exe/*.exe"
+            files: |
+              ui/composeApp/build/compose/binaries/main/msi/*.msi
+              ui/composeApp/build/compose/binaries/main/exe/*.exe
           - os: ubuntu-latest
             tasks: ":composeApp:packageDeb"
             files: "ui/composeApp/build/compose/binaries/main/deb/*.deb"
