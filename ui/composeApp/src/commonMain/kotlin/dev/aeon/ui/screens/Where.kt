@@ -1,6 +1,14 @@
 package dev.aeon.ui.screens
 
 import androidx.compose.foundation.background
+import dev.aeon.ui.platform.DEVICE_STAGES
+import dev.aeon.ui.state.SetupState
+import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -197,14 +205,82 @@ fun DeviceScreen(state: UiState, model: AppModel) {
                     Text("지금은 이렇게 쓸 수 있어요", style = MaterialTheme.typography.titleMedium)
                     Body("다른 컴퓨터에서 Aeon을 켜고 이 기기로 연결하면 이 기기에서 시키고 승인할 수 있어요.")
                 }
-                s.deviceError != null -> {
-                    Text("시작하지 못했어요", style = MaterialTheme.typography.titleMedium)
-                    Body(s.deviceError)
+                s.deviceError != null -> DeviceProgress(s, failed = true)
+                else -> DeviceProgress(s, failed = false)
+            }
+        }
+        if (here && s.deviceLog.isNotEmpty()) DeviceLog(s)
+    }
+}
+
+/** The steps of starting the agent on this device, each done, in progress, failed or waiting, with the reason when it failed. */
+@Composable
+private fun DeviceProgress(s: SetupState, failed: Boolean) {
+    val scheme = MaterialTheme.colorScheme
+    val status = LocalAeonStatus.current
+    Text(
+        when { failed -> "시작하지 못했어요"; s.deviceStarting -> "켜는 중…"; else -> "준비됐어요" },
+        style = MaterialTheme.typography.titleMedium,
+    )
+    if (failed) Body(s.deviceError.orEmpty())
+    else Body("처음에는 파일을 풀어서 조금 걸려요. 연결 코드는 앱이 직접 받아서 입력할 필요가 없어요.")
+    Column(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        DEVICE_STAGES.forEachIndexed { i, label ->
+            val done = i < s.deviceStage || (!s.deviceStarting && !failed && i <= s.deviceStage)
+            val current = i == s.deviceStage && !done
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Box(Modifier.size(22.dp), contentAlignment = Alignment.Center) {
+                    when {
+                        done -> Icon(AeonIcons.Check, contentDescription = "끝났어요", tint = status.ok, modifier = Modifier.size(20.dp))
+                        current && failed -> Icon(AeonIcons.Close, contentDescription = "실패", tint = status.danger, modifier = Modifier.size(20.dp))
+                        current -> CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = scheme.primary)
+                        else -> Box(Modifier.size(8.dp).clip(CircleShape).background(scheme.outlineVariant))
+                    }
                 }
-                else -> {
-                    Text(if (s.deviceStarting) "켜는 중…" else "준비됐어요", style = MaterialTheme.typography.titleMedium)
-                    Body("처음에는 파일을 풀어서 조금 걸려요. 연결 코드는 앱이 직접 받아서 입력할 필요가 없어요.")
-                }
+                Text(
+                    label, style = MaterialTheme.typography.bodyLarge,
+                    color = when { current && failed -> status.danger; done || current -> scheme.onSurface; else -> scheme.onSurfaceVariant },
+                )
+            }
+        }
+    }
+}
+
+/** What happened while starting, newest at the bottom, with a button that copies all of it. */
+@Suppress("DEPRECATION")
+@Composable
+private fun DeviceLog(s: SetupState) {
+    val scheme = MaterialTheme.colorScheme
+    val clipboard = LocalClipboardManager.current
+    val haptic = LocalHapticFeedback.current
+    var copied by remember { mutableStateOf(false) }
+    val scroll = rememberScrollState()
+    LaunchedEffect(s.deviceLog.size) { scroll.animateScrollTo(scroll.maxValue) }
+    Column(
+        Modifier.padding(top = 16.dp).fillMaxWidth().background(scheme.surface, RoundedCornerShape(AeonShape.CARD.dp)).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("로그", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+            Text(
+                if (copied) "복사했어요" else "전체 복사",
+                Modifier.clip(CircleShape).background(scheme.surfaceVariant)
+                    .clickable {
+                        clipboard.setText(AnnotatedString(s.deviceLog.joinToString("\n")))
+                        copied = true
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    }
+                    .padding(horizontal = 14.dp, vertical = 7.dp),
+                style = MaterialTheme.typography.labelLarge,
+            )
+        }
+        Column(Modifier.heightIn(max = 260.dp).background(scheme.surfaceVariant, RoundedCornerShape(12.dp)).verticalScroll(scroll).padding(12.dp)) {
+            SelectionContainer {
+                Text(
+                    s.deviceLog.joinToString("\n"),
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 11.sp, lineHeight = 15.sp),
+                    color = scheme.onSurfaceVariant,
+                )
             }
         }
     }

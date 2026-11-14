@@ -8,12 +8,23 @@ interface LocalAgentHost {
     /** True when this build contains the runtime and the server. */
     val available: Boolean
 
+    /**
+     * Set by the app to follow a start: the stage it is in (an index into [DEVICE_STAGES]) and one line for the log.
+     * A host that starts nothing ignores it.
+     */
+    var onProgress: ((stage: Int, line: String) -> Unit)?
+        get() = null
+        set(_) {}
+
     /** Starts it if it is not running. Returns null once it answers, or a sentence saying why it could not start. */
     suspend fun start(): String?
 
     /** A fresh one-time pairing code that only this app can read (the server writes it into the app's private folder), or null. */
     suspend fun pairingCode(): String?
 }
+
+/** The steps shown while the agent starts on this device, in order. */
+val DEVICE_STAGES = listOf("에이전트 파일 준비", "에이전트 켜기", "응답 기다리기", "연결 코드 받기", "이 기기와 연결")
 
 expect fun localAgentHost(): LocalAgentHost
 

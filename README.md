@@ -79,6 +79,8 @@ Windows (Compose Desktop) and web (Compose for Web) UIs are built; Android is wa
 
 ## Android app with the agent inside (decision D19)
 
+The agent runs in a process of its own (`:node`, the `NodeService` in the app), so when Node ends its process or crashes the app stays open and says the agent did not start.
+
 The Android app can run the agent on the phone itself (Node.js for Mobile runs the compiled core). It is built only when the runtime has been fetched:
 
 ```bash
@@ -86,7 +88,7 @@ node tools/fetch-nodejs-mobile.mjs      # downloads nodejs-mobile v18.20.4 (abou
 cd ui && ./gradlew :androidApp:assembleDebug
 ```
 
-This needs the Android NDK (29.0.14206865) and Node 24 on the build machine. Without the fetch step the app is the same remote control as before and offers only "내 컴퓨터에 연결". Verified on the x86_64 emulator, not yet on a real ARM phone.
+This needs the Android NDK (29.0.14206865) and Node 24 on the build machine (on Linux also `unzip`; the fetch script reads the release zip with `tar` where that can, which GNU tar cannot). Without the fetch step the app is the same remote control as before and offers only "내 컴퓨터에 연결". Verified on the x86_64 emulator, not yet on a real ARM phone.
 
 ## Skills (decision D20)
 
