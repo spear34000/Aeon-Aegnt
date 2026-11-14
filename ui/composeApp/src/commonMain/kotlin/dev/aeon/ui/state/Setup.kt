@@ -4,11 +4,12 @@ import dev.aeon.ui.api.Profile
 
 /**
  * First-run flow, in order. Splash is not a step: it is shown briefly on every start while state is restored.
+ * Welcome is the title page (logo, slogan, start button); the feature intro pages come after it.
  * Where asks whether the agent runs on this device or on another one; Connect is the pairing screen (with the guide for
  * another device in front of it); Model picks the AI when the agent has none. They sit before the coach marks because those
  * run on the real main screen and the profile is saved on the server.
  */
-enum class SetupStep { Intro, Welcome, Terms, Where, Connect, Model, Coach, Profile, Done }
+enum class SetupStep { Welcome, Intro, Terms, Where, Connect, Model, Coach, Profile, Done }
 
 const val INTRO_PAGES = 4
 const val PROFILE_PAGES = 5
@@ -40,7 +41,7 @@ data class Consents(
 data class SetupState(
     /** False until the saved progress has been read; the splash stays up until then. */
     val loaded: Boolean = false,
-    val step: SetupStep = SetupStep.Intro,
+    val step: SetupStep = SetupStep.Welcome,
     val introPage: Int = 0,
     val consents: Consents = Consents(),
     val profileDraft: Profile = Profile(),
@@ -54,6 +55,10 @@ data class SetupState(
     val deviceStarting: Boolean = false,
     /** Why starting the agent inside this app failed, with a way to try again. */
     val deviceError: String? = null,
+    /** Which of [dev.aeon.ui.platform.DEVICE_STAGES] the start is in (or stopped at, when [deviceError] is set). */
+    val deviceStage: Int = 0,
+    /** What happened while starting, one line each with the seconds since the start, for the owner to read and copy. */
+    val deviceLog: List<String> = emptyList(),
     /** The profile is saved on this device but the server has not received it yet; it is sent when the server answers. */
     val profilePending: Boolean = false,
     /** The choice about internet lookups still has to be applied to the server. */

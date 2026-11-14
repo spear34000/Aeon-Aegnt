@@ -27,6 +27,9 @@ class AeonApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         AppContext.init(this)
+        // The agent's own process (":node", see NodeService) starts this class too; it needs none of the app's state.
+        if (!isMainProcess()) return
+        CrashReport.install(this)
         val crypto = createDeviceCrypto()
         model = AppModel(
             AeonClient("http://invalid.local", crypto, HttpClient()), // replaced when the user pairs or a saved pairing is restored
@@ -39,6 +42,11 @@ class AeonApplication : Application() {
     }
 }
 
+private fun Application.isMainProcess(): Boolean {
+    val name = if (android.os.Build.VERSION.SDK_INT >= 28) Application.getProcessName() else runCatching { java.io.File("/proc/self/cmdline").readText().trim('\u0000') }.getOrDefault("")
+    return name == packageName
+}
+
 /**
  * Phone shell: bottom navigation and one pane at a time. Polling runs only while the app is visible, so an idle
  * app does not wake the radio or drain the battery (push notifications arrive with Phase 6).
@@ -49,12 +57,13 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge() // the app draws its own background under the status and navigation bars
         val model = (application as AeonApplication).model
         lifecycle.addObserver(object : DefaultLifecycleObserver {
-            override fun onStart(owner: LifecycleOwner) = model.start()
-            override fun onStop(owner: LifecycleOwner) = model.stop()
+            override fun onStart(owner: LifecycleOwner) { CrashReport.setForeground(this@MainActivity, true); model.start() }
+            override fun onStop(owner: LifecycleOwner) { model.stop(); CrashReport.setForeground(this@MainActivity, false) }
         })
         openFrom(intent)
         setContent {
             AppRoot(model) { s, m -> PhoneLayout(s, m) }
+            CrashReport.Dialog()
         }
     }
 

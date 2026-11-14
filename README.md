@@ -4,7 +4,7 @@
 
 An open-source personal AI agent built around four ideas: **continuity** (work survives restarts and, later, moves between your cloud and your devices), **ownership** (your data, keys, models, and runtime), **verifiability** (a task is only "verified" if the real world confirms it), and **accessibility** (no cloud expertise required).
 
-> **Status: Phase 1 (Agent Core).** Automated tests use mocks; real EXAONE calls and two real end-to-end tasks were also run manually and succeeded. Cloud runtimes and device continuity are planned (see [ROADMAP](docs/ROADMAP.md)) and **do not exist yet**. What exists beyond the core: a local server with device pairing, apps for Android (with the agent running on the phone), Windows, Linux and the web, Agent Skills, an interest feed written from sources, routines that start tasks on a schedule, and agent behaviour built from research (self-check and repair, loop detection, notes, questions, memory that learns from finished tasks with the owner in charge: [behaviour](docs/research/2026-11-14-agent-behaviour.md), [memory](docs/research/2026-11-15-memory.md)); each is described with what was and was not verified in [TESTING](docs/TESTING.md).
+> **Status: Phase 1 (Agent Core).** Automated tests use mocks; real EXAONE calls and two real end-to-end tasks were also run manually and succeeded. Cloud runtimes and device continuity are planned (see [ROADMAP](docs/ROADMAP.md)) and **do not exist yet**. What exists beyond the core: a local server with device pairing, apps for Android (with the agent running on the phone), Windows, Linux and the web, Agent Skills, an interest feed written from sources, routines that start tasks on a schedule, and agent behaviour built from research (self-check and repair, loop detection, notes, questions, memory that learns from finished tasks with the owner in charge: [behaviour](docs/research/2026-11-14-agent-behaviour.md), [memory](docs/research/2026-11-14-memory.md)); each is described with what was and was not verified in [TESTING](docs/TESTING.md).
 > Every model interaction in the automated tests is mocked; see [TESTING](docs/TESTING.md) for exactly what was verified for real.
 
 ## What works today
@@ -79,6 +79,8 @@ Windows (Compose Desktop) and web (Compose for Web) UIs are built; Android is wa
 
 ## Android app with the agent inside (decision D19)
 
+The agent runs in a process of its own (`:node`, the `NodeService` in the app), so when Node ends its process or crashes the app stays open and says the agent did not start.
+
 The Android app can run the agent on the phone itself (Node.js for Mobile runs the compiled core). It is built only when the runtime has been fetched:
 
 ```bash
@@ -86,7 +88,7 @@ node tools/fetch-nodejs-mobile.mjs      # downloads nodejs-mobile v18.20.4 (abou
 cd ui && ./gradlew :androidApp:assembleDebug
 ```
 
-This needs the Android NDK (29.0.14206865) and Node 24 on the build machine. Without the fetch step the app is the same remote control as before and offers only "내 컴퓨터에 연결". Verified on the x86_64 emulator, not yet on a real ARM phone.
+This needs the Android NDK (29.0.14206865) and Node 24 on the build machine (on Linux also `unzip`; the fetch script reads the release zip with `tar` where that can, which GNU tar cannot). Without the fetch step the app is the same remote control as before and offers only "내 컴퓨터에 연결". Verified on the x86_64 emulator, not yet on a real ARM phone.
 
 ## Skills (decision D20)
 
