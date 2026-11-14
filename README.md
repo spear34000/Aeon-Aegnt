@@ -79,6 +79,8 @@ Windows (Compose Desktop) and web (Compose for Web) UIs are built; Android is wa
 
 ## Android app with the agent inside (decision D19)
 
+The agent runs in a process of its own (`:node`, the `NodeService` in the app), so when Node ends its process or crashes the app stays open and says the agent did not start.
+
 The Android app can run the agent on the phone itself (Node.js for Mobile runs the compiled core). It is built only when the runtime has been fetched:
 
 ```bash

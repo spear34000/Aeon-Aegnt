@@ -27,6 +27,8 @@ class AeonApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         AppContext.init(this)
+        // The agent's own process (":node", see NodeService) starts this class too; it needs none of the app's state.
+        if (!isMainProcess()) return
         val crypto = createDeviceCrypto()
         model = AppModel(
             AeonClient("http://invalid.local", crypto, HttpClient()), // replaced when the user pairs or a saved pairing is restored
@@ -37,6 +39,11 @@ class AeonApplication : Application() {
             defaultServerUrl = "",
         )
     }
+}
+
+private fun Application.isMainProcess(): Boolean {
+    val name = if (android.os.Build.VERSION.SDK_INT >= 28) Application.getProcessName() else runCatching { java.io.File("/proc/self/cmdline").readText().trim('\u0000') }.getOrDefault("")
+    return name == packageName
 }
 
 /**
