@@ -18,9 +18,14 @@ describe("WorkspaceGuard", () => {
     const g = new WorkspaceGuard(dir);
     assert.equal(g.resolve("a/b.txt").ok, true);
     assert.equal(g.resolve(".").ok, true);
-    for (const bad of ["../x", "a/../../x", join(dir, "..", "x"), "C:\\Windows\\win.ini", "/etc/passwd", ".aeon/aeon.db", ".git/config", ".AEON/x", "", "a\0b"]) {
+    for (const bad of ["../x", "a/../../x", join(dir, "..", "x"), "/etc/passwd", ".aeon/aeon.db", ".git/config", ".AEON/x", "", "a\0b"]) {
       assert.equal(g.resolve(bad).ok, false, `should block: ${JSON.stringify(bad)}`);
     }
+    // A Windows drive path is absolute only on Windows. Elsewhere it is an odd but harmless file name, so the
+    // guarantee that holds on every system is: it never leads outside the workspace.
+    const drive = g.resolve("C:\\Windows\\win.ini");
+    if (process.platform === "win32") assert.equal(drive.ok, false, "a drive path must be blocked on Windows");
+    else assert.ok(!drive.ok || drive.abs.startsWith(g.root), "a drive path must stay inside the workspace");
     assert.equal(g.resolve(123).ok, false);
     cleanup();
   });
