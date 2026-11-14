@@ -1,1 +1,23 @@
+# One line ending everywhere in the repository (LF), whatever the contributor's system: the working copy of a Windows
+# checkout may use CRLF, the repository does not.
 * text=auto eol=lf
+
+# Windows scripts keep CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Never touched by line-ending conversion.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.ico binary
+*.jar binary
+*.otf binary
+*.ttf binary
+*.woff2 binary
+*.zip binary
+*.gz binary
+*.so binary
+*.wasm binary

@@ -17,3 +17,11 @@ dist-mobile/
 ui/androidApp/nodejs-mobile/
 ui/androidApp/.cxx/
 ui/androidApp/src/main/jniLibs/
+
+# Local tool settings (they hold paths of one person's computer)
+.claude/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.log

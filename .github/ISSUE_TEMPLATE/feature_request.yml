@@ -1,0 +1,27 @@
+name: Feature request
+description: An idea for something Aeon should do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve, and for whom?
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: cost
+    attributes:
+      label: Cost and safety
+      description: Does it need a paid service, a new dependency, a new permission, or send data anywhere? Aeon's rules (docs/DECISIONS.md) need the maintainer's approval for these.
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Would you work on it?
+      options:
+        - label: I would like to build this (see CONTRIBUTING.md; please wait for a yes on the issue first)

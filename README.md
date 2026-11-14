@@ -1,5 +1,7 @@
 # Aeon Agent
 
+[![CI](https://github.com/spear34000/Aeon-Agent/actions/workflows/ci.yml/badge.svg)](https://github.com/spear34000/Aeon-Agent/actions/workflows/ci.yml) [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
+
 An open-source personal AI agent built around four ideas: **continuity** (work survives restarts and, later, moves between your cloud and your devices), **ownership** (your data, keys, models, and runtime), **verifiability** (a task is only "verified" if the real world confirms it), and **accessibility** (no cloud expertise required).
 
 > **Status: Phase 1 (Agent Core).** Automated tests use mocks; real EXAONE calls and two real end-to-end tasks were also run manually and succeeded. Cloud runtimes and device continuity are planned (see [ROADMAP](docs/ROADMAP.md)) and **do not exist yet**. What exists beyond the core: a local server with device pairing, apps for Android (with the agent running on the phone), Windows, Linux and the web, Agent Skills, an interest feed written from sources, routines that start tasks on a schedule, and agent behaviour built from research (self-check and repair, loop detection, notes, questions, memory that learns from finished tasks with the owner in charge: [behaviour](docs/research/2026-11-14-agent-behaviour.md), [memory](docs/research/2026-11-15-memory.md)); each is described with what was and was not verified in [TESTING](docs/TESTING.md).
@@ -100,6 +102,6 @@ Delete the workspace's `.aeon/` folder and this repository folder. Phase 1 creat
 
 ## Docs
 
-[ARCHITECTURE](docs/ARCHITECTURE.md) · [DECISIONS](docs/DECISIONS.md) · [TESTING](docs/TESTING.md) · [THREAT_MODEL](docs/THREAT_MODEL.md) · [BRANCHING](docs/BRANCHING.md) · [CLOUD_PROVIDERS](docs/CLOUD_PROVIDERS.md) · [ROADMAP](docs/ROADMAP.md) · [SECURITY](SECURITY.md) · [CONTRIBUTING](CONTRIBUTING.md) · [한국어 README](README.ko.md)
+[ARCHITECTURE](docs/ARCHITECTURE.md) · [DECISIONS](docs/DECISIONS.md) · [TESTING](docs/TESTING.md) · [THREAT_MODEL](docs/THREAT_MODEL.md) · [BRANCHING](docs/BRANCHING.md) · [CONTRIBUTING](CONTRIBUTING.md) · [CLOUD_PROVIDERS](docs/CLOUD_PROVIDERS.md) · [ROADMAP](docs/ROADMAP.md) · [SECURITY](SECURITY.md) · [CONTRIBUTING](CONTRIBUTING.md) · [한국어 README](README.ko.md)
 
 License: Apache-2.0.
