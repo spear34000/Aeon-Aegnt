@@ -60,18 +60,22 @@ class SetupFlowTest {
     fun aNewInstallWalksTheStepsInOrderAndCanGoBack() {
         val m = model(MapStore())
         assertTrue(m.setup.loaded)
+        assertEquals(SetupStep.Welcome, m.setup.step, "the title page comes first")
+        assertFalse(m.setupBack(), "nothing before the title page: the system handles back")
+        m.startIntro()
         assertEquals(SetupStep.Intro, m.setup.step)
-        assertFalse(m.setupBack(), "nothing before the first intro page: the system handles back")
+        assertTrue(m.setupBack(), "back from the first intro page returns to the title page")
+        assertEquals(SetupStep.Welcome, m.setup.step)
+        m.startIntro()
 
         m.setIntroPage(2)
         assertTrue(m.setupBack())
         assertEquals(1, m.setup.introPage)
         m.finishIntro() // also what "건너뛰기" does
-        assertEquals(SetupStep.Welcome, m.setup.step)
+        assertEquals(SetupStep.Terms, m.setup.step)
         m.setupBack()
-        assertEquals(SetupStep.Intro to INTRO_PAGES - 1, m.setup.step to m.setup.introPage, "back from the welcome screen reopens the last intro page")
+        assertEquals(SetupStep.Intro to INTRO_PAGES - 1, m.setup.step to m.setup.introPage, "back from the terms reopens the last intro page")
         m.finishIntro()
-        m.beginSetup()
         assertEquals(SetupStep.Terms, m.setup.step)
 
         m.acceptTerms()
@@ -92,7 +96,7 @@ class SetupFlowTest {
     fun bothWaysAreFirstClass_anotherDeviceGetsItsGuideThenTheForm_thisDeviceSaysWhatIsPossible() {
         val store = MapStore()
         val m = model(store)
-        m.finishIntro(); m.beginSetup()
+        m.startIntro(); m.finishIntro()
         m.setConsents(Consents(service = true, data = true)); m.acceptTerms()
         assertEquals(SetupStep.Where, m.setup.step)
         assertEquals(null, m.setup.where, "no choice is made for the owner")
@@ -135,7 +139,7 @@ class SetupFlowTest {
         val broken = FakeAgent("에이전트가 시작되지 않았어요.", null)
         val m = model(MapStore(), broken)
         assertTrue(m.canRunOnDevice)
-        m.finishIntro(); m.beginSetup()
+        m.startIntro(); m.finishIntro()
         m.setConsents(Consents(service = true, data = true)); m.acceptTerms()
         m.chooseWhere("device")
         m.whereContinue()
@@ -146,7 +150,7 @@ class SetupFlowTest {
 
         val noCode = FakeAgent(null, null)
         val m2 = model(MapStore(), noCode)
-        m2.finishIntro(); m2.beginSetup()
+        m2.startIntro(); m2.finishIntro()
         m2.setConsents(Consents(service = true, data = true)); m2.acceptTerms()
         m2.chooseWhere("device"); m2.whereContinue(); m2.waitForDevice()
         assertEquals("이 기기의 에이전트에서 연결 코드를 받지 못했어요.", m2.setup.deviceError)
@@ -155,7 +159,7 @@ class SetupFlowTest {
 
         val other = FakeAgent(null, null)
         val m3 = model(MapStore(), other)
-        m3.finishIntro(); m3.beginSetup()
+        m3.startIntro(); m3.finishIntro()
         m3.setConsents(Consents(service = true, data = true)); m3.acceptTerms()
         m3.chooseWhere("remote"); m3.whereContinue()
         assertEquals(0, other.started, "choosing another computer never starts the agent here")
@@ -175,9 +179,9 @@ class SetupFlowTest {
     fun progressAndChoicesSurviveClosingTheApp() {
         val store = MapStore()
         val first = model(store)
+        first.startIntro()
         first.setIntroPage(3)
         first.finishIntro()
-        first.beginSetup()
         first.setConsents(Consents(service = true, data = true, background = true))
         first.editSetupProfile(Profile(userName = "지우", tone = "casual", interests = listOf("개발", "여행")))
         first.setProfilePage(2)
@@ -195,7 +199,7 @@ class SetupFlowTest {
     fun skippingTheProfileOrFinishingItEmptyOpensTheMainScreenAndIsRememberedAsDone() {
         val store = MapStore()
         val m = model(store)
-        m.finishIntro(); m.beginSetup()
+        m.startIntro(); m.finishIntro()
         m.setConsents(Consents(service = true, data = true)); m.acceptTerms()
         store.map["setup.step"] = SetupStep.Profile.name // as if pairing and the tour were done
         val p = model(store)
@@ -224,8 +228,8 @@ class SetupFlowTest {
     fun aStoreThatCannotWriteDoesNotStopTheFlow() {
         val store = MapStore(failWrites = true)
         val m = model(store)
+        m.startIntro()
         m.finishIntro()
-        m.beginSetup()
         assertEquals(SetupStep.Terms, m.setup.step, "progress continues in memory")
         assertTrue(m.setup.storageError, "and the screen can say that it will not be remembered")
         m.editSetupProfile(Profile(userName = "지우"))

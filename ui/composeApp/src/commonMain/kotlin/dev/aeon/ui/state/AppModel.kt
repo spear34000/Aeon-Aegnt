@@ -639,7 +639,7 @@ class AppModel(
     /** Restores where the owner left off. A device that was paired before this flow existed is treated as done. */
     private fun loadSetup() {
         val saved = SetupStep.entries.firstOrNull { it.name == read(KEY_SETUP_STEP) }
-        val step = saved ?: if (read(KEY_DEVICE) != null) SetupStep.Done else SetupStep.Intro
+        val step = saved ?: if (read(KEY_DEVICE) != null) SetupStep.Done else SetupStep.Welcome
         val draft = try {
             read(KEY_SETUP_PROFILE)?.let { dev.aeon.ui.api.ApiJson.decodeFromString(Profile.serializer(), it) }
         } catch (e: Exception) {
@@ -679,7 +679,7 @@ class AppModel(
     /** Leaves the intro, whether it was read to the end or skipped. */
     fun finishIntro() {
         if (_state.value.setup.replayIntro) setup { it.copy(replayIntro = false, step = SetupStep.entries.firstOrNull { s -> s.name == read(KEY_SETUP_STEP) } ?: SetupStep.Done) }
-        else goStep(SetupStep.Welcome)
+        else goStep(SetupStep.Terms)
     }
 
     /** Shows the intro again. From the settings it returns to where the owner was; nothing saved is changed. */
@@ -692,7 +692,11 @@ class AppModel(
         }
     }
 
-    fun beginSetup() = goStep(SetupStep.Terms)
+    /** The title page's "시작하기": on to the intro pages. */
+    fun startIntro() {
+        setIntroPage(0)
+        goStep(SetupStep.Intro)
+    }
 
     fun setConsents(c: Consents) {
         save(KEY_SETUP_CONSENTS, c.encode())
@@ -769,12 +773,12 @@ class AppModel(
     fun setupBack(): Boolean {
         val s = _state.value.setup
         when (s.step) {
-            SetupStep.Intro -> if (s.introPage > 0) setIntroPage(s.introPage - 1) else return false
-            SetupStep.Welcome -> {
+            SetupStep.Welcome -> return false
+            SetupStep.Intro -> if (s.introPage > 0) setIntroPage(s.introPage - 1) else if (s.replayIntro) return false else goStep(SetupStep.Welcome)
+            SetupStep.Terms -> {
                 setIntroPage(INTRO_PAGES - 1)
                 goStep(SetupStep.Intro)
             }
-            SetupStep.Terms -> goStep(SetupStep.Welcome)
             SetupStep.Where -> goStep(SetupStep.Terms)
             SetupStep.Connect -> if (s.where == "remote" && s.guideDone) setup { it.copy(guideDone = false) } else goStep(SetupStep.Where)
             SetupStep.Model -> goStep(SetupStep.Where)
