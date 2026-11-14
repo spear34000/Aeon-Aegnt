@@ -6,7 +6,7 @@ import { dice } from "./feed-text.ts";
 
 /**
  * What the owner wants the agent to remember across tasks, kept as plain text the owner can read, edit and delete.
- * Design, from the sources read for it (docs/research/2026-11-15-memory.md):
+ * Design, from the sources read for it (docs/research/2026-11-14-memory.md):
  *  - Generative Agents: a memory stream retrieved by recency, importance and relevance, the three scores added.
  *  - Mem0 / LangMem: what a task leaves behind is a few *candidates*, compared with what is already kept before anything is
  *    added (here: skipped if the same, offered as a correction if close), and formed in the background of the task, not in it.
