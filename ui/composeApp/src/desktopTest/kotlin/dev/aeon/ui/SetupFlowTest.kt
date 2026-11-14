@@ -127,6 +127,41 @@ class SetupFlowTest {
 
     private fun AppModel.waitForDevice() = runBlocking { withTimeout(10_000) { while (setup.deviceStarting) delay(20) } }
 
+    /** An agent that reports each stage the way the Android one does. */
+    private class ChattyAgent(val startResult: String?, val code: String?) : LocalAgentHost {
+        override val available = true
+        override var onProgress: ((Int, String) -> Unit)? = null
+        override suspend fun start(): String? {
+            onProgress?.invoke(0, "파일 준비")
+            onProgress?.invoke(1, "켜기")
+            onProgress?.invoke(2, "기다려요")
+            return startResult
+        }
+        override suspend fun pairingCode(): String? = code
+    }
+
+    @Test
+    fun startingTheAgentShowsItsStagesAndKeepsALogToCopy() {
+        val failing = ChattyAgent("시간 초과", null)
+        val m = model(MapStore(), failing)
+        m.startOnDevice(); m.waitForDevice()
+        assertEquals(2, m.setup.deviceStage, "it stopped at the third stage")
+        assertEquals("시간 초과", m.setup.deviceError)
+        val lines = m.setup.deviceLog
+        assertEquals(listOf("파일 준비", "켜기", "기다려요", "실패: 시간 초과"), lines.map { it.substringAfter("] ") })
+        assertTrue(lines.all { it.startsWith("[") && "s]" in it }, "each line says how many seconds after the start it happened")
+        m.startOnDevice(); m.waitForDevice()
+        assertEquals(4, m.setup.deviceLog.size, "a retry starts a fresh log")
+
+        // Once the agent answers, the model itself reports asking for the code and connecting (there is no server here, so connecting fails).
+        val answers = ChattyAgent(null, "ABCDEFGHIJKLMNOP")
+        val m2 = model(MapStore(), answers)
+        m2.startOnDevice(); m2.waitForDevice()
+        assertEquals(4, m2.setup.deviceStage)
+        assertTrue(m2.setup.deviceLog.any { "연결 코드를 요청해요" in it })
+        assertTrue(m2.setup.deviceLog.any { "이 기기와 연결해요" in it })
+    }
+
     @Test
     fun thisDevicePathStartsTheAgentAndSaysWhyWhenItCannot() {
         val none = model(MapStore(), FakeAgent(null, null, available = false))

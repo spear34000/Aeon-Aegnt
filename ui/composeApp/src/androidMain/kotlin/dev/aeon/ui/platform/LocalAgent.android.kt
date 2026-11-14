@@ -37,15 +37,20 @@ private object AndroidLocalAgent : LocalAgentHost {
     }
 
     /** Copies the bundled server out of the APK when it is new or changed (Node reads real files). */
-    private fun unpack(): File {
+    private fun unpack(say: (Int, String) -> Unit): File {
         val ctx = context()
         val project = File(root(), "project")
         val stamp = ctx.packageManager.getPackageInfo(ctx.packageName, 0).lastUpdateTime.toString()
         val marker = File(project, ".stamp")
-        if (marker.exists() && marker.readText() == stamp) return project
+        if (marker.exists() && marker.readText() == stamp) {
+            say(0, "에이전트 파일이 이미 준비돼 있어요")
+            return project
+        }
+        say(0, "처음이라 에이전트 파일을 풀어요")
         project.deleteRecursively()
         copyAsset(ASSET_DIR, project)
         marker.writeText(stamp)
+        say(0, "파일을 풀었어요 (${project.walkTopDown().count { it.isFile }}개)")
         return project
     }
 
@@ -72,30 +77,99 @@ private object AndroidLocalAgent : LocalAgentHost {
         false
     }
 
+    override var onProgress: ((Int, String) -> Unit)? = null
+
+    private fun say(stage: Int, line: String) {
+        android.util.Log.i("AeonApp", line) // not "AeonNode": the node lines are read back from that tag and this would repeat
+        onProgress?.invoke(stage, line)
+    }
+
+    /** The agent's process (":node"), or null while it is not running. */
+    private fun nodeProcess(): android.app.ActivityManager.RunningAppProcessInfo? = runCatching {
+        val am = context().getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        am.runningAppProcesses?.firstOrNull { it.processName == "${context().packageName}:node" }
+    }.getOrNull()
+
+    /**
+     * What Node printed (and the native bridge and the service logged) since [token] was written to the log, one clean line
+     * each, only those not returned by an earlier call ([emitted] counts them). It does not depend on knowing the process,
+     * which may already be gone.
+     */
+    private fun nodeOutput(token: String, emitted: IntArray): List<String> = runCatching {
+        val p = ProcessBuilder("logcat", "-d", "-v", "brief", "AeonNode:V", "*:S").redirectErrorStream(true).start()
+        val lines = p.inputStream.bufferedReader().readLines()
+        p.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)
+        val mine = lines.drop(lines.indexOfLast { it.contains(token) } + 1).filter { it.isNotBlank() && !it.startsWith("---") }
+            .map { it.replace(Regex("^[A-Z]/AeonNode\\(\\s*\\d+\\):\\s?"), "node: ") }
+        val fresh = mine.drop(emitted[0])
+        emitted[0] = mine.size
+        fresh
+    }.getOrDefault(emptyList())
+
+    private fun errorLog(): List<String> =
+        runCatching { File(File(root(), "cfg"), "node-error.log").readLines().filter { it.isNotBlank() }.takeLast(12) }.getOrDefault(emptyList())
+
+    /** Why Android says the agent's process ended, when it can tell (Android 11 and later). */
+    private fun exitReason(since: Long): String? = runCatching {
+        if (android.os.Build.VERSION.SDK_INT < 30) return@runCatching null
+        val am = context().getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        am.getHistoricalProcessExitReasons(context().packageName, 0, 5)
+            .firstOrNull { it.processName.endsWith(":node") && it.timestamp >= since }
+            ?.let { "종료 이유: reason=${it.reason} status=${it.status} ${it.description.orEmpty()}" }
+    }.getOrNull()
+
     override suspend fun start(): String? = withContext(Dispatchers.IO) {
         if (!available) return@withContext "이 앱에는 기기에서 실행하는 기능이 들어 있지 않아요."
         try {
-            if (!answers()) {
-                android.util.Log.i("AeonNode", "unpacking the server")
-                val project = unpack()
-                android.util.Log.i("AeonNode", "starting node")
-                val cfg = File(root(), "cfg").apply { mkdirs() }
-                val ws = File(root(), "workspace").apply { mkdirs() }
-                val tmp = context().cacheDir.absolutePath
-                // Node runs in its own process (":node"): when it exits or crashes, only that process goes, not the app.
-                context().startService(
-                    android.content.Intent().setClassName(context().packageName, "dev.aeon.app.NodeService")
-                        .putExtra("args", arrayOf("node", File(project, "node/mobile-main.js").absolutePath, cfg.absolutePath, ws.absolutePath, "7421"))
-                        .putExtra("tmp", tmp),
-                )
+            if (answers()) {
+                say(2, "에이전트가 이미 켜져 있어요")
+                return@withContext null
             }
-            repeat(100) {
-                if (answers()) return@withContext null
+            val began = System.currentTimeMillis()
+            val token = "begin-${System.nanoTime()}"
+            android.util.Log.i("AeonNode", token)
+            say(0, "에이전트 파일을 확인해요")
+            val project = unpack(::say)
+            val cfg = File(root(), "cfg").apply { mkdirs() }
+            val ws = File(root(), "workspace").apply { mkdirs() }
+            val tmp = context().cacheDir.absolutePath
+            File(cfg, "node-error.log").delete()
+            say(1, "에이전트 프로세스를 시작해요 (Node 18, ${android.os.Build.SUPPORTED_ABIS.firstOrNull()})")
+            // Node runs in its own process (":node"): when it exits or crashes, only that process goes, not the app.
+            context().startService(
+                android.content.Intent().setClassName(context().packageName, "dev.aeon.app.NodeService")
+                    .putExtra("args", arrayOf("node", File(project, "node/mobile-main.js").absolutePath, cfg.absolutePath, ws.absolutePath, "7421"))
+                    .putExtra("tmp", tmp),
+            )
+            say(2, "응답을 기다려요 (최대 30초)")
+            val emitted = IntArray(1)
+            var reportedAlive = false
+            repeat(100) { i ->
+                if (answers()) {
+                    nodeOutput(token, emitted).forEach { l -> say(2, l) }
+                    say(2, "에이전트가 응답했어요")
+                    return@withContext null
+                }
+                if (i % 3 == 2) {
+                    val lines = nodeOutput(token, emitted)
+                    lines.forEach { l -> say(2, l) }
+                    val proc = nodeProcess()
+                    if (proc != null && !reportedAlive) { reportedAlive = true; say(2, "에이전트 프로세스가 켜졌어요 (pid ${proc.pid})") }
+                    // Node returned (the service logs it first), or the process is gone, or it never showed up.
+                    val ended = lines.any { it.contains("node returned") || it.contains("node stopped") }
+                    val gone = (reportedAlive && proc == null) || (!reportedAlive && i >= 20)
+                    if (ended || gone) {
+                        errorLog().forEach { l -> say(2, "node-error.log: $l") }
+                        exitReason(began)?.let { say(2, it) }
+                        return@withContext "에이전트가 시작하자마자 멈췄어요. 아래 로그를 복사해서 알려 주세요."
+                    }
+                }
                 delay(300)
             }
-            val why = runCatching { File(File(root(), "cfg"), "node-error.log").readText().trim().takeLast(1500) }.getOrDefault("")
-            "에이전트가 시작되지 않았어요. 앱을 다시 열어 보세요." + if (why.isNotEmpty()) "\n\n$why" else ""
+            errorLog().forEach { l -> say(2, "node-error.log: $l") }
+            "30초 안에 에이전트가 응답하지 않았어요. 아래 로그를 복사해서 알려 주세요."
         } catch (e: Throwable) {
+            say(2, "예외: ${e.message}")
             "에이전트를 시작하지 못했어요: ${e.message}"
         }
     }

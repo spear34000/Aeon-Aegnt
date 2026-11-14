@@ -54,6 +54,10 @@ data class SetupState(
     val deviceStarting: Boolean = false,
     /** Why starting the agent inside this app failed, with a way to try again. */
     val deviceError: String? = null,
+    /** Which of [dev.aeon.ui.platform.DEVICE_STAGES] the start is in (or stopped at, when [deviceError] is set). */
+    val deviceStage: Int = 0,
+    /** What happened while starting, one line each with the seconds since the start, for the owner to read and copy. */
+    val deviceLog: List<String> = emptyList(),
     /** The profile is saved on this device but the server has not received it yet; it is sent when the server answers. */
     val profilePending: Boolean = false,
     /** The choice about internet lookups still has to be applied to the server. */
