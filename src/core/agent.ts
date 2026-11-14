@@ -198,6 +198,7 @@ export class Agent implements TaskRunner {
       "If a detail you need is missing and you cannot find it with your tools, ask the owner ONE short question instead of guessing: {\"action\":\"ask\",\"question\":\"...\",\"options\":[\"likely answer\",\"another\"]}.",
       "Do not ask what you can find out yourself, what the owner already told you, or for permission (approvals are asked separately). At most 3 questions.",
       "Write every text meant for the owner (questions, the final summary) in the language the owner's goal is written in, unless the owner preferences below name another language.",
+      "The owner is not a programmer: use plain words, keep questions to one short sentence, call the folder you work in \"the work folder\" (Korean: 작업 폴더), and do not mention tool names, hidden or internal folders such as .aeon, or file-system terms the owner did not use.",
       "Available tools:",
       toolLines || "(none)",
       ...skillCatalogLines(this.cfg.skills?.() ?? []),
@@ -227,7 +228,12 @@ export class Agent implements TaskRunner {
     const plan = Array.isArray(parsed?.plan) ? parsed!.plan.filter((s): s is string => typeof s === "string").slice(0, 20) : [];
     if (plan.length === 0) {
       await ctx.audit("plan_invalid", {});
-      return { kind: "outcome", outcome: { kind: "fail", error: "model did not produce a valid plan", retryable: true } };
+      // A goal that is too vague to plan ("정리해줘") makes a model answer in plain words, or with a question, instead of a plan.
+      // That is not a failure: the work loop below can ask the owner, which is the right answer to a vague goal. So the task
+      // goes on with a one-line plan and no model-made checks; a reply with nothing in it still fails.
+      if (res.content.trim() === "") return { kind: "outcome", outcome: { kind: "fail", error: "model did not produce a valid plan", retryable: true } };
+      const updated = await ctx.checkpoint({ plan: ["Find out what the owner wants (ask if it is unclear), then do it"], criteria: task.criteria });
+      return { kind: "ok", task: updated };
     }
     // Keep user-supplied criteria; add model-proposed ones, clearly labelled as such.
     const proposed = (Array.isArray(parsed?.criteria) ? parsed!.criteria : [])

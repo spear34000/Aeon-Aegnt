@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import dev.aeon.ui.design.itemMotion
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -62,7 +63,7 @@ fun TaskList(state: UiState, model: AppModel, modifier: Modifier = Modifier, sho
         } else {
             LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 items(state.tasks, key = { it.id }) { t ->
-                    TaskRow(t, selected = t.id == state.selectedTaskId) { model.selectTask(t.id) }
+                    TaskRow(t, selected = t.id == state.selectedTaskId, modifier = itemMotion()) { model.selectTask(t.id) }
                 }
             }
         }
@@ -70,12 +71,12 @@ fun TaskList(state: UiState, model: AppModel, modifier: Modifier = Modifier, sho
 }
 
 @Composable
-fun TaskRow(t: TaskSummary, selected: Boolean, onClick: () -> Unit) {
+fun TaskRow(t: TaskSummary, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val s = LocalAeonStatus.current
     val bg = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.background
     val (dot, text) = taskStatusLine(t)
     Column(
-        Modifier.fillMaxWidth().background(bg, RoundedCornerShape(AeonShape.CONTROL.dp)).clickable(onClick = onClick).padding(12.dp),
+        modifier.fillMaxWidth().background(bg, RoundedCornerShape(AeonShape.CONTROL.dp)).clickable(onClick = onClick).padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Text(t.goal, maxLines = 1, style = MaterialTheme.typography.bodyLarge)
@@ -105,7 +106,7 @@ fun TaskDetailPanel(state: UiState, model: AppModel, onBack: () -> Unit, modifie
         }
         Text(d.goal, style = MaterialTheme.typography.headlineMedium)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TaskStatusChip(d.status)
+            TaskStatusChip(d.status, d.note)
             VerifyBadge(d.verificationDetail?.status, d.verificationDetail?.evidence?.count { !it.passed } ?: 0)
             Spacer(Modifier.weight(1f))
             Text(koreanClock(d.updatedAt), style = MaterialTheme.typography.bodySmall, color = s.fg3)

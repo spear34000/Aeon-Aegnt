@@ -49,10 +49,10 @@ import dev.aeon.ui.state.AppModel
 import dev.aeon.ui.state.UiState
 
 private fun effortLabel(e: String?): String? = when (e) {
-    "low" -> "낮음"
+    "low" -> "빠르게"
     "medium" -> "보통"
-    "high" -> "높음"
-    "max" -> "최대"
+    "high" -> "깊게"
+    "max" -> "아주 깊게"
     else -> null
 }
 
@@ -75,9 +75,9 @@ fun Composer(state: UiState, model: AppModel, enabled: Boolean, onSend: (String)
     LaunchedEffect(Unit) { if (state.models.current == null) model.loadModels() }
     val cur = state.models.current
     val modelLabel = when {
-        cur == null -> "모델 선택"
-        cur.model.isBlank() -> cur.providerName.ifBlank { cur.provider }
-        else -> cur.model
+        cur == null -> "AI 고르기"
+        // The service the person knows ("EXAONE"), not the model id ("k-exaone_v2.5"), which means nothing to them.
+        else -> cur.providerName.ifBlank { cur.provider.ifBlank { cur.model } }
     }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (state.attachments.isNotEmpty() || state.uploading) {
@@ -124,13 +124,13 @@ fun Composer(state: UiState, model: AppModel, enabled: Boolean, onSend: (String)
                 Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
                 Row(
                     Modifier.coachTarget("composer.model").heightIn(min = 40.dp).clip(RoundedCornerShape(20.dp)).background(scheme.surfaceVariant)
-                        .clickable { model.openModelSheet() }.padding(horizontal = 12.dp).semantics { contentDescription = "모델 바꾸기: $modelLabel" },
+                        .clickable { model.openModelSheet() }.padding(horizontal = 12.dp).semantics { contentDescription = "AI 바꾸기: $modelLabel" },
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Icon(AeonIcons.Cpu, contentDescription = null, tint = scheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
                     Text(modelLabel, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-                    effortLabel(cur?.reasoningEffort)?.let { Text("· 추론 $it", style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant, maxLines = 1) }
+                    effortLabel(cur?.reasoningEffort)?.let { Text("· $it", style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant, maxLines = 1) }
                 }
                 }
                 Box(

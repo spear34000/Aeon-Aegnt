@@ -53,7 +53,7 @@ import dev.aeon.ui.design.Tone
 import dev.aeon.ui.state.AppModel
 import dev.aeon.ui.state.UiState
 
-private fun effortName(e: String) = when (e) { "low" -> "낮음"; "medium" -> "보통"; "high" -> "높음"; "max" -> "최대"; else -> e }
+private fun effortName(e: String) = when (e) { "low" -> "빠르게"; "medium" -> "보통"; "high" -> "깊게"; "max" -> "아주 깊게"; else -> e }
 
 /** Bottom sheet over the screen: provider list, then that provider's models, key entry and reasoning effort. */
 @Composable
@@ -81,13 +81,13 @@ private fun androidx.compose.foundation.layout.ColumnScope.ModelSheetBody(state:
     val scheme = MaterialTheme.colorScheme
     val provider = m.providers.firstOrNull { it.id == m.providerId }
     Row(verticalAlignment = Alignment.CenterVertically) {
-        if (provider != null) Box(Modifier.size(40.dp).clickable { model.showProvider(null) }, contentAlignment = Alignment.Center) { Icon(AeonIcons.Back, contentDescription = "제공자 목록", modifier = Modifier.size(22.dp)) }
+        if (provider != null) Box(Modifier.size(40.dp).clickable { model.showProvider(null) }, contentAlignment = Alignment.Center) { Icon(AeonIcons.Back, contentDescription = "AI 서비스 목록", modifier = Modifier.size(22.dp)) }
         if (provider != null) {
             provider.icon?.let { path -> LaunchedEffect(path) { model.requestIcon(path) } }
             ProviderTile(provider.name, provider.icon?.let { state.explore.icons[it] }, 36.dp)
             Spacer(Modifier.width(10.dp))
         }
-        Text(provider?.name ?: "모델", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+        Text(provider?.name ?: "AI 고르기", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
         Box(Modifier.size(40.dp).clickable { model.closeModelSheet() }, contentAlignment = Alignment.Center) { Icon(AeonIcons.Close, contentDescription = "닫기", modifier = Modifier.size(22.dp)) }
     }
     if (!state.isAdmin) Banner("이 기기는 설정을 바꿀 수 없어요.", Tone.Warn, "⚠")
@@ -126,7 +126,7 @@ private fun ProviderList(state: UiState, model: AppModel) {
     m.catalogError?.let { Banner("최신 목록을 가져오지 못해 저장된 목록을 보여 줘요.", Tone.Warn, "⚠") }
     var query by remember { mutableStateOf("") }
     var all by remember { mutableStateOf(false) }
-    AeonTextField(query, { query = it }, "제공자 찾기", placeholder = "OpenAI, Groq, Upstage…")
+    AeonTextField(query, { query = it }, "AI 서비스 찾기", placeholder = "OpenAI, Groq, Upstage…")
     val ranked = m.providers.sortedWith(compareByDescending<ProviderRow> { it.id == m.current?.provider }.thenByDescending { it.hasKey && it.keyName != null && !it.local }.thenBy { it.name.lowercase() })
     // Aeon's own providers (EXAONE, Ollama, llama.cpp), the one in use, and any with a saved key; the catalogue is behind the button.
     val builtin = setOf("exaone", "ollama", "llamacpp")
@@ -138,7 +138,7 @@ private fun ProviderList(state: UiState, model: AppModel) {
     }
     ProviderRows(shown, m.current?.provider, state, model)
     if (query.isBlank() && !all && ranked.size > mine.size) {
-        AeonButton("제공자 ${ranked.size - mine.size}개 더 보기", { all = true }, Modifier.fillMaxWidth(), kind = ButtonKind.Secondary)
+        AeonButton("AI 서비스 ${ranked.size - mine.size}개 더 보기", { all = true }, Modifier.fillMaxWidth(), kind = ButtonKind.Secondary)
     }
 }
 
@@ -146,7 +146,7 @@ private fun ProviderList(state: UiState, model: AppModel) {
 private fun ProviderRows(list: List<ProviderRow>, currentId: String?, state: UiState, model: AppModel) {
     val scheme = MaterialTheme.colorScheme
     if (list.isEmpty()) {
-        Text("찾는 제공자가 없어요.", Modifier.padding(4.dp), style = MaterialTheme.typography.bodyMedium, color = scheme.onSurfaceVariant)
+        Text("찾는 AI 서비스가 없어요.", Modifier.padding(4.dp), style = MaterialTheme.typography.bodyMedium, color = scheme.onSurfaceVariant)
         return
     }
     ListSurface {
@@ -179,21 +179,21 @@ private fun ProviderDetail(state: UiState, model: AppModel, p: ProviderRow) {
 
     if (needsKey) {
         Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(AeonShape.CARD.dp)).background(scheme.background).padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            AeonTextField(key, { key = it }, "API 키", secret = true, mono = true)
+            AeonTextField(key, { key = it }, "접속 키 (API 키)", secret = true, mono = true)
             AeonButton("저장", { model.saveProviderKey(p.keyName!!, key); key = "" }, Modifier.fillMaxWidth(), kind = ButtonKind.Primary, enabled = key.isNotBlank() && !m.loading && state.isAdmin)
         }
     }
     if (!p.local && !p.consented) {
         Row(Modifier.fillMaxWidth().clickable { consent = !consent }, verticalAlignment = Alignment.CenterVertically) {
-            CheckBox(consent, "전송 동의")
-            Text("${p.name}(${p.baseUrl.removePrefix("https://").substringBefore('/')})로 요청과 읽은 파일 내용을 보내는 데 동의해요.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+            CheckBox(consent, "내용 보내도 돼요")
+            Text("${p.name}(${p.baseUrl.removePrefix("https://").substringBefore('/')})에 내 요청과 에이전트가 읽은 파일 내용을 보내도 좋아요.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
         }
     }
     val ready = state.isAdmin && !m.loading && !needsKey && (p.local || p.consented || consent)
     when {
         list == null && m.loading -> Text("불러오는 중…", style = MaterialTheme.typography.bodyMedium)
         list.isNullOrEmpty() -> {
-            AeonTextField(typed, { typed = it }, "모델 이름", mono = true, placeholder = "예: exaone3.5:7.8b")
+            AeonTextField(typed, { typed = it }, "AI 모델 이름", mono = true, placeholder = "예: exaone3.5:7.8b")
             AeonButton("사용", { model.pickModel(p.id, typed.trim(), null, consent) }, Modifier.fillMaxWidth(), kind = ButtonKind.Primary, enabled = ready && typed.isNotBlank())
         }
         else -> ListSurface {
@@ -208,14 +208,14 @@ private fun ProviderDetail(state: UiState, model: AppModel, p: ProviderRow) {
                     ) {
                         Column(Modifier.weight(1f)) {
                             Text(mo.name, style = MaterialTheme.typography.titleMedium)
-                            mo.context?.let { Text("문맥 ${it / 1000}K", style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant) }
+                            mo.context?.let { Text("읽는 양 ${it / 1000}K", style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant) }
                         }
                         if (on) Icon(AeonIcons.Check, contentDescription = "사용 중", tint = scheme.primary, modifier = Modifier.size(20.dp))
                     }
                     // The effort levels only appear for the model in use, and only if that model has a reasoning mode.
                     if (on && effortAvailable) {
                         Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text("추론 강도", style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant)
+                            Text("생각하는 정도", style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant)
                             Segmented(listOf<Pair<String?, String>>(null to "자동") + p.efforts.map { it to effortName(it) }, m.current?.reasoningEffort?.takeIf { it in p.efforts }) { e ->
                                 model.pickModel(p.id, mo.id, e, consent)
                             }

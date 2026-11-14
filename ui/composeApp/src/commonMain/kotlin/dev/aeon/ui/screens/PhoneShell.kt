@@ -6,6 +6,16 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.ui.graphics.graphicsLayer
+import dev.aeon.ui.design.Motion
+import dev.aeon.ui.design.itemMotion
+import dev.aeon.ui.design.pressScale
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -70,6 +80,9 @@ import dev.aeon.ui.state.connectedText
 import dev.aeon.ui.state.runsOn
 import dev.aeon.ui.state.thisDevice
 
+/** What fills the phone's main area. The order is the order of the bar, so the direction of a slide follows it; Detail is a task opened over a tab. */
+private enum class Page { Chat, Feed, Explore, Tasks, Agent, Detail }
+
 private data class PhoneTab(val section: Section, val icon: ImageVector, val label: String)
 
 private val TABS = listOf(
@@ -113,14 +126,42 @@ fun PhoneLayout(state: UiState, model: AppModel) {
             if (!(state.showDetail && state.selectedTaskId != null)) {
                 if (current == Section.Chat) ChatTopBar(state, model) else if (!settingsOpen) TitleBar(TABS.first { it.section == current }.label)
             }
-            Box(Modifier.weight(1f).fillMaxWidth()) {
-                when {
-                    state.showDetail && state.selectedTaskId != null -> TaskDetailPanel(state, model, onBack = { model.closeDetail() }, modifier = Modifier.fillMaxSize())
-                    current == Section.Chat -> ConversationScreen(state, model, wide = false, modifier = Modifier.fillMaxSize())
-                    current == Section.Feed -> FeedScreen(state, model, Modifier.fillMaxSize())
-                    current == Section.Explore -> ExploreScreen(state, model, Modifier.fillMaxSize())
-                    current == Section.Tasks -> TasksScreen(state, model, Modifier.fillMaxSize())
-                    else -> AgentHubScreen(state, model, Modifier.fillMaxSize())
+            // A page change is a short move, not a swap: tabs slide a little towards where they are in the bar and cross-fade,
+            // and a task opens over the list from the right and goes back the same way.
+            val page = if (state.showDetail && state.selectedTaskId != null) Page.Detail else when (current) {
+                Section.Chat -> Page.Chat
+                Section.Feed -> Page.Feed
+                Section.Explore -> Page.Explore
+                Section.Tasks -> Page.Tasks
+                else -> Page.Agent
+            }
+            AnimatedContent(
+                targetState = page,
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                transitionSpec = {
+                    when {
+                        targetState == Page.Detail ->
+                            (slideInHorizontally(Motion.arrive(Motion.Slow)) { it / 4 } + fadeIn(Motion.arrive(Motion.Standard, 40))) togetherWith
+                                (slideOutHorizontally(Motion.leave(Motion.Standard)) { -it / 10 } + fadeOut(Motion.leave(Motion.Quick + 40)))
+                        initialState == Page.Detail ->
+                            (slideInHorizontally(Motion.arrive(Motion.Slow)) { -it / 10 } + fadeIn(Motion.arrive(Motion.Standard, 40))) togetherWith
+                                (slideOutHorizontally(Motion.leave(Motion.Standard)) { it / 4 } + fadeOut(Motion.leave(Motion.Quick + 40)))
+                        else -> {
+                            val dir = if (targetState.ordinal > initialState.ordinal) 1 else -1
+                            (slideInHorizontally(Motion.arrive(Motion.Slow)) { dir * it / 14 } + fadeIn(Motion.arrive(Motion.Standard, 50))) togetherWith
+                                (slideOutHorizontally(Motion.leave(Motion.Standard)) { -dir * it / 14 } + fadeOut(Motion.leave()))
+                        }
+                    }.using(SizeTransform(clip = false))
+                },
+                label = "page",
+            ) { p ->
+                when (p) {
+                    Page.Detail -> TaskDetailPanel(state, model, onBack = { model.closeDetail() }, modifier = Modifier.fillMaxSize())
+                    Page.Chat -> ConversationScreen(state, model, wide = false, modifier = Modifier.fillMaxSize())
+                    Page.Feed -> FeedScreen(state, model, Modifier.fillMaxSize())
+                    Page.Explore -> ExploreScreen(state, model, Modifier.fillMaxSize())
+                    Page.Tasks -> TasksScreen(state, model, Modifier.fillMaxSize())
+                    Page.Agent -> AgentHubScreen(state, model, Modifier.fillMaxSize())
                 }
             }
             PhoneBottomBar(current, state.pendingCount, model::go)
@@ -149,7 +190,8 @@ fun PhoneLayout(state: UiState, model: AppModel) {
 /** 44dp soft circle with a 48dp touch target. */
 @Composable
 internal fun CircleButton(icon: ImageVector, label: String, onClick: () -> Unit) {
-    Box(Modifier.size(48.dp).clip(CircleShape).clickable(onClick = onClick).semantics { contentDescription = label }, contentAlignment = Alignment.Center) {
+    val source = remember { MutableInteractionSource() }
+    Box(Modifier.pressScale(source, 0.9f).size(48.dp).clip(CircleShape).clickable(interactionSource = source, indication = LocalIndication.current, onClick = onClick).semantics { contentDescription = label }, contentAlignment = Alignment.Center) {
         Box(Modifier.size(44.dp).background(MaterialTheme.colorScheme.surfaceVariant, CircleShape), contentAlignment = Alignment.Center) {
             Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(22.dp))
         }
@@ -167,7 +209,8 @@ private fun ChatTopBar(state: UiState, model: AppModel) {
     val busy = state.tasks.any { it.status == "RUNNING" || it.status == "PENDING" || it.status == "RETRY_WAIT" }
     val (dot, text) = when {
         state.connection !is Connection.Connected -> s.danger to "연결되지 않음"
-        state.pendingCount > 0 -> s.warn to "승인을 기다리는 중"
+        state.pendingCount > 0 -> s.warn to "확인할 일 ${state.pendingCount}개"
+        state.tasks.any { it.status == "WAITING_FOR_QUOTA" } -> s.warn to dev.aeon.ui.design.quotaWaitWord(state.tasks.first { it.status == "WAITING_FOR_QUOTA" }.note)
         busy -> MaterialTheme.colorScheme.primary to "작업 중"
         else -> s.ok to state.connectedText
     }
@@ -204,14 +247,24 @@ private fun PhoneBottomBar(current: Section, pending: Int, onSelect: (Section) -
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             TABS.forEach { t ->
                 val selected = t.section == current
+                val source = remember { MutableInteractionSource() }
+                // The selected tab's pill grows out of its centre while the icon darkens and swells a little; the old one shrinks away.
+                val pill by animateFloatAsState(if (selected) 1f else 0f, Motion.arrive(Motion.Standard), label = "pill")
+                val iconColor by animateColorAsState(if (selected) scheme.onSurface else scheme.onSurfaceVariant, Motion.arrive(Motion.Standard), label = "iconColor")
+                val iconScale by animateFloatAsState(if (selected) 1.1f else 1f, Motion.settle(), label = "iconScale")
                 Box(
                     Modifier.weight(1f).height(48.dp).coachTarget("nav.${t.section.name.lowercase()}")
-                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onSelect(t.section) }
+                        .clickable(interactionSource = source, indication = null) { onSelect(t.section) }
                         .semantics { contentDescription = t.label },
                     contentAlignment = Alignment.Center,
                 ) {
-                    Box(Modifier.size(width = 60.dp, height = 40.dp).background(if (selected) scheme.surfaceVariant else Color.Transparent, RoundedCornerShape(20.dp)), contentAlignment = Alignment.Center) {
-                        Icon(t.icon, contentDescription = null, tint = if (selected) scheme.onSurface else scheme.onSurfaceVariant, modifier = Modifier.size(24.dp))
+                    Box(
+                        Modifier.pressScale(source, 0.88f).size(width = 60.dp, height = 40.dp)
+                            .graphicsLayer { scaleX = 0.4f + 0.6f * pill }
+                            .background(scheme.surfaceVariant.copy(alpha = pill), RoundedCornerShape(20.dp)),
+                    )
+                    Box(Modifier.pressScale(source, 0.88f).size(width = 60.dp, height = 40.dp), contentAlignment = Alignment.Center) {
+                        Icon(t.icon, contentDescription = null, tint = iconColor, modifier = Modifier.size(24.dp).graphicsLayer { scaleX = iconScale; scaleY = iconScale })
                     }
                     if (t.section == Section.Tasks && pending > 0 && !selected) {
                         Box(Modifier.align(Alignment.Center).padding(start = 22.dp, bottom = 20.dp).size(9.dp).background(s.danger, CircleShape))
@@ -231,7 +284,7 @@ internal fun taskStatusLine(t: TaskSummary): Pair<Color, String> {
         "WAITING_FOR_APPROVAL" -> s.warn to "승인 대기"
         "RUNNING", "PENDING" -> MaterialTheme.colorScheme.primary to "진행 중"
         "RETRY_WAIT" -> s.warn to "다시 시도 중"
-        "WAITING_FOR_QUOTA" -> s.warn to "한도 대기"
+        "WAITING_FOR_QUOTA" -> s.warn to dev.aeon.ui.design.quotaWaitWord(t.note)
         "WAITING_FOR_DEVICE" -> s.warn to "기기 대기"
         "FAILED" -> s.danger to "실패"
         "CANCELLED" -> neutral to "중단됨"
@@ -260,10 +313,11 @@ private fun ChatDrawer(state: UiState, model: AppModel, modifier: Modifier) {
         LazyColumn(Modifier.weight(1f).padding(top = 12.dp), contentPadding = PaddingValues(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             items(state.tasks, key = { it.id }) { t ->
                 val (dot, _) = taskStatusLine(t)
+                val motion = itemMotion()
                 val selected = t.id == state.selectedTaskId
                 val quiet = t.status == "COMPLETED" && t.verification?.status != "failed" || t.status == "CANCELLED"
                 Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(AeonShape.CONTROL.dp)).background(if (selected) scheme.surface else Color.Transparent)
+                    motion.fillMaxWidth().clip(RoundedCornerShape(AeonShape.CONTROL.dp)).background(if (selected) scheme.surface else Color.Transparent)
                         .clickable { model.selectTask(t.id) }.padding(horizontal = 14.dp, vertical = 13.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
@@ -331,7 +385,8 @@ fun AgentHubScreen(state: UiState, model: AppModel, modifier: Modifier = Modifie
     }
     val ok = state.usage.filter { it.ok }
     val connected = state.connection is Connection.Connected
-    val modelName = state.models.current?.model?.takeIf { it.isNotBlank() }
+    // The service the person chose ("EXAONE"), not the model id ("k-exaone_v2.5").
+    val modelName = state.models.current?.let { it.providerName.ifBlank { it.provider }.ifBlank { it.model } }?.takeIf { it.isNotBlank() }
     val open: (SettingsPage) -> Unit = { model.openSettings(it) }
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, bottom = 24.dp)) {
         Row(
@@ -352,16 +407,16 @@ fun AgentHubScreen(state: UiState, model: AppModel, modifier: Modifier = Modifie
             Chip(if (connected) "연결됨" else "끊김", if (connected) Tone.Ok else Tone.Danger)
         }
         Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            StatCard("모델 호출", "${ok.size}번", Modifier.weight(1f))
-            StatCard("사용한 토큰", "${ok.sumOf { it.inputTokens + it.outputTokens }}", Modifier.weight(1f))
+            StatCard("AI 사용 횟수", "${ok.size}번", Modifier.weight(1f))
+            StatCard("읽고 쓴 양", "${ok.sumOf { it.inputTokens + it.outputTokens }}", Modifier.weight(1f))
         }
         GroupHeader("설정")
         ListSurface {
             SettingRow(AeonIcons.Agent, "개인화", state.profile.userName ?: "") { open(SettingsPage.Personal) }
             RowDivider(64.dp)
-            SettingRow(AeonIcons.Cpu, "모델", modelName ?: "") { open(SettingsPage.Models) }
+            SettingRow(AeonIcons.Cpu, "AI", modelName ?: "") { open(SettingsPage.Models) }
             RowDivider(64.dp)
-            SettingRow(AeonIcons.Key, "API 키", if (state.secretNames.isEmpty()) "없음" else "${state.secretNames.size}개 보관") { open(SettingsPage.Keys) }
+            SettingRow(AeonIcons.Key, "접속 키", if (state.secretNames.isEmpty()) "없음" else "${state.secretNames.size}개 보관") { open(SettingsPage.Keys) }
             RowDivider(64.dp)
             SettingRow(AeonIcons.Phone, "연결된 기기", if (state.devices.isEmpty()) "" else "${state.devices.count { !it.revoked }}대") { open(SettingsPage.Devices) }
             RowDivider(64.dp)
