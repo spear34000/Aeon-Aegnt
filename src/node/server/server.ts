@@ -659,6 +659,14 @@ export class AeonServer {
         if (!Number.isFinite(t) || new Date(t).getDate() !== Number(m![3])) throw new HttpError(400, 'expires must be a date as "YYYY-MM-DD" or null');
         return t;
       };
+      /** Either [expires] (a date, or null for no end) or [expiresInDays] (1 to 3650, counted from today, to the end of that day). */
+      const period = (b: Record<string, unknown>): number | null | undefined => {
+        if (b.expiresInDays === undefined) return until(b.expires);
+        const n = b.expiresInDays;
+        if (typeof n !== "number" || !Number.isInteger(n) || n < 1 || n > 3650) throw new HttpError(400, "expiresInDays must be a whole number from 1 to 3650");
+        const d = new Date(this.clock.now());
+        return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n, 23, 59, 59).getTime();
+      };
       const view = () => {
         memory.purgePast();
         const all = memory.list();
@@ -680,7 +688,7 @@ export class AeonServer {
         if (!text) throw new HttpError(400, "text must be a sentence of 3 to 300 characters");
         if (rt.redactor.redact(text) !== text) throw new HttpError(400, "that looks like a secret (a key, token or password): it would be sent to the model with every task");
         if (b.kind !== undefined && b.kind !== "preference" && b.kind !== "fact") throw new HttpError(400, 'kind must be "preference" or "fact"');
-        const end = until(b.expires);
+        const end = period(b);
         return this.json(res, 201, { item: memory.add(text, b.kind === "preference" ? "preference" : "fact", { type: "owner" }, end ? { expiresAt: end } : {}) });
       }
       if (id && method === "PATCH") {
@@ -697,7 +705,7 @@ export class AeonServer {
           if (b.kind !== "preference" && b.kind !== "fact") throw new HttpError(400, 'kind must be "preference" or "fact"');
           patch.kind = b.kind;
         }
-        const end = until(b.expires);
+        const end = period(b);
         if (end !== undefined) patch.expiresAt = end;
         const item = memory.update(id, patch);
         if (!item) throw new HttpError(404, "nothing remembered with that id");
@@ -718,7 +726,7 @@ export class AeonServer {
           if (rt.redactor.redact(t) !== t) throw new HttpError(400, "that looks like a secret (a key, token or password): it would be sent to the model with every task");
           text = t;
         }
-        const end = until(b.expires);
+        const end = period(b);
         const item = memory.accept(proposalId, text, end ?? undefined);
         if (!item) throw new HttpError(404, "no such suggestion");
         return this.json(res, 200, { item, ...view() });

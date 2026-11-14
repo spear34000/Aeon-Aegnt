@@ -10,6 +10,7 @@ import io.ktor.client.statement.bodyAsBytes
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpMethod
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
@@ -236,13 +237,34 @@ class AeonClient(
     /** What the owner wants remembered across tasks, newest first. */
     suspend fun memory(): MemoryResponse = ApiJson.decodeFromString(signed(HttpMethod.Get, "/v1/memory"))
 
-    suspend fun addMemory(text: String, kind: String): MemoryItem {
+    /** [days] is how long to remember it, counted from today; null means without an end. */
+    suspend fun addMemory(text: String, kind: String, days: Int? = null): MemoryItem {
         val json = buildJsonObject {
             put("text", text)
             put("kind", kind)
+            if (days != null) put("expiresInDays", days)
         }
         return ApiJson.decodeFromString<MemoryItemResponse>(signed(HttpMethod.Post, "/v1/memory", json.toString())).item
     }
+
+    /** Changes a memory. [periodChanged] says whether [days] (null: no end) is to be applied; otherwise the period is left as it is. */
+    suspend fun editMemory(id: String, text: String, periodChanged: Boolean, days: Int?): MemoryResponse {
+        val json = buildJsonObject {
+            put("text", text)
+            if (periodChanged) { if (days == null) put("expires", JsonNull) else put("expiresInDays", days) }
+        }
+        return ApiJson.decodeFromString(signed(HttpMethod.Patch, "/v1/memory/$id", json.toString()))
+    }
+
+    suspend fun acceptMemoryProposal(id: String, text: String, periodChanged: Boolean, days: Int?): MemoryResponse {
+        val json = buildJsonObject {
+            put("text", text)
+            if (periodChanged && days != null) put("expiresInDays", days)
+        }
+        return ApiJson.decodeFromString(signed(HttpMethod.Post, "/v1/memory/proposals/$id/accept", json.toString()))
+    }
+
+    suspend fun ignoreMemoryProposal(id: String): MemoryResponse = ApiJson.decodeFromString(signed(HttpMethod.Delete, "/v1/memory/proposals/$id"))
 
     suspend fun deleteMemory(id: String) {
         signed(HttpMethod.Delete, "/v1/memory/$id")

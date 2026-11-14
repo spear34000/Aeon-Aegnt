@@ -112,6 +112,12 @@ data class SkillAddState(
 /** What the agent remembers across tasks: the list, the sheet for a new one, the one being looked at. */
 data class MemoryState(
     val items: List<dev.aeon.ui.api.MemoryItem> = emptyList(),
+    /** Memories that ran out; removed 30 days later. */
+    val past: List<dev.aeon.ui.api.MemoryItem> = emptyList(),
+    /** What finished tasks suggest keeping. */
+    val proposals: List<dev.aeon.ui.api.MemoryProposal> = emptyList(),
+    /** A memory or a suggestion open for rewording. */
+    val edit: MemoryEdit? = null,
     val loaded: Boolean = false,
     val textMax: Int = 300,
     /** The sheet for writing a new memory, or null when closed. */
@@ -122,7 +128,10 @@ data class MemoryState(
     val error: String? = null,
 )
 
-data class MemoryDraft(val text: String = "", val kind: String = "preference")
+data class MemoryDraft(val text: String = "", val kind: String = "preference", val days: Int? = null)
+
+/** Rewording a kept memory ([memoryId]) or a suggestion ([proposalId]); [days] is the period chosen, null for no end, used only if [periodChanged]. */
+data class MemoryEdit(val memoryId: String? = null, val proposalId: String? = null, val text: String = "", val periodChanged: Boolean = false, val days: Int? = null)
 
 /** One skill open on its detail page, and what is being done to it. */
 data class SkillDetailState(val skill: dev.aeon.ui.api.SkillItem, val busy: Boolean = false, val error: String? = null)
@@ -1180,8 +1189,13 @@ class AppModel(
 
     fun loadMemory() {
         scope.launch {
-            runCatching { client.memory() }.onSuccess { r -> memory { it.copy(items = r.items, textMax = r.textMax, loaded = true) } }
+            runCatching { client.memory() }.onSuccess { r -> showMemory(r) }
         }
+    }
+
+    private fun showMemory(r: dev.aeon.ui.api.MemoryResponse) = memory { m ->
+        m.copy(items = r.items, past = r.past, proposals = r.proposals, textMax = r.textMax, loaded = true, busy = false, error = null,
+            picked = m.picked?.let { p -> (r.items + r.past).firstOrNull { it.id == p.id } })
     }
 
     fun openMemoryDraft() = memory { it.copy(draft = MemoryDraft(), picked = null, error = null) }
@@ -1198,10 +1212,11 @@ class AppModel(
         if (d.text.trim().length < 3 || _state.value.memory.busy) return
         scope.launch {
             memory { it.copy(busy = true, error = null) }
-            runCatching { client.addMemory(d.text.trim(), d.kind) }
+            runCatching { client.addMemory(d.text.trim(), d.kind, d.days) }
                 .onSuccess {
                     val r = runCatching { client.memory() }.getOrNull()
-                    memory { m -> m.copy(busy = false, draft = null, items = r?.items ?: (listOf(it) + m.items), loaded = true) }
+                    if (r != null) showMemory(r) else memory { m -> m.copy(items = listOf(it) + m.items, loaded = true) }
+                    memory { m -> m.copy(busy = false, draft = null) }
                 }
                 .onFailure { e -> memory { it.copy(busy = false, error = memoryMessage(e)) } }
         }
@@ -1212,8 +1227,49 @@ class AppModel(
         scope.launch {
             memory { it.copy(busy = true, error = null) }
             runCatching { client.deleteMemory(id) }
-                .onSuccess { memory { m -> m.copy(busy = false, picked = null, items = m.items.filter { it.id != id }) } }
+                .onSuccess { memory { m -> m.copy(busy = false, picked = null, items = m.items.filter { it.id != id }, past = m.past.filter { it.id != id }) } }
                 .onFailure { e -> memory { it.copy(busy = false, error = memoryMessage(e)) } }
+        }
+    }
+
+    fun editMemory(item: dev.aeon.ui.api.MemoryItem) = memory { it.copy(edit = MemoryEdit(memoryId = item.id, text = item.text), picked = null, error = null) }
+    fun editProposal(p: dev.aeon.ui.api.MemoryProposal) = memory { it.copy(edit = MemoryEdit(proposalId = p.id, text = p.text), error = null) }
+    fun changeMemoryEditText(text: String) = memory { m -> m.copy(edit = m.edit?.copy(text = text.take(m.textMax)), error = null) }
+    fun changeMemoryEditPeriod(days: Int?) = memory { m -> m.copy(edit = m.edit?.copy(periodChanged = true, days = days), error = null) }
+    fun closeMemoryEdit() = memory { it.copy(edit = null, error = null) }
+
+    /** Saves the reworded memory, or accepts the reworded suggestion. */
+    fun saveMemoryEdit() {
+        val e = _state.value.memory.edit ?: return
+        if (e.text.trim().length < 3 || _state.value.memory.busy) return
+        scope.launch {
+            memory { it.copy(busy = true, error = null) }
+            runCatching {
+                if (e.memoryId != null) client.editMemory(e.memoryId, e.text.trim(), e.periodChanged, e.days)
+                else client.acceptMemoryProposal(e.proposalId!!, e.text.trim(), e.periodChanged, e.days)
+            }.onSuccess { r -> showMemory(r); memory { it.copy(edit = null) } }
+                .onFailure { err -> memory { it.copy(busy = false, error = memoryMessage(err)) } }
+        }
+    }
+
+    /** Accepts a suggestion as it is worded. */
+    fun acceptMemoryProposal(p: dev.aeon.ui.api.MemoryProposal) {
+        if (_state.value.memory.busy) return
+        scope.launch {
+            memory { it.copy(busy = true, error = null) }
+            runCatching { client.acceptMemoryProposal(p.id, p.text, false, null) }
+                .onSuccess { r -> showMemory(r) }
+                .onFailure { err -> memory { it.copy(busy = false, error = memoryMessage(err)) } }
+        }
+    }
+
+    fun ignoreMemoryProposal(p: dev.aeon.ui.api.MemoryProposal) {
+        if (_state.value.memory.busy) return
+        scope.launch {
+            memory { it.copy(busy = true, error = null) }
+            runCatching { client.ignoreMemoryProposal(p.id) }
+                .onSuccess { r -> showMemory(r) }
+                .onFailure { err -> memory { it.copy(busy = false, error = memoryMessage(err)) } }
         }
     }
 

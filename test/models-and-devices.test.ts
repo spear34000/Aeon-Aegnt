@@ -659,6 +659,10 @@ describe("Setting things up from any paired device", () => {
     const kept = (await call("POST", "/v1/memory", { text: "My sister Mina lives in Busan", expires: "2099-01-01" })).body.item;
     assert.ok(kept.expiresAt > 0, "a memory can be added with an end date");
     assert.equal((await call("POST", "/v1/memory", { text: "A fine sentence", expires: "tomorrow" })).status, 400);
+    const week = (await call("POST", "/v1/memory", { text: "Parcel arrives at the door", expiresInDays: 7 })).body.item;
+    assert.equal(week.expiresAt > t.clock.now() + 6 * 86_400_000 && week.expiresAt < t.clock.now() + 8 * 86_400_000, true, "a period in days counts from today, to the end of that day");
+    for (const bad of [0, 3651, 1.5, "7"]) assert.equal((await call("POST", "/v1/memory", { text: "Another fine one", expiresInDays: bad })).status, 400, String(bad));
+    await call("DELETE", `/v1/memory/${week.id}`);
     const memory = t.rt.memory!;
     const [fix, extra] = memory.propose([{ text: "My sister Mina lives in Daegu now" }, { text: "I am allergic to peanuts" }], "task_1");
     const got = (await call("GET", "/v1/memory")).body;

@@ -370,8 +370,35 @@ data class FeedResponse(
 
 /** Who made a memory: the owner typed it, or the agent proposed it in a task and the owner approved those exact words. */
 @Serializable data class MemorySource(val type: String = "owner", val taskId: String? = null)
-@Serializable data class MemoryItem(val id: String, val text: String, val kind: String = "fact", val source: MemorySource = MemorySource(), val createdAt: Double = 0.0, val lastUsedAt: Double? = null, val uses: Int = 0)
-@Serializable data class MemoryResponse(val items: List<MemoryItem> = emptyList(), val max: Int = 200, val textMax: Int = 300)
+/** An earlier wording of a memory. It is deleted together with the memory. */
+@Serializable data class MemoryHistory(val text: String = "", val at: Double = 0.0)
+@Serializable
+data class MemoryItem(
+    val id: String,
+    val text: String,
+    val kind: String = "fact",
+    val source: MemorySource = MemorySource(),
+    val createdAt: Double = 0.0,
+    val lastUsedAt: Double? = null,
+    val uses: Int = 0,
+    /** After this time the memory is not used any more (it stays in the list as past for 30 days). */
+    val expiresAt: Double? = null,
+    val history: List<MemoryHistory> = emptyList(),
+)
+
+/** What a finished task suggests keeping. It waits for the owner; [replaces] is the kept memory it would correct. */
+@Serializable data class MemoryProposal(val id: String, val text: String, val kind: String = "fact", val taskId: String = "", val createdAt: Double = 0.0, val replaces: String? = null)
+
+/** The memory page: what is in use, what ran out, what is suggested. [item] is the one the last change was about. */
+@Serializable
+data class MemoryResponse(
+    val items: List<MemoryItem> = emptyList(),
+    val past: List<MemoryItem> = emptyList(),
+    val proposals: List<MemoryProposal> = emptyList(),
+    val max: Int = 200,
+    val textMax: Int = 300,
+    val item: MemoryItem? = null,
+)
 @Serializable data class MemoryItemResponse(val item: MemoryItem)
 
 @Serializable data class SkillsResponse(val skills: List<SkillItem> = emptyList(), val dir: String = "", val projectDir: String? = null, val canEdit: Boolean = false)

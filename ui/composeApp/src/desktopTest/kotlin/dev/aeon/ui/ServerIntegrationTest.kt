@@ -544,4 +544,45 @@ class ServerIntegrationTest {
         assertEquals(listOf(mine.id), client.memory().items.map { it.id })
         assertEquals(404, assertFailsWith<AeonException> { client.deleteMemory(proposed.id) }.status)
     }
+
+    @Test
+    fun aFinishedTaskSuggestsWhatToKeepAndTheOwnerAcceptsRewordsOrTurnsItDown() = runBlocking {
+        val port = startFakeModel(
+            listOf(
+                """{"plan":["say hello"],"criteria":[]}""",
+                """{"action":"finish","summary":"said hello","remember":[{"text":"The owner wants reports as a short list","kind":"preference"},{"text":"My sister Mina lives in Busan","kind":"fact"}]}""",
+            ),
+        )
+        val fx = startAeon(port)
+        val (client, _) = newClient(fx.base)
+        client.pair(fx.code, "kotlin test client")
+        val old = client.addMemory("My sister Mina lives in Daegu now", "fact")
+        val created = client.createTask("say hello", emptyList())
+        assertEquals("COMPLETED", awaitTask(client, created.id, "COMPLETED", "FAILED").status)
+
+        val page = client.memory()
+        assertEquals(listOf("The owner wants reports as a short list", "My sister Mina lives in Busan"), page.proposals.map { it.text }.sortedByDescending { it.startsWith("The") })
+        assertEquals(listOf(old.id), page.items.map { it.id }, "nothing is kept before the owner accepts")
+        val short = page.proposals.first { it.text.startsWith("The owner") }
+        val busan = page.proposals.first { it.text.startsWith("My sister") }
+        assertEquals(old.id, busan.replaces, "a close suggestion says which memory it would correct")
+
+        // Accepted in the owner's own words and with a period of a week.
+        val kept = client.acceptMemoryProposal(short.id, "Reports go to me as a short list", periodChanged = true, days = 7)
+        assertEquals("Reports go to me as a short list", kept.item!!.text)
+        assertEquals("owner", kept.item!!.source.type)
+        assertTrue((kept.item!!.expiresAt ?: 0.0) > System.currentTimeMillis())
+        // Accepted as worded: the kept memory is corrected and its older wording stays as history.
+        val fixed = client.acceptMemoryProposal(busan.id, busan.text, periodChanged = false, days = null)
+        assertEquals(listOf("My sister Mina lives in Busan", "My sister Mina lives in Daegu now"), listOf(fixed.item!!.text, fixed.item!!.history.single().text))
+        assertEquals(0, fixed.proposals.size)
+        // Taking the period away.
+        val open = client.editMemory(kept.item!!.id, kept.item!!.text, periodChanged = true, days = null)
+        assertEquals(null, open.item!!.expiresAt)
+        // Deleting removes the memory with its history.
+        client.deleteMemory(fixed.item!!.id)
+        assertEquals(listOf(kept.item!!.id), client.memory().items.map { it.id })
+        assertEquals("이 기억을 지울까요?", dev.aeon.ui.screens.riskInfo(dev.aeon.ui.api.Approval(id = "a", taskId = "t", tool = "memory.forget", summary = "Forget: x", risk = "delete", status = "pending")).title(1))
+        assertEquals("1월 5일", dev.aeon.ui.screens.shortDate(java.time.LocalDateTime.of(2027, 1, 5, 12, 0).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli().toDouble()))
+    }
 }

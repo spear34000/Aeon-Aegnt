@@ -49,7 +49,7 @@ import dev.aeon.ui.platform.nowMillis
  */
 data class RiskInfo(val kind: String, val level: Int, val title: (Int) -> String)
 
-fun riskInfo(a: Approval): RiskInfo = if (a.tool == "skill.run") RiskInfo("스크립트", 2) { _ -> "스크립트를 실행할까요?" } else if (a.tool == "skill.create") RiskInfo("스킬", 2) { _ -> "스킬을 만들까요?" } else if (a.tool == "skill.update") RiskInfo("스킬", 2) { _ -> "스킬을 바꿀까요?" } else if (a.tool == "memory.save") RiskInfo("기억", 2) { _ -> "이걸 기억할까요?" } else when (a.risk) {
+fun riskInfo(a: Approval): RiskInfo = if (a.tool == "skill.run") RiskInfo("스크립트", 2) { _ -> "스크립트를 실행할까요?" } else if (a.tool == "skill.create") RiskInfo("스킬", 2) { _ -> "스킬을 만들까요?" } else if (a.tool == "skill.update") RiskInfo("스킬", 2) { _ -> "스킬을 바꿀까요?" } else if (a.tool == "memory.save") RiskInfo("기억", 2) { _ -> "이걸 기억할까요?" } else if (a.tool == "memory.forget") RiskInfo("기억", 3) { _ -> "이 기억을 지울까요?" } else when (a.risk) {
     "read" -> RiskInfo("읽기", 1) { n -> "파일 ${n}개를 읽을까요?" }
     "write" -> RiskInfo("쓰기", 2) { n -> "파일 ${n}개를 쓸까요?" }
     "delete" -> RiskInfo("삭제", 3) { n -> "파일 ${n}개를 삭제할까요?" }
@@ -85,7 +85,8 @@ fun ApprovalCard(a: Approval, seenAt: Long?, sourceLabel: String, onDecide: (Boo
     val isFileAction = a.risk == "read" || a.risk == "write" || a.risk == "delete"
     val isSkill = a.tool == "skill.create" || a.tool == "skill.update"
     // Remembering is not "sending out": the card shows the sentence exactly as it will be kept, and nothing else.
-    val isMemory = a.tool == "memory.save"
+    val isMemory = a.tool == "memory.save" || a.tool == "memory.forget"
+    val isForget = a.tool == "memory.forget"
     val leftMs = a.expiresAt - now
     var allowReady by remember(a.id) { mutableStateOf(seenAt == null || now - seenAt >= 1000) }
     var showAll by remember(a.id) { mutableStateOf(false) }
@@ -139,14 +140,20 @@ fun ApprovalCard(a: Approval, seenAt: Long?, sourceLabel: String, onDecide: (Boo
                 }
             }
         } else if (isMemory) {
-            val kind = if (a.resources.firstOrNull() == "memory:preference") "일하는 방식" else "나에 대해"
-            val text = a.detail?.takeIf { it.isNotBlank() } ?: a.summary.removePrefix("Remember: ")
-            Chip(kind, Tone.Neutral)
-            Column(Modifier.fillMaxWidth().background(scheme.background, RoundedCornerShape(AeonShape.CONTROL.dp)).padding(horizontal = 14.dp, vertical = 12.dp)) {
+            val full = a.detail?.takeIf { it.isNotBlank() } ?: a.summary.removePrefix("Remember: ").removePrefix("Forget: ")
+            val text = full.substringBefore("\n← ")
+            val old = full.substringAfter("\n← ", "").takeIf { it.isNotBlank() }
+            val until = a.resources.firstOrNull { it.startsWith("expires:") }?.removePrefix("expires:")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (!isForget) Chip(if (a.resources.firstOrNull() == "memory:preference") "일하는 방식" else "나에 대해", Tone.Neutral)
+                if (until != null) Chip("${until.substring(5, 7).trimStart('0')}월 ${until.substring(8, 10).trimStart('0')}일까지", Tone.Warn)
+            }
+            Column(Modifier.fillMaxWidth().background(scheme.background, RoundedCornerShape(AeonShape.CONTROL.dp)).padding(horizontal = 14.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 SelectionContainer { Text(text, style = MaterialTheme.typography.titleMedium) }
+                if (old != null) Text("이전: $old", style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
             }
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                listOf("이 문장 그대로 저장돼요. 다른 말은 덧붙지 않아요.", "앞으로 모든 작업에서 에이전트가 참고해요.", "내 에이전트 › 기억에서 언제든 지울 수 있어요.").forEach { Text("✓ $it", style = MaterialTheme.typography.bodySmall, color = s.ok) }
+                (if (isForget) listOf("지우면 이전 기록도 함께 사라져요.") else listOf("이 문장 그대로 저장돼요. 다른 말은 덧붙지 않아요.", "앞으로 모든 작업에서 에이전트가 참고해요.", "내 에이전트 › 기억에서 언제든 지울 수 있어요.")).forEach { Text("✓ $it", style = MaterialTheme.typography.bodySmall, color = s.ok) }
             }
         } else if (isSkill) {
             // A skill steers every later task, so the owner sees what it is called, what it is for and, one tap away, what it says.
@@ -197,9 +204,9 @@ fun ApprovalCard(a: Approval, seenAt: Long?, sourceLabel: String, onDecide: (Boo
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            AeonButton(if (isMemory) "기억하지 않기" else "거부", { onDecide(false) }, Modifier.weight(1f).focusRequester(denyFocus), kind = ButtonKind.Strong)
+            AeonButton(if (isForget) "그대로 두기" else if (isMemory) "기억하지 않기" else "거부", { onDecide(false) }, Modifier.weight(1f).focusRequester(denyFocus), kind = ButtonKind.Strong)
             AeonButton(
-                if (!allowReady) "잠시만…" else if (isRun && isolation == "host") "그래도 허용" else if (isMemory) "기억하기" else "허용",
+                if (!allowReady) "잠시만…" else if (isRun && isolation == "host") "그래도 허용" else if (isForget) "지우기" else if (isMemory) "기억하기" else "허용",
                 { haptic.performHapticFeedback(HapticFeedbackType.LongPress); onDecide(true) },
                 Modifier.weight(1f),
                 kind = if (high) ButtonKind.Destructive else ButtonKind.Primary,
