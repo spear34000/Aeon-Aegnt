@@ -1,7 +1,9 @@
 package dev.aeon.ui
 
 import dev.aeon.ui.design.quotaWaitWord
+import dev.aeon.ui.screens.GOAL_LIMIT
 import dev.aeon.ui.screens.friendlyError
+import dev.aeon.ui.screens.goalTooLong
 import dev.aeon.ui.screens.friendlyProblem
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -36,6 +38,14 @@ class CopyTest {
         }
         assertEquals("인터넷에 연결되지 않아 AI 서비스에 닿지 못했어요. 연결을 확인하고 다시 해 보세요.", friendlyError("exaone: network: network error: fetch failed"))
         assertTrue(friendlyError("exaone: weird: x").startsWith("문제가 생겨서 멈췄어요."), "an unknown kind is not mistaken for a known one")
+    }
+
+    @Test
+    fun aMessageTooLongForTheServerIsStoppedBeforeSending() {
+        assertEquals(4000, GOAL_LIMIT, "the same limit as the server's goal")
+        assertFalse(goalTooLong("가".repeat(4000)))
+        assertTrue(goalTooLong("가".repeat(4001)))
+        assertFalse(goalTooLong("  " + "가".repeat(4000) + "  "), "spaces around it do not count, the server trims them too")
     }
 
     @Test

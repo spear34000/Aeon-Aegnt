@@ -48,6 +48,11 @@ import dev.aeon.ui.platform.rememberFilePicker
 import dev.aeon.ui.state.AppModel
 import dev.aeon.ui.state.UiState
 
+/** The server takes a goal of at most this many characters; the composer says so before sending instead of after a refusal. */
+internal const val GOAL_LIMIT = 4000
+
+internal fun goalTooLong(text: String): Boolean = text.trim().length > GOAL_LIMIT
+
 private fun effortLabel(e: String?): String? = when (e) {
     "low" -> "빠르게"
     "medium" -> "보통"
@@ -66,7 +71,8 @@ fun Composer(state: UiState, model: AppModel, enabled: Boolean, onSend: (String)
     val s = LocalAeonStatus.current
     val scheme = MaterialTheme.colorScheme
     val pick = rememberFilePicker(model::attach)
-    val canSend = enabled && !state.uploading && text.isNotBlank()
+    val tooLong = goalTooLong(text)
+    val canSend = enabled && !state.uploading && text.isNotBlank() && !tooLong
     fun send() {
         if (!canSend) return
         onSend(text)
@@ -140,6 +146,7 @@ fun Composer(state: UiState, model: AppModel, enabled: Boolean, onSend: (String)
                 ) { Icon(AeonIcons.Send, contentDescription = null, tint = if (canSend) scheme.onPrimary else s.fg3, modifier = Modifier.size(20.dp)) }
             }
         }
-        if (hint != null) Text(hint, style = MaterialTheme.typography.bodySmall, color = s.fg3, modifier = Modifier.padding(start = 16.dp))
+        if (tooLong) Text("글이 너무 길어요. ${GOAL_LIMIT}자까지 보낼 수 있어요. (지금 ${text.trim().length}자)", style = MaterialTheme.typography.bodySmall, color = s.warn, modifier = Modifier.padding(start = 16.dp))
+        else if (hint != null) Text(hint, style = MaterialTheme.typography.bodySmall, color = s.fg3, modifier = Modifier.padding(start = 16.dp))
     }
 }
