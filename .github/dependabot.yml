@@ -1,0 +1,31 @@
+version: 2
+updates:
+  # The Node agent core has no runtime dependencies: only TypeScript and the Node typings (dev only).
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      dev-tools:
+        patterns: ["*"]
+  # Kotlin, Compose, Ktor and Gradle plugins of the apps.
+  - package-ecosystem: gradle
+    directory: /ui
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      gradle:
+        patterns: ["*"]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: "chore(ci)"

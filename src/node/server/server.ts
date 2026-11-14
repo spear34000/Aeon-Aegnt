@@ -119,7 +119,9 @@ export class AeonServer {
   private readonly nonces = new NonceCache(FRESHNESS_MS * 2);
   private server: Server | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
-  private ticking = false;
+  /** The scheduler pass that is running now, if any, and whether another was asked for while it ran. */
+  private tickRun: Promise<void> | null = null;
+  private tickAgain = false;
   private readonly sseClients = new Set<ServerResponse>();
 
   constructor(o: AeonServerOptions) {
@@ -230,17 +232,34 @@ export class AeonServer {
     }
   }
 
-  /** One scheduler pass (also called by the background loop). */
-  async tick(): Promise<void> {
-    if (this.ticking) return;
-    this.ticking = true;
-    try {
-      await this.o.getRuntime().engine.tick();
-    } catch {
-      /* a failing pass must not kill the loop; task failures are recorded on the tasks themselves */
-    } finally {
-      this.ticking = false;
+  /**
+   * One scheduler pass (also called by the background loop and after a task or an approval arrives).
+   * Passes never overlap. A request that arrives while one runs is not dropped: one more pass follows it,
+   * so a task submitted a moment after a pass began is picked up at once, and the returned promise settles
+   * only when that last pass is done, so a caller that awaits it sees the result of its own request.
+   */
+  tick(): Promise<void> {
+    if (this.tickRun) {
+      this.tickAgain = true;
+      return this.tickRun;
     }
+    // Started on the next microtask, so `tickRun` is set before the pass can finish, even if it fails at once.
+    const run = Promise.resolve().then(async () => {
+      try {
+        do {
+          this.tickAgain = false;
+          try {
+            await this.o.getRuntime().engine.tick();
+          } catch {
+            /* a failing pass must not kill the loop; task failures are recorded on the tasks themselves */
+          }
+        } while (this.tickAgain);
+      } finally {
+        this.tickRun = null;
+      }
+    });
+    this.tickRun = run;
+    return run;
   }
 
   // ---------------------------------------------------------------- plumbing
@@ -615,7 +634,7 @@ export class AeonServer {
         if (!this.canAdmin(req, deviceId)) throw new HttpError(403, "this device is not allowed to change routines");
       };
       const now = this.clock.now();
-      const view = () => ({ routines: store.list().map((r) => ({ ...r, nextRunAt: r.enabled ? nextDueAt(r.schedule, now) : null })), runsToday: store.runsToday(now), cap: DAILY_RUN_CAP, utcOffsetMinutes: -new Date(now).getTimezoneOffset() });
+      const view = () => ({ routines: store.list().map((r) => ({ ...r, nextRunAt: r.enabled ? nextDueAt(r.schedule, now) : null })), runsToday: store.runsToday(now), cap: DAILY_RUN_CAP, utcOffsetMinutes: 0 - new Date(now).getTimezoneOffset() });
       if (!id && method === "GET") return this.json(res, 200, view());
       if (!id && method === "POST") {
         admin();

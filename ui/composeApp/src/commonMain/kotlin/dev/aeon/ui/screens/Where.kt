@@ -45,7 +45,7 @@ import dev.aeon.ui.design.Tone
 import dev.aeon.ui.state.AppModel
 import dev.aeon.ui.state.UiState
 
-private val GUIDE_COMMANDS = listOf("git clone https://github.com/spear34000/Aeon-Aegnt", "cd Aeon-Aegnt", "node src/node/cli.ts serve --host 0.0.0.0")
+private val GUIDE_COMMANDS = listOf("git clone https://github.com/spear34000/Aeon-Agent", "cd Aeon-Agent", "node src/node/cli.ts serve --host 0.0.0.0")
 
 @Composable
 private fun WhereOption(icon: ImageVector, title: String, points: List<String>, selected: Boolean, chip: String? = null, onClick: () -> Unit) {

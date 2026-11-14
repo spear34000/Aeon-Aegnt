@@ -14,6 +14,24 @@ export function tempDir(prefix = "aeon-test-"): { dir: string; cleanup: () => vo
   return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
+const openThings: Array<() => Promise<unknown>> = [];
+
+/**
+ * Makes a close function safe to call twice and registers it to run after the test, so a test that fails
+ * halfway still closes its server: an open server keeps the whole test process alive, and CI would wait for it forever.
+ * Use it together with `afterEach(closeLeftovers)` in the test file.
+ */
+export function closeAfterTest(close: () => unknown): () => Promise<void> {
+  let once: Promise<unknown> | undefined;
+  const run = () => (once ??= Promise.resolve().then(close));
+  openThings.push(run);
+  return async () => void (await run());
+}
+
+export async function closeLeftovers(): Promise<void> {
+  for (const run of openThings.splice(0)) await run().catch(() => {});
+}
+
 export const fakeSandbox = (calls: string[][] = []): SandboxRunner => ({
   async run(args) {
     calls.push(args);

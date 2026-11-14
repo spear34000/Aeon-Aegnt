@@ -1,0 +1,54 @@
+name: CI
+
+# Runs on every pull request and on main. The checks are the ones docs/BRANCHING.md asks for before a PR:
+# typecheck + tests of the core, and the Kotlin tests (which start the real Node server) plus the web compile.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core:
+    name: Core (TypeScript)
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      # A per-test limit and a live reporter, so a slow test is named in the log; the step limit ends a test file that never exits within minutes (a normal run takes well under one).
+      - run: npm test -- --test-reporter=spec --test-timeout=180000
+        timeout-minutes: 8
+
+  apps:
+    name: Apps (Kotlin)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Desktop tests (they start the real Node server) and web compile
+        working-directory: ui
+        run: bash ./gradlew :composeApp:desktopTest :composeApp:compileKotlinWasmJs --console=plain

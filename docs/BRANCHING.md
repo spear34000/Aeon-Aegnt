@@ -25,6 +25,13 @@ Decision D28. The aim: `main` always works, every change reaches it through a sh
 - A fix follows the same path (`fix/…`), only smaller. There are no long-lived `develop` or release branches; a release is a tag on `main` (`v0.x.y`), made when a version is worth naming.
 - Work that must not be lost but is not ready lives on its own pushed branch with a draft PR, so it is visible and can be picked up.
 
-## What the repository does and does not enforce
+## What the repository enforces (decision D29)
 
-There is no CI yet, so rule 1 is kept by running the checks locally; a PR says which ran. Settings that would make the rules automatic and that only the repository owner can change: "automatically delete head branches" on merge, a rule that requires a pull request for `main`, and required status checks once there is a CI.
+- **CI** (`.github/workflows/ci.yml`) runs on every pull request and on `main`: typecheck and tests of the core on Linux and Windows, and the Kotlin desktop tests plus the web compile. All three must pass to merge.
+- **`main` is protected:** changes arrive by pull request only, with one approval, resolved conversations and a branch that is up to date; no force-push, no deletion. The repository owner can override this for their own pull requests (administrator bypass); nobody else can.
+- **Merging:** squash and merge commit are allowed, rebase-merge is off. Merged branches are deleted automatically.
+- **Code owners** (`.github/CODEOWNERS`) are asked to review changes to the policy engine, the sandbox and file/network guards, the server, skills, memory, the decision log, the threat model and CI.
+- **Pull requests from forks** need the maintainer's approval before their workflows run, and workflows get a read-only token.
+- **Security:** private vulnerability reporting, secret scanning with push protection, Dependabot alerts and updates are on.
+
+What is *not* enforced: that every pull request has a test or a doc update (the template asks, a reviewer checks), and anything about contributors' machines.

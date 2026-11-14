@@ -1,0 +1,18 @@
+# Code owners are asked to review a pull request that touches their files.
+# Everything: the maintainer.
+*                         @spear34000
+
+# What decides what the agent may do, and what it may reach: changes here need the maintainer's eyes.
+/src/core/policy.ts       @spear34000
+/src/node/fs-guard.ts     @spear34000
+/src/node/net-guard.ts    @spear34000
+/src/node/server/         @spear34000
+/src/node/skill-*.ts      @spear34000
+/src/node/tools/          @spear34000
+/src/node/memory.ts       @spear34000
+
+# Decisions, threat model and the CI itself.
+/docs/DECISIONS.md        @spear34000
+/docs/THREAT_MODEL.md     @spear34000
+/.github/                 @spear34000
+/LICENSE                  @spear34000

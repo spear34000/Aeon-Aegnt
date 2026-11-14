@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { generateKeyPairSync, randomBytes, sign, type KeyObject } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, it } from "node:test";
+import { afterEach, describe, it } from "node:test";
 import { ManualClock } from "../src/core/clock.ts";
 import { MemoryStore } from "../src/core/memory-store.ts";
 import { MockProvider } from "../src/core/models/mock.ts";
@@ -10,7 +10,9 @@ import { MemorySecretStore } from "../src/core/secrets.ts";
 import { createRuntime } from "../src/node/runtime.ts";
 import { canonicalRequest, DeviceRegistry, PairingManager } from "../src/node/server/device-auth.ts";
 import { AeonServer } from "../src/node/server/server.ts";
-import { finishReply, planReply, tempDir, toolReply } from "./helpers.ts";
+import { closeAfterTest, closeLeftovers, finishReply, planReply, tempDir, toolReply } from "./helpers.ts";
+
+afterEach(closeLeftovers);
 
 const SECRET = "exa_server_secret_VALUE_98765";
 
@@ -54,10 +56,10 @@ async function boot(replies: string[] = []) {
   return {
     base, clock, rt, store, registry, pairing, secrets, model, dir, server,
     configChanged: () => configChanged,
-    close: async () => {
+    close: closeAfterTest(async () => {
       await server.close();
       cleanup();
-    },
+    }),
   };
 }
 
@@ -289,6 +291,41 @@ describe("Tasks, approvals and events through the API", () => {
     assert.match(text, /event: audit/);
     assert.match(text, /task_submitted/);
     assert.match(text, /task_state/);
+    await t.close();
+  });
+
+  it("scheduler passes never overlap, and a request made during a pass is answered only after a pass of its own", async () => {
+    const t = await boot();
+    let running = 0;
+    let overlapped = false;
+    let passes = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    (t.rt.engine as { tick: () => Promise<unknown> }).tick = async () => {
+      const n = ++passes;
+      if (++running > 1) overlapped = true;
+      if (n === 1) await gate; // the first pass stays busy until the test lets it go
+      running--;
+      return 0;
+    };
+    const first = t.server.tick();
+    await new Promise((resolve) => setImmediate(resolve)); // the first pass is now running and held open
+    assert.equal(passes, 1);
+    const second = t.server.tick(); // arrives while the first pass is busy
+    release();
+    await second;
+    await first;
+    assert.equal(passes, 2, "the request made during the pass got its own pass");
+    assert.equal(overlapped, false);
+
+    // A pass that fails does not leave the scheduler stuck.
+    (t.rt.engine as { tick: () => Promise<unknown> }).tick = async () => {
+      passes++;
+      throw new Error("boom");
+    };
+    await t.server.tick();
+    await t.server.tick();
+    assert.equal(passes, 4);
     await t.close();
   });
 });
