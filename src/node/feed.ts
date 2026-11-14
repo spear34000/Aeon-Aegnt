@@ -1,4 +1,5 @@
 import { decodeEntities } from "./feed-text.ts";
+import { NOT_WORD_OR_SPACE } from "../core/word-chars.ts";
 
 /**
  * Rules for the headlines the feed starts from. They come from Google News RSS (free, no key, the only host the search contacts),
@@ -68,7 +69,7 @@ export function parseRss(xml: string): RawItem[] {
 }
 
 function tokens(s: string): Set<string> {
-  return new Set(s.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter((t) => t.length > 1));
+  return new Set(s.toLowerCase().replace(NOT_WORD_OR_SPACE, " ").split(/\s+/).filter((t) => t.length > 1));
 }
 
 function similar(a: Set<string>, b: Set<string>): boolean {

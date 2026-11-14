@@ -22,6 +22,8 @@ export interface ServeOptions {
    * of someone typing it. A new code is written at start and whenever a file named like this plus `.request` appears.
    */
   pairingCodeFile?: string | undefined;
+  /** The server has no usable terminal (inside the Android app): do not read commands from stdin, which can be missing or throw there. */
+  noStdin?: boolean | undefined;
 }
 
 /**
@@ -96,7 +98,7 @@ export async function serveCommand(o: ServeOptions): Promise<number> {
   } else {
     console.log("Only this machine can connect. To pair a phone or another computer, start with: serve --host 0.0.0.0");
   }
-  console.log("Type 'pair' + Enter for a new pairing code, 'devices' to list devices, 'quit' to stop.");
+  if (!o.noStdin) console.log("Type 'pair' + Enter for a new pairing code, 'devices' to list devices, 'quit' to stop.");
   showCode();
   if (o.pairingCodeFile) {
     const request = `${o.pairingCodeFile}.request`;
@@ -107,22 +109,29 @@ export async function serveCommand(o: ServeOptions): Promise<number> {
     }, 500).unref();
   }
 
-  const rl = createInterface({ input: process.stdin });
+  let rl: ReturnType<typeof createInterface> | undefined;
+  if (!o.noStdin) {
+    try {
+      rl = createInterface({ input: process.stdin });
+    } catch (e) {
+      console.error(`No terminal input (${e instanceof Error ? e.message : String(e)}); serving without commands.`);
+    }
+  }
   const done = new Promise<void>((resolve) => {
-    rl.on("line", (line) => {
+    rl?.on("line", (line) => {
       const cmd = line.trim().toLowerCase();
       if (cmd === "pair") showCode();
       else if (cmd === "devices") for (const d of registry.list()) console.log(`${d.id}  ${d.name}  ${d.revoked ? "REVOKED" : "active"}`);
       else if (cmd === "quit" || cmd === "exit") resolve();
     });
-    rl.on("close", () => {
+    rl?.on("close", () => {
       /* stdin closed (e.g. started as a service): keep serving until signalled */
     });
     process.once("SIGINT", () => resolve());
     process.once("SIGTERM", () => resolve());
   });
   await done;
-  rl.close();
+  rl?.close();
   await server.close();
   return 0;
 }

@@ -2,11 +2,12 @@ import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { looksLikeInjection } from "../core/untrusted.ts";
+import { NOT_WORD_OR_SPACE } from "../core/word-chars.ts";
 import { dice } from "./feed-text.ts";
 
 /**
  * What the owner wants the agent to remember across tasks, kept as plain text the owner can read, edit and delete.
- * Design, from the sources read for it (docs/research/2026-11-15-memory.md):
+ * Design, from the sources read for it (docs/research/2026-11-14-memory.md):
  *  - Generative Agents: a memory stream retrieved by recency, importance and relevance, the three scores added.
  *  - Mem0 / LangMem: what a task leaves behind is a few *candidates*, compared with what is already kept before anything is
  *    added (here: skipped if the same, offered as a correction if close), and formed in the background of the task, not in it.
@@ -73,7 +74,7 @@ const STOP_KO = new Set("에서 으로 에게 에는 에도 니다 습니 합니
 /** Words of a text: lower-cased letters and digits, plus character pairs for Hangul and CJK so that endings do not hide a match. */
 export function memoryTokens(s: string): Set<string> {
   const out = new Set<string>();
-  const words = s.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter(Boolean);
+  const words = s.toLowerCase().replace(NOT_WORD_OR_SPACE, " ").split(/\s+/).filter(Boolean);
   for (const w of words) {
     const cjk = /[ㄱ-ㆎ가-힣一-鿿]/.test(w);
     if (w.length > 1 && !STOP.has(w) && (cjk || w.length > 2 || /\d/.test(w))) out.add(w);

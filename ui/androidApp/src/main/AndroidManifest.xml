@@ -38,6 +38,9 @@
             </intent-filter>
         </activity>
 
+        <!-- The on-device agent, in a process of its own so that a Node crash cannot take the app down with it. -->
+        <service android:name=".NodeService" android:process=":node" android:exported="false" />
+
         <!-- Runs only if the owner turned on the background approval check (JobScheduler, about every 15 minutes). -->
         <service
             android:name="dev.aeon.ui.platform.ApprovalCheckService"
