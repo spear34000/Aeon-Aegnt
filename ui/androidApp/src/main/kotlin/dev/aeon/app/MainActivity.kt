@@ -29,6 +29,7 @@ class AeonApplication : Application() {
         AppContext.init(this)
         // The agent's own process (":node", see NodeService) starts this class too; it needs none of the app's state.
         if (!isMainProcess()) return
+        CrashReport.install(this)
         val crypto = createDeviceCrypto()
         model = AppModel(
             AeonClient("http://invalid.local", crypto, HttpClient()), // replaced when the user pairs or a saved pairing is restored
@@ -56,12 +57,13 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge() // the app draws its own background under the status and navigation bars
         val model = (application as AeonApplication).model
         lifecycle.addObserver(object : DefaultLifecycleObserver {
-            override fun onStart(owner: LifecycleOwner) = model.start()
-            override fun onStop(owner: LifecycleOwner) = model.stop()
+            override fun onStart(owner: LifecycleOwner) { CrashReport.setForeground(this@MainActivity, true); model.start() }
+            override fun onStop(owner: LifecycleOwner) { model.stop(); CrashReport.setForeground(this@MainActivity, false) }
         })
         openFrom(intent)
         setContent {
             AppRoot(model) { s, m -> PhoneLayout(s, m) }
+            CrashReport.Dialog()
         }
     }
 
