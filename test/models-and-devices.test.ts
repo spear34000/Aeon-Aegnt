@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createCipheriv, createDecipheriv, createHash, createPublicKey, diffieHellman, generateKeyPairSync, randomBytes, sign, type KeyObject } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, it } from "node:test";
+import { afterEach, describe, it } from "node:test";
 import { profileLines } from "../src/core/agent.ts";
 import { ManualClock } from "../src/core/clock.ts";
 import { DEFAULT_CONFIG, parseConfig } from "../src/core/config.ts";
@@ -25,7 +25,9 @@ import { canonicalRequest, DeviceRegistry, PairingManager } from "../src/node/se
 import { ServerIdentity } from "../src/node/server/seal.ts";
 import { AeonServer } from "../src/node/server/server.ts";
 import { Redactor } from "../src/core/redact.ts";
-import { tempDir } from "./helpers.ts";
+import { closeAfterTest, closeLeftovers, tempDir } from "./helpers.ts";
+
+afterEach(closeLeftovers);
 
 // Shape of https://models.dev/api.json (2026-11-11), reduced to the fields Aeon reads.
 const MODELS_DEV = {
@@ -346,7 +348,7 @@ async function boot(opts: { local?: boolean; maxUploadBytes?: number; feedFetch?
   const base = `http://127.0.0.1:${(await server.listen(0)).port}`;
   const owner = new Client("owner-phone");
   assert.equal((await owner.pair(base, pairing.newCode(clock.now()).code)).status, 201);
-  return { server, rt, base, clock, dir, workspace, registry, pairing, secrets, identity, owner, changed: () => changed, cfgDir: join(dir, "cfg"), close: async () => (await server.close(), cleanup()) };
+  return { server, rt, base, clock, dir, workspace, registry, pairing, secrets, identity, owner, changed: () => changed, cfgDir: join(dir, "cfg"), close: closeAfterTest(async () => (await server.close(), cleanup())) };
 }
 
 describe("Setting things up from any paired device", () => {

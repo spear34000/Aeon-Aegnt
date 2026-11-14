@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { generateKeyPairSync, randomBytes, sign } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, it } from "node:test";
+import { afterEach, describe, it } from "node:test";
 import { inflateSync } from "node:zlib";
 import { ManualClock } from "../src/core/clock.ts";
 import { DEFAULT_CONFIG, parseConfig } from "../src/core/config.ts";
@@ -14,7 +14,9 @@ import { ConnectionService, normaliseImage, type Fetched } from "../src/node/con
 import { createRuntime } from "../src/node/runtime.ts";
 import { canonicalRequest, DeviceRegistry, PairingManager } from "../src/node/server/device-auth.ts";
 import { AeonServer } from "../src/node/server/server.ts";
-import { tempDir } from "./helpers.ts";
+import { closeAfterTest, closeLeftovers, tempDir } from "./helpers.ts";
+
+afterEach(closeLeftovers);
 
 // Shapes copied from the official MCP registry (registry.modelcontextprotocol.io, 2026-11-11), trimmed.
 const BROWSER_USE = {
@@ -311,7 +313,7 @@ describe("Connections over the API", () => {
       const text = await res.text();
       return { status: res.status, body: text ? (JSON.parse(text) as Record<string, any>) : {} };
     };
-    return { call, base, close: async () => (await server.close(), t.cleanup()) };
+    return { call, base, close: closeAfterTest(async () => (await server.close(), t.cleanup())) };
   }
 
   it("serves installed connections, the live catalog, collections and icons to a paired device", async () => {
