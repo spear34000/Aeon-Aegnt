@@ -228,13 +228,14 @@ fun AeonTextField(
 
 /** Switch 44x24 with the on/off word next to it (design: never a bare toggle for meaningful settings). */
 @Composable
-fun AeonSwitch(on: Boolean, onChange: (Boolean) -> Unit, label: String, modifier: Modifier = Modifier, enabled: Boolean = true) {
+/** [showLabel] false hides the label text (the row it sits in already says what it is) and keeps the on/off word. */
+fun AeonSwitch(on: Boolean, onChange: (Boolean) -> Unit, label: String, modifier: Modifier = Modifier, enabled: Boolean = true, showLabel: Boolean = true) {
     val scheme = MaterialTheme.colorScheme
     Row(
         modifier.defaultMinSize(minHeight = 48.dp).clickable(enabled = enabled) { onChange(!on) },
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, color = if (enabled) scheme.onSurface else LocalAeonStatus.current.fg3)
+        if (showLabel) Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, color = if (enabled) scheme.onSurface else LocalAeonStatus.current.fg3) else Spacer(Modifier.weight(1f))
         Text(if (on) "켬" else "끔", style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant)
         Spacer(Modifier.width(10.dp))
         Box(

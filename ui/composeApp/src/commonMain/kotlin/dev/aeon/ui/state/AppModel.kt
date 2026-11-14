@@ -47,7 +47,7 @@ sealed interface Connection {
 /** Which main area is visible. The conversation is the default place (design: chat-first). */
 enum class Section { Chat, Feed, Explore, Tasks, Agent, Approvals, Settings }
 
-enum class SettingsPage { Personal, Models, Keys, Devices, Feed, Memory, Usage, Legal, About }
+enum class SettingsPage { Personal, Models, Keys, Devices, Feed, Memory, Routines, Usage, Legal, About }
 
 enum class ThemeMode(val label: String) { System("시스템 설정"), Light("라이트"), Dark("다크") }
 
@@ -108,6 +108,21 @@ data class SkillAddState(
     /** Scripts that pass the check run in Docker without a question each time. On unless the owner switches it off. */
     val autoRun: Boolean = true,
 )
+
+/** Routines: the list, the sheet for a new one, the one open. */
+data class RoutinesState(
+    val items: List<dev.aeon.ui.api.RoutineItem> = emptyList(),
+    val runsToday: Int = 0,
+    val cap: Int = 10,
+    val loaded: Boolean = false,
+    val draft: RoutineDraft? = null,
+    val picked: dev.aeon.ui.api.RoutineItem? = null,
+    val busy: Boolean = false,
+    val error: String? = null,
+)
+
+/** A new routine being written: [repeat] daily, weekdays or weekly; [day] 0 = Sunday for weekly; [hour] 0 to 23, [minute] in steps of five. */
+data class RoutineDraft(val title: String = "", val repeat: String = "weekdays", val day: Int = 1, val hour: Int = 9, val minute: Int = 0)
 
 /** What the agent remembers across tasks: the list, the sheet for a new one, the one being looked at. */
 data class MemoryState(
@@ -262,6 +277,7 @@ data class UiState(
     val skills: SkillsState = SkillsState(),
     val feed: FeedState = FeedState(),
     val memory: MemoryState = MemoryState(),
+    val routines: RoutinesState = RoutinesState(),
 ) {
     /** This device may change settings, keys, connections and devices. */
     val isAdmin: Boolean get() = status?.admin == true
@@ -365,6 +381,7 @@ class AppModel(
         _state.update { it.copy(section = Section.Settings, settingsPage = page, showDetail = false, settingsOpen = true) }
         if (page == SettingsPage.Devices) scope.launch { runCatching { client.devices() }.onSuccess { d -> _state.update { it.copy(devices = d) } } }
         if (page == SettingsPage.Memory) loadMemory()
+        if (page == SettingsPage.Routines) loadRoutines()
         if (page == SettingsPage.Feed) loadFeed()
         if (page == SettingsPage.Usage) scope.launch { runCatching { client.usage() }.onSuccess { u -> _state.update { it.copy(usage = u) } } }
     }
@@ -1182,6 +1199,55 @@ class AppModel(
         feed { it.copy(images = emptyMap()) }
         loadFeed()
     }
+
+    // ---------------------------------------------------------------- 반복 작업
+
+    private fun routines(change: (RoutinesState) -> RoutinesState) = _state.update { it.copy(routines = change(it.routines)) }
+
+    private fun showRoutines(r: dev.aeon.ui.api.RoutinesResponse) = routines { s ->
+        s.copy(items = r.routines, runsToday = r.runsToday, cap = r.cap, loaded = true, busy = false, error = null, picked = s.picked?.let { p -> r.routines.firstOrNull { it.id == p.id } })
+    }
+
+    fun loadRoutines() {
+        scope.launch { runCatching { client.routines() }.onSuccess { showRoutines(it) } }
+    }
+
+    fun openRoutineDraft() = routines { it.copy(draft = RoutineDraft(), picked = null, error = null) }
+    fun closeRoutineDraft() = routines { it.copy(draft = null, error = null) }
+    fun changeRoutineDraft(change: (RoutineDraft) -> RoutineDraft) = routines { s -> s.copy(draft = s.draft?.let(change)?.let { d -> d.copy(title = d.title.take(300)) }, error = null) }
+    fun pickRoutine(item: dev.aeon.ui.api.RoutineItem?) = routines { it.copy(picked = item, draft = null, error = null) }
+
+    private fun routineMessage(e: Throwable): String = when {
+        e is AeonException && e.status == 403 -> "이 기기는 반복 작업을 바꿀 수 없어요."
+        e is AeonException && e.status == 409 -> "오늘 반복 작업이 만들 수 있는 작업을 다 썼어요."
+        e is AeonException && e.status == 400 -> "작업 내용을 3자 이상으로 적어 주세요. 반복 작업은 20개까지 만들 수 있어요."
+        e is Exception -> describe(e)
+        else -> e.message ?: "error"
+    }
+
+    private fun routineCall(call: suspend () -> dev.aeon.ui.api.RoutinesResponse, after: (RoutinesState) -> RoutinesState = { it }) {
+        if (_state.value.routines.busy) return
+        scope.launch {
+            routines { it.copy(busy = true, error = null) }
+            runCatching { call() }
+                .onSuccess { r -> showRoutines(r); routines(after) }
+                .onFailure { e -> routines { it.copy(busy = false, error = routineMessage(e)) } }
+        }
+    }
+
+    fun saveRoutine() {
+        val d = _state.value.routines.draft ?: return
+        if (d.title.trim().length < 3) return
+        routineCall({ client.createRoutine(d.title.trim(), d.repeat, "${d.hour.toString().padStart(2, '0')}:${d.minute.toString().padStart(2, '0')}", d.day) }) { it.copy(draft = null) }
+    }
+
+    fun setRoutineEnabled(id: String, on: Boolean) = routineCall({ client.setRoutineEnabled(id, on) })
+    fun deleteRoutine(id: String) = routineCall({ client.deleteRoutine(id) }) { it.copy(picked = null) }
+
+    /** Starts a routine's task now; the task shows up in the task list. */
+    fun runRoutine(id: String) = routineCall({ client.runRoutine(id) }) { it.copy(picked = null) }.also { loadTasksSoon() }
+
+    private fun loadTasksSoon() = scope.launch { kotlinx.coroutines.delay(800); runCatching { refresh() } }
 
     // ---------------------------------------------------------------- 기억
 

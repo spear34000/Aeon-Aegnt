@@ -368,6 +368,24 @@ data class FeedResponse(
     val report: RunReport? = null,
 )
 
+/** When a routine is due: [repeat] daily, weekdays or weekly (then [day], 0 = Sunday), at [time] "HH:MM" on the computer's clock. */
+@Serializable data class RoutineSchedule(val repeat: String = "daily", val time: String = "09:00", val day: Int? = null)
+
+/** A routine: a task the server starts on its own at a set time. [nextRunAt] is null while it is switched off. */
+@Serializable
+data class RoutineItem(
+    val id: String,
+    val title: String,
+    val schedule: RoutineSchedule = RoutineSchedule(),
+    val enabled: Boolean = true,
+    val createdAt: Double = 0.0,
+    val lastRunAt: Double? = null,
+    val lastTaskId: String? = null,
+    val nextRunAt: Double? = null,
+)
+
+@Serializable data class RoutinesResponse(val routines: List<RoutineItem> = emptyList(), val runsToday: Int = 0, val cap: Int = 10, val routine: RoutineItem? = null, val taskId: String? = null)
+
 /** Who made a memory: the owner typed it, or the agent proposed it in a task and the owner approved those exact words. */
 @Serializable data class MemorySource(val type: String = "owner", val taskId: String? = null)
 /** An earlier wording of a memory. It is deleted together with the memory. */

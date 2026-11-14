@@ -585,4 +585,37 @@ class ServerIntegrationTest {
         assertEquals("이 기억을 지울까요?", dev.aeon.ui.screens.riskInfo(dev.aeon.ui.api.Approval(id = "a", taskId = "t", tool = "memory.forget", summary = "Forget: x", risk = "delete", status = "pending")).title(1))
         assertEquals("1월 5일", dev.aeon.ui.screens.shortDate(java.time.LocalDateTime.of(2027, 1, 5, 12, 0).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli().toDouble()))
     }
+
+    @Test
+    fun aRoutineIsMadeSwitchedOffRunAndDeletedAndItsTaskIsAnOrdinaryOne() = runBlocking {
+        val port = startFakeModel(listOf("""{"plan":["say hello"],"criteria":[]}""", """{"action":"finish","summary":"said hello"}"""))
+        val fx = startAeon(port)
+        val (client, _) = newClient(fx.base)
+        client.pair(fx.code, "kotlin test client")
+        assertEquals(emptyList(), client.routines().routines.map { it.id })
+        assertEquals(400, assertFailsWith<AeonException> { client.createRoutine("x", "daily", "09:00", null) }.status)
+        assertEquals(400, assertFailsWith<AeonException> { client.createRoutine("Say hello to me", "daily", "9am", null) }.status)
+
+        val made = client.createRoutine("Say hello to me every weekday", "weekdays", "09:00", null)
+        val r = made.routine!!
+        assertEquals(listOf("weekdays", "09:00", true), listOf(r.schedule.repeat, r.schedule.time, r.enabled))
+        assertTrue((made.routines.single().nextRunAt ?: 0.0) > System.currentTimeMillis(), "the next time is known")
+        assertEquals("평일 오전 9:00", dev.aeon.ui.screens.scheduleText(r.schedule))
+        assertEquals("매주 월요일 오후 6:30", dev.aeon.ui.screens.scheduleText(dev.aeon.ui.api.RoutineSchedule("weekly", "18:30", 1)))
+        assertEquals("매일 오전 12:05", dev.aeon.ui.screens.scheduleText(dev.aeon.ui.api.RoutineSchedule("daily", "00:05")))
+
+        val off = client.setRoutineEnabled(r.id, false)
+        assertEquals(listOf(false, null), listOf(off.routines.single().enabled, off.routines.single().nextRunAt))
+        client.setRoutineEnabled(r.id, true)
+
+        // Run now: it becomes an ordinary task in the task list and completes like any other.
+        val ran = client.runRoutine(r.id)
+        assertEquals(1, ran.runsToday)
+        val task = awaitTask(client, ran.taskId!!, "COMPLETED", "FAILED")
+        assertEquals(listOf("Say hello to me every weekday", "COMPLETED"), listOf(task.goal, task.status))
+        assertEquals(ran.taskId, client.routines().routines.single().lastTaskId)
+
+        assertEquals(0, client.deleteRoutine(r.id).routines.size)
+        assertEquals(404, assertFailsWith<AeonException> { client.deleteRoutine(r.id) }.status)
+    }
 }

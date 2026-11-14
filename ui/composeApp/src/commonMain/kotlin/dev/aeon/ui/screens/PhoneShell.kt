@@ -430,7 +430,9 @@ fun TasksScreen(state: UiState, model: AppModel, modifier: Modifier = Modifier) 
                 }
             }
         }
-        if (state.tasks.isEmpty() && state.approvals.isEmpty()) EmptyState("아직 작업이 없습니다", "대화에서 일을 맡기면 여기에 쌓입니다.")
+        LaunchedEffect(Unit) { model.loadRoutines() }
+        RoutinesEntry(state, model)
+        if (state.tasks.isEmpty() && state.approvals.isEmpty()) EmptyState("아직 작업이 없어요", "대화에서 일을 맡기면 여기에 쌓여요.")
         // The approvals above are the same tasks as the waiting ones: they are not listed twice.
         listOf("승인을 기다리는 작업" to (if (state.approvals.isEmpty()) waiting else emptyList()), "진행 중" to active, "예약됨" to scheduled, "지난 작업" to finished).forEach { (title, list) ->
             if (list.isEmpty()) return@forEach

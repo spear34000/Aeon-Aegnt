@@ -237,6 +237,30 @@ class AeonClient(
     /** What the owner wants remembered across tasks, newest first. */
     suspend fun memory(): MemoryResponse = ApiJson.decodeFromString(signed(HttpMethod.Get, "/v1/memory"))
 
+    suspend fun routines(): RoutinesResponse = ApiJson.decodeFromString(signed(HttpMethod.Get, "/v1/routines"))
+
+    suspend fun createRoutine(title: String, repeat: String, time: String, day: Int?): RoutinesResponse {
+        val json = buildJsonObject {
+            put("title", title)
+            put("schedule", buildJsonObject {
+                put("repeat", repeat)
+                put("time", time)
+                if (repeat == "weekly" && day != null) put("day", day)
+            })
+        }
+        return ApiJson.decodeFromString(signed(HttpMethod.Post, "/v1/routines", json.toString()))
+    }
+
+    suspend fun setRoutineEnabled(id: String, enabled: Boolean): RoutinesResponse {
+        val json = buildJsonObject { put("enabled", enabled) }
+        return ApiJson.decodeFromString(signed(HttpMethod.Patch, "/v1/routines/$id", json.toString()))
+    }
+
+    suspend fun deleteRoutine(id: String): RoutinesResponse = ApiJson.decodeFromString(signed(HttpMethod.Delete, "/v1/routines/$id"))
+
+    /** Starts the routine's task now (it counts against the day's limit). */
+    suspend fun runRoutine(id: String): RoutinesResponse = ApiJson.decodeFromString(signed(HttpMethod.Post, "/v1/routines/$id/run", "{}"))
+
     /** [days] is how long to remember it, counted from today; null means without an end. */
     suspend fun addMemory(text: String, kind: String, days: Int? = null): MemoryItem {
         val json = buildJsonObject {
