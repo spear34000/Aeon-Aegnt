@@ -31,6 +31,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
+      - name: Issue automation checks
+        run: node --test .github/scripts/issue-management.test.cjs
       # A per-test limit and a live reporter, so a slow test is named in the log; the step limit ends a test file that never exits within minutes (a normal run takes well under one).
       - run: npm test -- --test-reporter=spec --test-timeout=180000
         timeout-minutes: 8

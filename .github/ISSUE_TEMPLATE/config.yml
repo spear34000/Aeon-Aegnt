@@ -1,5 +1,5 @@
 blank_issues_enabled: false
 contact_links:
-  - name: Report a security problem
-    url: https://github.com/spear34000/Aeon-Agent/security/advisories/new
-    about: Private report. Please do not open a public issue for security problems.
+- name: Private security report / 비공개 보안 신고
+  url: https://github.com/spear34000/Aeon-Agent/security/advisories/new
+  about: Report vulnerabilities privately. / 보안 취약점은 비공개로 신고해 주세요.
