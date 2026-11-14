@@ -45,8 +45,8 @@ object CrashReport {
     private const val SEEN = "seen"
     private const val MARKER = "foreground.marker"
 
-    /** True when the previous run ended while the app was on screen (read once, when the process starts). */
-    private var previousRunDied = false
+    /** When the previous run's marker was written if that run ended while the app was on screen (0: it ended normally). Read once, when the process starts. */
+    private var previousRunDiedAt = 0L
 
     /** The marker exists only while the app is on screen: it is written on start and removed on stop. */
     fun setForeground(context: Context, on: Boolean) {
@@ -57,7 +57,7 @@ object CrashReport {
     /** Saves any uncaught Java error to a file before the process ends, then lets the system carry on as usual. */
     fun install(context: Context) {
         File(context.filesDir, MARKER).let {
-            previousRunDied = it.exists()
+            previousRunDiedAt = if (it.exists()) runCatching { it.readText().trim().toLong() }.getOrDefault(1L) else 0L
             it.delete()
         }
         val previous = Thread.getDefaultUncaughtExceptionHandler()
@@ -85,12 +85,23 @@ object CrashReport {
         else -> "OTHER($r)"
     }
 
-    /** Only an exit the owner asked for is left out; the process calling exit() itself (Node does) must show up too. */
-    private val notReported = setOf(ApplicationExitInfo.REASON_USER_REQUESTED, ApplicationExitInfo.REASON_USER_STOPPED, ApplicationExitInfo.REASON_PERMISSION_CHANGE)
+    /**
+     * Only what really went wrong is reported: a crash, a native crash, an app that did not answer, one that could not start,
+     * and the app itself calling exit() or being signalled. Everything else is normal life and would only frighten the owner:
+     * an update replacing the app, the owner swiping it away, the system freeing memory for an app in the background, and the
+     * agent's own process (`:node`) ending when its work is done.
+     */
+    private fun isReal(e: ApplicationExitInfo, mainProcess: String): Boolean = when (e.reason) {
+        ApplicationExitInfo.REASON_CRASH, ApplicationExitInfo.REASON_CRASH_NATIVE, ApplicationExitInfo.REASON_ANR, ApplicationExitInfo.REASON_INITIALIZATION_FAILURE -> true
+        ApplicationExitInfo.REASON_EXIT_SELF, ApplicationExitInfo.REASON_SIGNALED -> e.processName == mainProcess
+        else -> false
+    }
 
     /** The text to show, or null when the last run ended normally. Each exit is reported once. */
     fun collect(context: Context): String? {
         val parts = mutableListOf<String>()
+        // What happened before this version was installed belongs to an older version and says nothing about this one.
+        val installedAt = runCatching { context.packageManager.getPackageInfo(context.packageName, 0).lastUpdateTime }.getOrDefault(0L)
         val file = File(context.filesDir, FILE)
         if (file.exists()) {
             runCatching { file.readText() }.getOrNull()?.let { parts += "[Java 오류]\n$it" }
@@ -100,8 +111,8 @@ object CrashReport {
             val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             val seen = prefs.getLong(SEEN, 0)
             val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-            val exits = am.getHistoricalProcessExitReasons(context.packageName, 0, 5).filter { it.timestamp > seen }
-            exits.filter { it.reason !in notReported }.forEach {
+            val exits = am.getHistoricalProcessExitReasons(context.packageName, 0, 5).filter { it.timestamp > seen && it.timestamp > installedAt }
+            exits.filter { isReal(it, context.packageName) }.forEach {
                 parts += "[종료 이유] ${stamp(it.timestamp)} ${it.processName} ${reasonName(it.reason)} status=${it.status}" +
                     (if (it.reason == ApplicationExitInfo.REASON_CRASH_NATIVE || it.reason == ApplicationExitInfo.REASON_SIGNALED) " (신호 번호: 11=SEGV 메모리 오류, 6=ABRT 강제 종료, 9=KILL)" else "") +
                     "\n${it.description.orEmpty()}"
@@ -109,7 +120,7 @@ object CrashReport {
             exits.maxOfOrNull { it.timestamp }?.let { prefs.edit().putLong(SEEN, it).apply() }
         }
         runCatching { File(context.filesDir, "agent/cfg/node-error.log").takeIf { it.exists() }?.readText()?.takeLast(3000) }.getOrNull()?.let { parts += "[에이전트(Node) 오류 기록]\n$it" }
-        if (previousRunDied) parts += "[감지] 앱이 화면에 떠 있는 동안 종료됐어요."
+        if (previousRunDiedAt > installedAt) parts += "[감지] 앱이 화면에 떠 있는 동안 종료됐어요."
         if (parts.isEmpty()) return null
         parts += "[앱 로그]\n" + recentLog()
         return "Aeon ${runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull()} " +

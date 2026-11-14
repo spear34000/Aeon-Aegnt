@@ -347,6 +347,49 @@ describe("Agent behaviour on model/API failures", () => {
     h.cleanup();
   });
 
+  it("a reply that is not the expected JSON (an error page, a half-sent body) is a passing fault: the task waits and tries again", async () => {
+    const m = new MockProvider("m", [err("invalid_response"), planReply(), finishReply("ok")]);
+    const h = harness({ providers: [m] });
+    const t = await h.engine.submit({ goal: "x" });
+    await h.engine.runTask(t.id);
+    assert.equal((await get(h, t.id)).status, "RETRY_WAIT");
+    h.clock.advance(60_000);
+    await h.engine.tick();
+    assert.equal((await get(h, t.id)).status, "COMPLETED");
+    h.cleanup();
+  });
+
+  it("a connection that is down for a while does not fail the task: five tries, waiting longer each time, and the task finishes once it is back", async () => {
+    const m = new MockProvider("m", [err("network"), err("network"), err("network"), planReply(), finishReply("ok")]);
+    const h = harness({ providers: [m] });
+    const t = await h.engine.submit({ goal: "x" });
+    assert.equal(t.maxAttempts, 5);
+    const waits: number[] = [];
+    for (let i = 0; i < 3; i++) {
+      const before = h.clock.now();
+      await h.engine.runTask(t.id);
+      const saved = await get(h, t.id);
+      assert.equal(saved.status, "RETRY_WAIT", `failure ${i + 1} is retried`);
+      waits.push(saved.runAfter - before);
+      h.clock.advance(saved.runAfter - before);
+    }
+    assert.deepEqual(waits, [5_000, 10_000, 20_000]);
+    h.clock.advance(120_000); // past the short rest the router takes after three failures in a row
+    await h.engine.tick();
+    assert.equal((await get(h, t.id)).status, "COMPLETED");
+    h.cleanup();
+  });
+
+  it("the system prompt asks for the owner's own language, so a Korean goal is not answered in English", async () => {
+    const m = new MockProvider("m", [planReply(), finishReply("ok")]);
+    const h = harness({ providers: [m] });
+    const t = await h.engine.submit({ goal: "파일을 정리해줘" });
+    await h.engine.runTask(t.id);
+    const system = m.calls.map((c) => c.messages[0]?.content ?? "").join(" ");
+    assert.match(system, /in the language the owner's goal is written in/);
+    h.cleanup();
+  });
+
   it("a truncated reply is retried inside the step with a doubled token budget", async () => {
     const m = new MockProvider("m", [planReply(), err("truncated"), finishReply("ok")]);
     const h = harness({ providers: [m] });

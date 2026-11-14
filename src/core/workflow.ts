@@ -95,7 +95,8 @@ export class WorkflowEngine {
       updatedAt: now,
       runAfter: opts.runAfter ?? now,
       attempt: 0,
-      maxAttempts: opts.maxAttempts ?? 3,
+      // Five tries, 5, 10, 20 and 40 seconds apart: a connection that drops for a minute does not cost the person their task.
+      maxAttempts: opts.maxAttempts ?? 5,
       maxSteps: opts.maxSteps ?? 20,
       plan: [],
       criteria: (opts.criteria ?? []).map((c) => ({ ...c, source: c.source ?? "user" })),

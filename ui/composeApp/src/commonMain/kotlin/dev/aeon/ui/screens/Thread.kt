@@ -15,7 +15,12 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
+import dev.aeon.ui.design.Motion
+import dev.aeon.ui.design.WorkingDots
+import dev.aeon.ui.design.itemMotion
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -73,7 +78,7 @@ fun ConversationScreen(state: UiState, model: AppModel, wide: Boolean, modifier:
             Banner("에이전트에 연결할 수 없어요. 컴퓨터가 켜져 있고 같은 와이파이에 있는지 확인해 주세요.", Tone.Danger, "⚠", null)
         }
         state.status?.setupProblem?.let {
-            Banner("지금 고른 모델은 키가 없어서 쓸 수 없어요. 입력창의 모델 버튼에서 키를 넣거나 다른 모델을 골라 주세요.", Tone.Warn, "•")
+            Banner("AI 서비스에 연결할 키가 아직 없어요. 입력창 아래 AI 버튼에서 키를 넣거나 다른 AI를 골라 주세요.", Tone.Warn, "•")
         }
         state.message?.let { Banner(it, Tone.Neutral, "·", model::dismissMessage) }
 
@@ -85,11 +90,11 @@ fun ConversationScreen(state: UiState, model: AppModel, wide: Boolean, modifier:
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 16.dp),
             ) {
                 if (detail == null) {
-                    item(key = "welcome") { WelcomeBlock(state, model) }
+                    animatedItem(key = "welcome") { WelcomeBlock(state, model) }
                 } else {
-                    item(key = "user-${detail.id}") { UserBubble(detail.goal) }
+                    animatedItem(key = "user-${detail.id}") { UserBubble(detail.goal) }
                     if (detail.plan.isNotEmpty()) {
-                        item(key = "plan-${detail.id}") {
+                        animatedItem(key = "plan-${detail.id}") {
                             AgentMessage("계획을 세웠습니다.") {
                                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                     detail.plan.forEachIndexed { i, p -> Text("${i + 1}. $p", style = MaterialTheme.typography.bodyMedium) }
@@ -99,10 +104,10 @@ fun ConversationScreen(state: UiState, model: AppModel, wide: Boolean, modifier:
                     }
                     val pending: Approval? = state.approvals.firstOrNull { it.id == detail.pendingApprovalId && it.status == "pending" }
                     if (detail.steps.isNotEmpty()) {
-                        item(key = "progress-${detail.id}") { ProgressCard(detail, waiting = pending != null) }
+                        animatedItem(key = "progress-${detail.id}") { ProgressCard(detail, waiting = pending != null) }
                     }
                     if (pending != null) {
-                        item(key = "approval-${pending.id}") {
+                        animatedItem(key = "approval-${pending.id}") {
                             Column(Modifier.padding(start = 40.dp)) {
                                 ApprovalCard(
                                     a = pending,
@@ -115,22 +120,32 @@ fun ConversationScreen(state: UiState, model: AppModel, wide: Boolean, modifier:
                         }
                     }
                     if (detail.status == "WAITING_FOR_QUOTA") {
-                        item(key = "quota-${detail.id}") { QuotaCard(detail, model) }
+                        animatedItem(key = "quota-${detail.id}") { QuotaCard(detail, model) }
                     }
                     when (detail.status) {
-                        "RUNNING", "PENDING", "RETRY_WAIT" -> item(key = "running-${detail.id}") {
-                            Row(Modifier.padding(start = 40.dp), verticalAlignment = Alignment.CenterVertically) {
+                        "RUNNING", "PENDING", "RETRY_WAIT" -> animatedItem(key = "running-${detail.id}") {
+                            Row(Modifier.padding(start = 40.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                WorkingDots(MaterialTheme.colorScheme.primary)
+                                Text(
+                                    if (detail.status == "RETRY_WAIT") "연결이 불안정해서 다시 시도하고 있어요" else "일하는 중이에요",
+                                    style = MaterialTheme.typography.bodyMedium, color = LocalAeonStatus.current.fg3,
+                                )
                                 Spacer(Modifier.weight(1f))
                                 AeonButton("멈추기", { model.cancel(detail.id) }, kind = ButtonKind.Ghost)
                             }
                         }
-                        "COMPLETED" -> item(key = "result-${detail.id}") { ResultBlock(detail) }
-                        "FAILED" -> item(key = "failed-${detail.id}") {
-                            AgentMessage("작업이 끝나지 않았습니다.") {
-                                Text(detail.error?.let { friendlyError(it) } ?: "원인을 알 수 없어요.", color = LocalAeonStatus.current.danger, style = MaterialTheme.typography.bodyMedium)
+                        "COMPLETED" -> animatedItem(key = "result-${detail.id}") { ResultBlock(detail) }
+                        "FAILED" -> animatedItem(key = "failed-${detail.id}") {
+                            val problem = detail.error?.let { friendlyProblem(it) } ?: Problem("원인을 알 수 없어요.")
+                            AgentMessage("작업이 끝나지 않았어요.") {
+                                Text(problem.text, color = LocalAeonStatus.current.danger, style = MaterialTheme.typography.bodyMedium)
+                                Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    AeonButton("다시 해보기", { model.createTask(detail.goal, emptyList()) }, kind = ButtonKind.Primary)
+                                    if (problem.fixInSettings) AeonButton("AI 설정 열기", { model.openSettings(dev.aeon.ui.state.SettingsPage.Models) }, kind = ButtonKind.Ghost)
+                                }
                             }
                         }
-                        "CANCELLED" -> item(key = "cancel-${detail.id}") { Chip("중단됨", Tone.Neutral) }
+                        "CANCELLED" -> animatedItem(key = "cancel-${detail.id}") { Chip("중단됨", Tone.Neutral) }
                     }
                 }
             }
@@ -194,6 +209,11 @@ private fun ResultBlock(d: TaskDetail) {
     }
 }
 
+/** A card or message of the thread: it fades in when it appears and the others glide when it comes or goes. */
+private fun LazyListScope.animatedItem(key: Any, content: @Composable () -> Unit) {
+    item(key = key) { Box(itemMotion()) { content() } }
+}
+
 @Composable
 private fun QuotaCard(d: TaskDetail, model: AppModel) {
     val s = LocalAeonStatus.current
@@ -203,10 +223,15 @@ private fun QuotaCard(d: TaskDetail, model: AppModel) {
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text("모델 사용 한도에 걸렸어요. 잠시 뒤 이어서 할게요.", style = MaterialTheme.typography.bodyMedium)
+        val limit = d.note?.startsWith("limit") == true
+        Text(
+            if (limit) "오늘 쓸 수 있는 AI 사용량을 다 썼어요. 내일 다시 이어서 하거나, 다른 AI를 골라 주세요."
+            else "AI 서비스가 지금 붐벼서 잠깐 쉬고 있어요. 곧 알아서 다시 이어 가요. 기다리기만 하면 돼요.",
+            style = MaterialTheme.typography.bodyMedium,
+        )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            AeonButton("작업 정지", { model.cancel(d.id) }, kind = ButtonKind.Secondary)
-            AeonButton("설정 바꾸기", { model.openSettings(dev.aeon.ui.state.SettingsPage.Models) }, kind = ButtonKind.Ghost)
+            AeonButton("그만두기", { model.cancel(d.id) }, kind = ButtonKind.Secondary)
+            if (limit) AeonButton("AI 바꾸기", { model.openSettings(dev.aeon.ui.state.SettingsPage.Models) }, kind = ButtonKind.Ghost)
         }
     }
 }
@@ -229,12 +254,12 @@ private fun ProgressCard(d: TaskDetail, waiting: Boolean) {
     val s = LocalAeonStatus.current
     val scheme = MaterialTheme.colorScheme
     Column(
-        Modifier.fillMaxWidth().background(scheme.surface, RoundedCornerShape(AeonShape.CARD.dp)).padding(16.dp),
+        Modifier.fillMaxWidth().background(scheme.surface, RoundedCornerShape(AeonShape.CARD.dp)).animateContentSize(Motion.settle()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("한 일 ${d.steps.size}", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-            TaskStatusChip(d.status)
+            TaskStatusChip(d.status, d.note)
         }
         d.steps.forEach { st ->
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {

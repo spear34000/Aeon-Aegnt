@@ -197,6 +197,20 @@ describe("asking the owner (Anthropic: return to the human on a missing detail; 
     h.cleanup();
   });
 
+  it("a goal too vague to plan is not a failure: the model answers in plain words, the task goes on and asks the owner", async () => {
+    const m = new MockProvider("m", ["무엇을 정리할까요? 조금 더 구체적으로 알려 주세요.", ask("어떤 폴더를 정리할까요?", ["내려받기", "바탕화면"]), finishReply("내려받기 폴더를 정리했어요")]);
+    const h = harness({ providers: [m] });
+    const t = await h.engine.submit({ goal: "정리해줘" });
+    await h.engine.runTask(t.id);
+    const waiting = await get(h, t.id);
+    assert.equal(waiting.status, "WAITING_FOR_APPROVAL", "it asks instead of failing");
+    assert.equal((await h.store.listApprovals("pending"))[0]!.summary, "어떤 폴더를 정리할까요?");
+    await h.engine.decideApproval((await h.store.listApprovals("pending"))[0]!.id, "approved", "내려받기");
+    await h.engine.runTask(t.id);
+    assert.equal((await get(h, t.id)).status, "COMPLETED");
+    h.cleanup();
+  });
+
   it("skipping a question sends the agent on without an answer", async () => {
     const m = new MockProvider("m", [planReply(["go"], []), ask("Which folder do you mean?"), finishReply("Stopped: the folder was not named")]);
     const h = harness({ providers: [m] });

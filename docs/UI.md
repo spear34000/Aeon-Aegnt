@@ -122,3 +122,9 @@ Applied to old and new screens alike (2026-11-14):
 5. Tests that match Korean strings verbatim are changed in the same commit as the string.
 
 Not covered: the terms and data notices (Legal), which are written as agreements; the setup guide for the computer (`Where`), which has to name commands; the English summaries on approval cards, which are the exact request.
+
+## Motion and wording (2026-11-14)
+
+- **One set of timings** (`design/Motion.kt`): 120 ms for what answers a touch or leaves, 220 ms for a change inside a screen, 320 ms for a whole screen or a sheet. Things that arrive decelerate, things that leave accelerate and are shorter. The system's "remove animations" setting turns them all off.
+- **Where things move:** a press sinks buttons, round buttons and the tabs a little and springs back; the selected tab's pill grows out of its centre; a page change slides a little towards where the tab is in the bar and cross-fades, and a task opens over the list from the right and goes back the same way; a sheet rises over a fading scrim and leaves the same way before it is removed; rows of the task lists and cards of the conversation fade in and the others glide when one comes or goes; the progress card grows instead of jumping; a task that is running shows three swelling dots and "일하는 중이에요".
+- **Wording for people who do not write code:** the AI service is called by its name ("EXAONE"), not by its model id; "추론 강도" is "생각하는 정도" (빠르게, 보통, 깊게, 아주 깊게); "API 키" is "접속 키" (the field says "접속 키 (API 키)" once); "토큰" is "읽고 쓴 양"; "제공자" is "AI 서비스"; "한도 대기" is "AI가 붐벼요" or "오늘 사용량 가득" depending on the reason. A failed task says what happened and what to do, never what the service sent back (`friendlyProblem` in `FriendlyError.kt`), and offers 다시 해보기 and, for a key or consent problem, AI 설정 열기.

@@ -373,6 +373,8 @@ describe("provider logos", () => {
   it("reads filled paths on a square canvas and refuses everything it cannot draw faithfully", () => {
     assert.deepEqual(logoFromSvg(LOGO), { d: "M26.9 9.9H22.1L30.8 31.8H35.5L26.9 9.9Z M13 9.9L4.5 31.8H9.3L13 9.9Z", size: 40 });
     assert.deepEqual(logoFromSvg(LOGO.replace('fill="currentColor"', 'fill="currentColor" fill-rule="evenodd"').replace(/ fill="currentColor"\/>/, ' fill="currentColor" fill-rule="evenodd"/>')), { d: "M26.9 9.9H22.1L30.8 31.8H35.5L26.9 9.9Z M13 9.9L4.5 31.8H9.3L13 9.9Z", size: 40, rule: "evenodd" });
+    assert.equal(logoFromSvg(LOGO.replace("</svg>", "<!-- <!-- x --> <circle r='1'/> --></svg>")), null, "a shape hidden behind a comment inside a comment");
+    assert.equal(logoFromSvg(LOGO.replace("</svg>", "<!-- never closed</svg>")), null, "a comment that is never closed");
     assert.equal(logoFromSvg(PLACEHOLDER), null, "the catalogue's stand-in for a missing logo is not a logo");
     assert.equal(logoFromSvg(LOGO.replace('fill="currentColor"', 'fill="#ff0000"')), null, "other colours");
     assert.equal(logoFromSvg(LOGO.replace("<path ", '<path transform="scale(2)" ')), null, "transforms");

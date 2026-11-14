@@ -3,7 +3,9 @@ package dev.aeon.ui.design
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -64,13 +66,15 @@ fun AeonButton(
     }
     val alpha = if (enabled) 1f else 0.4f
     val shape = RoundedCornerShape(50)
+    val source = remember { MutableInteractionSource() }
     Row(
         modifier
+            .pressScale(source)
             .defaultMinSize(minHeight = if (wide) 40.dp else 48.dp)
             .clip(shape)
             .background(bg.copy(alpha = bg.alpha * alpha))
             .then(if (border != null) Modifier.border(1.5.dp, border.copy(alpha = alpha), shape) else Modifier)
-            .clickable(enabled = enabled, onClick = onClick)
+            .clickable(interactionSource = source, indication = LocalIndication.current, enabled = enabled, onClick = onClick)
             .padding(horizontal = 20.dp, vertical = 10.dp),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
@@ -110,14 +114,20 @@ fun Chip(text: String, tone: Tone, icon: String? = null, modifier: Modifier = Mo
     }
 }
 
+/**
+ * WAITING_FOR_QUOTA has two reasons, and the engine's note starts with the word for it: `busy` (the AI service turned the
+ * call away for now, it goes on by itself) or `limit` (the day's allowance is used up).
+ */
+fun quotaWaitWord(note: String?): String = if (note?.startsWith("limit") == true) "오늘 사용량 가득" else "AI가 붐벼요"
+
 /** The task-status chip. One word per state: 진행 중, 승인 대기, 완료, 실패, 중단됨. */
 @Composable
-fun TaskStatusChip(status: String) {
+fun TaskStatusChip(status: String, note: String? = null) {
     val (text, tone) = when (status) {
         "PENDING", "RUNNING" -> "진행 중" to Tone.Accent
         "RETRY_WAIT" -> "다시 시도 중" to Tone.Warn
         "WAITING_FOR_APPROVAL" -> "승인 대기" to Tone.Warn
-        "WAITING_FOR_QUOTA" -> "한도 대기" to Tone.Warn
+        "WAITING_FOR_QUOTA" -> quotaWaitWord(note) to Tone.Warn
         "WAITING_FOR_DEVICE" -> "기기 대기" to Tone.Warn
         "COMPLETED" -> "완료" to Tone.Ok
         "FAILED" -> "실패" to Tone.Danger

@@ -22,22 +22,41 @@ export interface RouterConfig {
   limits?: Record<string, ProviderLimits>;
   store: Store;
   clock: Clock;
+  /** How a "the service is busy" answer (a 429 that names no time to wait) is retried in place. Default: five more tries after the first, waiting 1, 2, 4, 8 and 8 seconds. */
+  busyRetry?: BusyRetry;
+  /** Waits for `ms`. Tests pass an instant one; the default is a real timer. */
+  sleep?: (ms: number) => Promise<void>;
 }
+
+export interface BusyRetry {
+  attempts: number;
+  baseMs: number;
+  maxMs: number;
+  /** Random spread of each wait, 0.25 = up to a quarter shorter or longer, so several tasks do not retry in step. */
+  jitter?: number;
+}
+
+const DEFAULT_BUSY_RETRY: BusyRetry = { attempts: 5, baseMs: 1_000, maxMs: 8_000, jitter: 0.25 };
 
 /** Every usable provider is waiting on a quota/rate limit; the task should wait, not fail. */
 export class QuotaWaitError extends Error {
   readonly until: number;
   readonly providers: string[];
-  constructor(until: number, providers: string[], detail: string) {
+  /** "busy": the service turned the call away for now and will take it soon. "limit": an allowance (the day's calls or tokens) is used up. */
+  readonly reason: "busy" | "limit";
+  constructor(until: number, providers: string[], detail: string, reason: "busy" | "limit" = "busy") {
     super(`All permitted model providers are rate/quota limited until ${new Date(until).toISOString()}: ${detail}`);
     this.name = "QuotaWaitError";
     this.until = until;
     this.providers = providers;
+    this.reason = reason;
   }
 }
 
 const FAILOVER_KINDS = new Set(["rate_limited", "quota_exhausted", "server", "network", "timeout", "unavailable", "auth", "invalid_response"]);
-const DEFAULT_RATE_BACKOFF_MS = 60_000;
+// A 429 without a time to wait is usually a busy service (EXAONE answers "service is busy, too many concurrent requests"
+// to about every second call), not an exhausted allowance: after the in-place retries, a short pause is enough.
+const DEFAULT_RATE_BACKOFF_MS = 20_000;
 const DEFAULT_QUOTA_BACKOFF_MS = 60 * 60_000;
 const DAY_MS = 86_400_000;
 
@@ -65,6 +84,7 @@ export class ModelRouter {
   private readonly cfg: RouterConfig;
   private blockedUntil = new Map<string, number>();
   private consecutiveFailures = new Map<string, number>();
+  private blockReason = new Map<string, "busy" | "limit">();
   private semaphores = new Map<string, Semaphore>();
 
   constructor(cfg: RouterConfig) {
@@ -107,13 +127,14 @@ export class ModelRouter {
       const limitHit = await this.localLimitReachedUntil(p.id);
       if (limitHit) {
         this.blockedUntil.set(p.id, limitHit);
+        this.blockReason.set(p.id, "limit");
         waits.push({ id: p.id, until: limitHit });
         continue;
       }
 
       const release = await this.semaphores.get(p.id)!.acquire();
       try {
-        const result = await p.chat(req);
+        const result = await this.callWithBusyRetry(p, req);
         this.consecutiveFailures.set(p.id, 0);
         await this.cfg.store.addUsage({
           at: now(),
@@ -147,17 +168,43 @@ export class ModelRouter {
 
     if (waits.length > 0 && waits.length === candidates.length) {
       const until = Math.min(...waits.map((w) => w.until));
-      throw new QuotaWaitError(until, waits.map((w) => w.id), lastError?.message ?? "limits reached");
+      const reason = waits.some((w) => this.blockReason.get(w.id) === "limit") ? "limit" : "busy";
+      throw new QuotaWaitError(until, waits.map((w) => w.id), lastError?.message ?? "limits reached", reason);
     }
     throw lastError ?? new ModelError("unavailable", "router", "no provider could serve the request");
+  }
+
+  /**
+   * A 429 that names no time to wait means "busy right now", and the next try often works (the real EXAONE service
+   * turns away about every second call). Retry a few times in place before the task is parked, which would
+   * otherwise cost it a pause for every refusal. A 429 that does name a time is honoured and not retried here.
+   */
+  private async callWithBusyRetry(p: ModelProvider, req: ChatRequest): Promise<ChatResult> {
+    const cfg = this.cfg.busyRetry ?? DEFAULT_BUSY_RETRY;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await p.chat(req);
+      } catch (e) {
+        const busy = e instanceof ModelError && e.kind === "rate_limited" && e.retryAfterMs === undefined;
+        if (!busy || attempt >= cfg.attempts) throw e;
+        const base = Math.min(cfg.maxMs, cfg.baseMs * 2 ** attempt);
+        const spread = 1 + (Math.random() * 2 - 1) * (cfg.jitter ?? 0);
+        await (this.cfg.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms))))(Math.round(base * spread));
+      }
+    }
   }
 
   /** Returns the time until which the provider should be considered blocked. */
   private noteFailure(id: string, e: ModelError): number {
     const t = this.cfg.clock.now();
     let until = t;
-    if (e.kind === "rate_limited") until = t + (e.retryAfterMs ?? DEFAULT_RATE_BACKOFF_MS);
-    else if (e.kind === "quota_exhausted") until = t + (e.retryAfterMs ?? DEFAULT_QUOTA_BACKOFF_MS);
+    if (e.kind === "rate_limited") {
+      until = t + (e.retryAfterMs ?? DEFAULT_RATE_BACKOFF_MS);
+      this.blockReason.set(id, "busy");
+    } else if (e.kind === "quota_exhausted") {
+      until = t + (e.retryAfterMs ?? DEFAULT_QUOTA_BACKOFF_MS);
+      this.blockReason.set(id, "limit");
+    }
     else {
       const n = (this.consecutiveFailures.get(id) ?? 0) + 1;
       this.consecutiveFailures.set(id, n);

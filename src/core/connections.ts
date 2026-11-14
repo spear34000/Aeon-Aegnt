@@ -60,7 +60,13 @@ export function logoFromSvg(text: string): { d: string; size: number; rule?: "ev
   if (!root || !box || box[1] !== box[2] || Number(box[1]) < 8) return null;
   const size = Number(box[1]);
   const rootFill = /\sfill="([^"]*)"/.exec(root)?.[1];
-  if (/<(?!\/?(?:svg|path|title)\b)[a-z]/i.test(text.replace(/<!--[\s\S]*?-->/g, ""))) return null;
+  let bare = text;
+  for (let before = ""; before !== bare; ) {
+    before = bare;
+    bare = bare.replace(/<!--[\s\S]*?-->/g, "");
+  }
+  if (bare.includes("<!--")) return null; // a comment that was never closed
+  if (/<(?!\/?(?:svg|path|title)\b)[a-z]/i.test(bare)) return null;
   const tags = text.match(/<path\b[^>]*>/gi) ?? [];
   if (tags.length === 0 || tags.length > 12) return null;
   const parts: string[] = [];

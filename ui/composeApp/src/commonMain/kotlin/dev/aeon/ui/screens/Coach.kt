@@ -77,7 +77,7 @@ private class CoachStep(val target: String, val title: String, val body: String)
 private val STEPS = listOf(
     CoachStep("composer.input", "맡길 일 적기", "하고 싶은 일을 적으면 돼요."),
     CoachStep("composer.attach", "파일 올리기", "문서나 이미지를 함께 맡길 수 있어요."),
-    CoachStep("composer.model", "모델 바꾸기", "모델과 추론 강도를 여기서 골라요."),
+    CoachStep("composer.model", "AI 바꾸기", "쓸 AI와, 얼마나 깊게 생각할지를 여기서 골라요."),
     CoachStep("nav.feed", "승인하기", "삭제 같은 일은 여기서 허락해야 실행돼요."),
     CoachStep("nav.explore", "연동과 스킬", "도구를 연결하고 스킬을 만들어요."),
     CoachStep("nav.agent", "내 에이전트", "이름, 말투, 기기를 바꿀 수 있어요."),

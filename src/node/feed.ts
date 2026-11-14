@@ -48,6 +48,19 @@ export interface RawItem {
   url: string;
 }
 
+/**
+ * A headline as plain text. One pass of tag removal is not enough (`<scr<b>ipt>` becomes `<script>`), so it repeats until nothing
+ * changes, and what is still a bracket afterwards is dropped: the headline is shown as text, never as markup.
+ */
+export function plainText(s: string): string {
+  let out = s;
+  for (let before = ""; before !== out; ) {
+    before = out;
+    out = out.replace(/<[^>]*>/g, "");
+  }
+  return out.replace(/[<>]/g, "").replace(/\s+/g, " ").trim();
+}
+
 /** Reads the items of an RSS 2.0 document. Anything that is not a plain https link, or has no time, is left out. */
 export function parseRss(xml: string): RawItem[] {
   const out: RawItem[] = [];
@@ -58,7 +71,7 @@ export function parseRss(xml: string): RawItem[] {
     const when = Date.parse(tag(block, "pubDate") ?? "");
     const source = tag(block, "source") ?? "";
     if (!title || !link || !Number.isFinite(when) || !/^https:\/\//i.test(link)) continue;
-    title = title.replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim();
+    title = plainText(title);
     // Google News writes "Headline - Source".
     // (some outlets put their own name in the headline too, so it can be there twice)
     while (source && title.endsWith(` - ${source}`)) title = title.slice(0, -(source.length + 3)).trim();

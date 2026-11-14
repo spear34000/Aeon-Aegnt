@@ -48,11 +48,16 @@ import dev.aeon.ui.platform.rememberFilePicker
 import dev.aeon.ui.state.AppModel
 import dev.aeon.ui.state.UiState
 
+/** The server takes a goal of at most this many characters; the composer says so before sending instead of after a refusal. */
+internal const val GOAL_LIMIT = 4000
+
+internal fun goalTooLong(text: String): Boolean = text.trim().length > GOAL_LIMIT
+
 private fun effortLabel(e: String?): String? = when (e) {
-    "low" -> "낮음"
+    "low" -> "빠르게"
     "medium" -> "보통"
-    "high" -> "높음"
-    "max" -> "최대"
+    "high" -> "깊게"
+    "max" -> "아주 깊게"
     else -> null
 }
 
@@ -66,7 +71,8 @@ fun Composer(state: UiState, model: AppModel, enabled: Boolean, onSend: (String)
     val s = LocalAeonStatus.current
     val scheme = MaterialTheme.colorScheme
     val pick = rememberFilePicker(model::attach)
-    val canSend = enabled && !state.uploading && text.isNotBlank()
+    val tooLong = goalTooLong(text)
+    val canSend = enabled && !state.uploading && text.isNotBlank() && !tooLong
     fun send() {
         if (!canSend) return
         onSend(text)
@@ -75,9 +81,9 @@ fun Composer(state: UiState, model: AppModel, enabled: Boolean, onSend: (String)
     LaunchedEffect(Unit) { if (state.models.current == null) model.loadModels() }
     val cur = state.models.current
     val modelLabel = when {
-        cur == null -> "모델 선택"
-        cur.model.isBlank() -> cur.providerName.ifBlank { cur.provider }
-        else -> cur.model
+        cur == null -> "AI 고르기"
+        // The service the person knows ("EXAONE"), not the model id ("k-exaone_v2.5"), which means nothing to them.
+        else -> cur.providerName.ifBlank { cur.provider.ifBlank { cur.model } }
     }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (state.attachments.isNotEmpty() || state.uploading) {
@@ -124,13 +130,13 @@ fun Composer(state: UiState, model: AppModel, enabled: Boolean, onSend: (String)
                 Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
                 Row(
                     Modifier.coachTarget("composer.model").heightIn(min = 40.dp).clip(RoundedCornerShape(20.dp)).background(scheme.surfaceVariant)
-                        .clickable { model.openModelSheet() }.padding(horizontal = 12.dp).semantics { contentDescription = "모델 바꾸기: $modelLabel" },
+                        .clickable { model.openModelSheet() }.padding(horizontal = 12.dp).semantics { contentDescription = "AI 바꾸기: $modelLabel" },
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Icon(AeonIcons.Cpu, contentDescription = null, tint = scheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
                     Text(modelLabel, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-                    effortLabel(cur?.reasoningEffort)?.let { Text("· 추론 $it", style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant, maxLines = 1) }
+                    effortLabel(cur?.reasoningEffort)?.let { Text("· $it", style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant, maxLines = 1) }
                 }
                 }
                 Box(
@@ -140,6 +146,7 @@ fun Composer(state: UiState, model: AppModel, enabled: Boolean, onSend: (String)
                 ) { Icon(AeonIcons.Send, contentDescription = null, tint = if (canSend) scheme.onPrimary else s.fg3, modifier = Modifier.size(20.dp)) }
             }
         }
-        if (hint != null) Text(hint, style = MaterialTheme.typography.bodySmall, color = s.fg3, modifier = Modifier.padding(start = 16.dp))
+        if (tooLong) Text("글이 너무 길어요. ${GOAL_LIMIT}자까지 보낼 수 있어요. (지금 ${text.trim().length}자)", style = MaterialTheme.typography.bodySmall, color = s.warn, modifier = Modifier.padding(start = 16.dp))
+        else if (hint != null) Text(hint, style = MaterialTheme.typography.bodySmall, color = s.fg3, modifier = Modifier.padding(start = 16.dp))
     }
 }

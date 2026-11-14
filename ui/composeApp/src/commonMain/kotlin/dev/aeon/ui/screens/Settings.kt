@@ -66,8 +66,8 @@ private val PROVIDERS = listOf(
 
 internal fun pageTitle(p: SettingsPage): String = when (p) {
     SettingsPage.Personal -> "개인화"
-    SettingsPage.Models -> "모델"
-    SettingsPage.Keys -> "API 키"
+    SettingsPage.Models -> "AI"
+    SettingsPage.Keys -> "접속 키"
     SettingsPage.Devices -> "연결된 기기"
     SettingsPage.Feed -> "피드 설정"
     SettingsPage.Memory -> "기억"
@@ -113,8 +113,8 @@ private fun SettingsTabs(state: UiState, model: AppModel, title: String) {
         SettingsPage.entries.forEach { p ->
             val label = when (p) {
                 SettingsPage.Personal -> "개인화"
-                SettingsPage.Models -> "모델"
-                SettingsPage.Keys -> "API 키"
+                SettingsPage.Models -> "AI"
+                SettingsPage.Keys -> "접속 키"
                 SettingsPage.Devices -> "기기"
                 SettingsPage.Feed -> "피드"
                 SettingsPage.Memory -> "기억"
@@ -152,9 +152,9 @@ private fun ModelsPage(state: UiState, model: AppModel) {
     LaunchedEffect(Unit) { model.loadModels() }
     val cur = state.models.current
     Card {
-        Text("지금 쓰는 모델", style = MaterialTheme.typography.titleMedium)
+        Text("지금 쓰는 AI", style = MaterialTheme.typography.titleMedium)
         Text(if (cur == null) "아직 고르지 않았습니다." else "${cur.providerName} · ${cur.model.ifBlank { "모델 이름 없음" }}${cur.reasoningEffort?.let { " · 추론 $it" } ?: ""}", style = MaterialTheme.typography.bodyLarge)
-        AeonButton("제공자와 모델 바꾸기", { model.openModelSheet() }, Modifier.fillMaxWidth(), kind = ButtonKind.Primary)
+        AeonButton("AI 바꾸기", { model.openModelSheet() }, Modifier.fillMaxWidth(), kind = ButtonKind.Primary)
     }
     
 }
@@ -165,7 +165,7 @@ private fun KeysPage(state: UiState, model: AppModel) {
     LaunchedEffect(Unit) { model.loadModels() }
     Text("저장한 키는 다시 보이지 않아요.", style = MaterialTheme.typography.bodySmall, color = s.fg3)
     val rows = state.models.providers.filter { it.keyName != null && (it.hasKey || it.inUse) }
-    if (rows.isEmpty()) Text("모델에서 제공자를 고르면 여기에 나타나요.", style = MaterialTheme.typography.bodyMedium, color = s.fg3)
+    if (rows.isEmpty()) Text("AI를 고르면 여기에 나타나요.", style = MaterialTheme.typography.bodyMedium, color = s.fg3)
     rows.forEach { p -> KeyRow(p.name, p.keyName!!, p.hasKey || state.secretNames.contains(p.keyName), model) }
 }
 
@@ -217,11 +217,11 @@ private fun UsagePage(state: UiState) {
     val s = LocalAeonStatus.current
     val ok = state.usage.filter { it.ok }
     Card {
-        Text("모델 호출", style = MaterialTheme.typography.titleMedium)
-        Text("${ok.size}번 · ${ok.sumOf { it.inputTokens + it.outputTokens }} 토큰", style = MaterialTheme.typography.bodyLarge)
-        Text("추론 토큰 ${ok.sumOf { it.reasoningTokens }}", style = MaterialTheme.typography.bodySmall, color = s.fg3)
+        Text("AI 사용 횟수", style = MaterialTheme.typography.titleMedium)
+        Text("${ok.size}번 · 읽고 쓴 양 ${ok.sumOf { it.inputTokens + it.outputTokens }}", style = MaterialTheme.typography.bodyLarge)
+        Text("그중 생각에 쓴 양 ${ok.sumOf { it.reasoningTokens }}", style = MaterialTheme.typography.bodySmall, color = s.fg3)
     }
-    if (state.usage.isEmpty()) Text("아직 모델을 호출하지 않았습니다.", style = MaterialTheme.typography.bodySmall, color = s.fg3)
+    if (state.usage.isEmpty()) Text("아직 AI를 쓰지 않았어요.", style = MaterialTheme.typography.bodySmall, color = s.fg3)
 }
 
 @Composable
@@ -232,7 +232,7 @@ private fun AboutPage(state: UiState, model: AppModel) {
         Text(state.serverUrl, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
         state.status?.let { Text("작업 ${state.tasks.size}개 · 키 저장 위치: ${it.secretsBackend}", style = MaterialTheme.typography.bodySmall, color = s.fg3) }
     }
-    state.status?.setupProblem?.let { Banner("설정 필요: $it", Tone.Warn, "•") }
+    state.status?.setupProblem?.let { Banner(friendlySetupProblem(it), Tone.Warn, "•") }
     AeonButton("이 기기 연결 끊기", { model.unpair() }, kind = ButtonKind.Secondary, modifier = Modifier.widthIn(min = 200.dp))
     
 }

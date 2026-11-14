@@ -1,5 +1,11 @@
 package dev.aeon.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -23,7 +29,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -33,6 +43,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import dev.aeon.ui.api.MemoryItem
 import dev.aeon.ui.api.MemoryProposal
 import dev.aeon.ui.design.AeonButton
@@ -43,6 +55,7 @@ import dev.aeon.ui.design.Banner
 import dev.aeon.ui.design.ButtonKind
 import dev.aeon.ui.design.Chip
 import dev.aeon.ui.design.LocalAeonStatus
+import dev.aeon.ui.design.Motion
 import dev.aeon.ui.design.Tone
 import dev.aeon.ui.platform.formatDateTime
 import dev.aeon.ui.state.AppModel
@@ -65,17 +78,37 @@ internal fun shortDate(millis: Double): String {
 @Composable
 internal fun SheetDialog(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
     val scheme = MaterialTheme.colorScheme
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+    // The sheet rises over a scrim that fades in, and leaves the same way: the dialog is removed only after it has gone.
+    var shown by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(Unit) { shown = true }
+    val close: () -> Unit = {
+        if (shown) {
+            shown = false
+            scope.launch {
+                delay(Motion.Quick + 80L)
+                onDismiss()
+            }
+        }
+    }
+    val scrim by animateFloatAsState(if (shown) 0.45f else 0f, if (shown) Motion.arrive(Motion.Standard) else Motion.leave(Motion.Quick + 60), label = "scrim")
+    Dialog(onDismissRequest = close, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Box(
-            Modifier.fillMaxSize().background(scheme.scrim.copy(alpha = 0.45f)).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss),
+            Modifier.fillMaxSize().background(scheme.scrim.copy(alpha = scrim)).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = close),
             contentAlignment = Alignment.BottomCenter,
         ) {
-            Column(
-                Modifier.widthIn(max = 560.dp).fillMaxWidth().imePadding()
-                    .clip(RoundedCornerShape(topStart = AeonShape.SHEET.dp, topEnd = AeonShape.SHEET.dp)).background(scheme.surface)
-                    .pointerInput(Unit) { detectTapGestures { } }.padding(horizontal = 20.dp, vertical = 20.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp), content = content,
-            )
+            AnimatedVisibility(
+                visible = shown,
+                enter = slideInVertically(Motion.arrive(Motion.Slow)) { it } + fadeIn(Motion.arrive(Motion.Standard)),
+                exit = slideOutVertically(Motion.leave(Motion.Quick + 60)) { it / 2 } + fadeOut(Motion.leave()),
+            ) {
+                Column(
+                    Modifier.widthIn(max = 560.dp).fillMaxWidth().imePadding()
+                        .clip(RoundedCornerShape(topStart = AeonShape.SHEET.dp, topEnd = AeonShape.SHEET.dp)).background(scheme.surface)
+                        .pointerInput(Unit) { detectTapGestures { } }.padding(horizontal = 20.dp, vertical = 20.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp), content = content,
+                )
+            }
         }
     }
 }
