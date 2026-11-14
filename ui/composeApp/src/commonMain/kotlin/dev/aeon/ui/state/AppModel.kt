@@ -354,10 +354,16 @@ class AppModel(
         if (_state.value.setup.deviceStarting) return
         setup { it.copy(deviceStarting = true, deviceError = null) }
         scope.launch {
-            val failure = localAgent.start() ?: localAgent.pairingCode()?.let { code ->
-                pairNow(LOCAL_AGENT_URL, code)
-                if (_state.value.connection is Connection.Connected) null else _state.value.message ?: "이 기기의 에이전트와 연결하지 못했어요."
-            } ?: "이 기기의 에이전트에서 연결 코드를 받지 못했어요."
+            // Anything thrown here (an Error included) would end the app, so it becomes the message on the screen instead.
+            val failure = try {
+                localAgent.start() ?: localAgent.pairingCode()?.let { code ->
+                    pairNow(LOCAL_AGENT_URL, code)
+                    if (_state.value.connection is Connection.Connected) null else _state.value.message ?: "이 기기의 에이전트와 연결하지 못했어요."
+                } ?: "이 기기의 에이전트에서 연결 코드를 받지 못했어요."
+            } catch (t: Throwable) {
+                _state.update { it.copy(busy = false, connection = if (it.connection is Connection.Connecting) Connection.Unpaired else it.connection) }
+                "연결하지 못했어요: ${t.message ?: t::class.simpleName}"
+            }
             setup { it.copy(deviceStarting = false, deviceError = failure) }
         }
     }
