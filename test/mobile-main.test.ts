@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -15,6 +15,14 @@ const entry = join(root, "dist-mobile", "node", "mobile-main.js");
 before(() => {
   execFileSync(process.execPath, [join(root, "tools", "build-mobile.mjs")], { cwd: root, stdio: "ignore" });
 });
+
+// On Windows a killed process still holds its folder until it has really gone, so wait for it before removing the folder.
+const stop = (child: ChildProcess): Promise<void> =>
+  new Promise((resolve) => {
+    if (child.exitCode !== null || child.signalCode !== null) return resolve();
+    child.once("exit", () => resolve());
+    child.kill();
+  });
 
 const freePort = (): Promise<number> =>
   new Promise((resolve, reject) => {
@@ -55,7 +63,7 @@ test("starts without any terminal input, answers on the port and records its pro
     const text = readFileSync(log, "utf8");
     for (const line of ["starting", "polyfills loaded", "server code loaded"]) assert.ok(text.includes(line), `node-error.log says "${line}"`);
   } finally {
-    child.kill();
+    await stop(child);
     rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -75,7 +83,7 @@ test("a server that cannot start leaves the reason in node-error.log instead of 
     const wrote = await waitFor(() => existsSync(log) && /EADDRINUSE/.test(readFileSync(log, "utf8")), 15_000);
     assert.ok(wrote, `the reason is recorded (stderr: ${stderr.slice(0, 300)})`);
   } finally {
-    child.kill();
+    await stop(child);
     holder.close();
     rmSync(dir, { recursive: true, force: true });
   }
