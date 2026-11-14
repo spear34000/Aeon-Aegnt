@@ -702,6 +702,48 @@ describe("Setting things up from any paired device", () => {
     await t.close();
   });
 
+  it("routines: any device reads them, only the machine or an admin device makes or runs them, and a due one becomes an ordinary task", async () => {
+    const t = await boot();
+    const call = (m: string, p: string, b?: Record<string, unknown>) => t.owner.call(t.base, t.clock, m, p, b);
+    const hhmm = (ms: number) => `${String(new Date(ms).getHours()).padStart(2, "0")}:${String(new Date(ms).getMinutes()).padStart(2, "0")}`;
+    assert.deepEqual((await call("GET", "/v1/routines")).body, { routines: [], runsToday: 0, cap: 10 });
+    assert.equal((await call("POST", "/v1/routines", { title: "x", schedule: { repeat: "daily", time: "09:00" } })).status, 400);
+    assert.equal((await call("POST", "/v1/routines", { title: "Sum up my notes", schedule: { repeat: "daily", time: "9am" } })).status, 400);
+    // Due thirty minutes after it was made.
+    const made = await call("POST", "/v1/routines", { title: "Say hello to the owner", schedule: { repeat: "daily", time: hhmm(t.clock.now() + 30 * 60_000) } });
+    assert.equal(made.status, 201);
+    const id = made.body.routine.id as string;
+    assert.ok(made.body.routines[0].nextRunAt > t.clock.now(), "the next time is shown");
+
+    const ex = clientExchange(t.owner.serverKey);
+    const code = ex.open((await call("POST", "/v1/pairing-codes", { epk: ex.epk, admin: false })).body.sealed, `pairing-code|${t.owner.id}`);
+    const tablet = new Client("tablet");
+    await tablet.pair(t.base, code);
+    const tcall = (m: string, p: string, b?: Record<string, unknown>) => tablet.call(t.base, t.clock, m, p, b);
+    assert.equal((await tcall("GET", "/v1/routines")).body.routines.length, 1, "any paired device reads");
+    for (const [m, p, b] of [["POST", "/v1/routines", { title: "Sneaky routine", schedule: { repeat: "daily", time: "09:00" } }], ["PATCH", `/v1/routines/${id}`, { enabled: false }], ["DELETE", `/v1/routines/${id}`, undefined], ["POST", `/v1/routines/${id}/run`, {}]] as const) {
+      assert.equal((await tcall(m, p, b as Record<string, unknown> | undefined)).status, 403, `${m} ${p}`);
+    }
+
+    assert.equal(await t.server.routineTick(), 0, "not yet due");
+    t.clock.advance(45 * 60_000);
+    assert.equal(await t.server.routineTick(), 1, "due: one task made");
+    assert.equal(await t.server.routineTick(), 0, "and not again for the same time");
+    const tasks = (await call("GET", "/v1/tasks")).body.tasks as { goal: string }[];
+    assert.deepEqual(tasks.map((x) => x.goal), ["Say hello to the owner"], "an ordinary task: it is in the task list like any other");
+    assert.equal((await call("GET", "/v1/routines")).body.runsToday, 1);
+
+    const now = await call("POST", `/v1/routines/${id}/run`, {});
+    assert.deepEqual([now.status, typeof now.body.taskId, now.body.runsToday], [200, "string", 2]);
+    assert.equal((await call("POST", "/v1/routines/rtn_ffffffffff/run", {})).status, 404);
+    const off = await call("PATCH", `/v1/routines/${id}`, { enabled: false });
+    assert.deepEqual([off.status, off.body.routines[0].enabled, off.body.routines[0].nextRunAt], [200, false, null]);
+    assert.equal((await call("PATCH", `/v1/routines/${id}`, { schedule: { repeat: "weekly", time: "09:00" } })).status, 400);
+    assert.equal((await call("DELETE", `/v1/routines/${id}`)).status, 200);
+    assert.equal((await call("DELETE", `/v1/routines/${id}`)).status, 404);
+    await t.close();
+  });
+
   it("what the owner wants remembered: any device reads it, the machine or an admin device changes it, and the agent sees it", async () => {
     const t = await boot();
     const call = (method: string, path: string, body?: unknown) => t.owner.call(t.base, t.clock, method, path, body);

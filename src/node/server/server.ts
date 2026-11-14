@@ -15,6 +15,7 @@ import { GoogleNewsAdapter } from "../feed-sources.ts";
 import { FeedStore, mergeSettings } from "../feed-store.ts";
 import { feedState } from "../feed-view.ts";
 import type { FeedChat } from "../feed.ts";
+import { DAILY_RUN_CAP, nextDueAt, RoutineStore } from "../routines.ts";
 import { MemoryService, MEMORY_MAX_ITEMS, MEMORY_TEXT_MAX } from "../memory.ts";
 import { articleFetcher, ImageStore } from "../feed-images.ts";
 import type { ProviderCatalog } from "../provider-catalog.ts";
@@ -39,6 +40,8 @@ export interface AeonServerOptions {
   feed?: FeedPipeline;
   /** How often the feed timer looks whether a run is due; 0 switches it off. Default: a minute, or off when tickIntervalMs is 0. */
   feedTickMs?: number;
+  /** How often the routine timer looks whether something is due; 0 switches it off. Default: a minute, or off when tickIntervalMs is 0. */
+  routineTickMs?: number;
   /** Sealing key. With it, paired devices can send keys and receive pairing codes encrypted. */
   identity?: ServerIdentity;
   /** Addresses other devices can use to reach this server (shown when pairing a new device). */
@@ -110,6 +113,8 @@ export class AeonServer {
   private readonly clock: Clock;
   private feedService: FeedPipeline | null = null;
   private feedTimer: ReturnType<typeof setInterval> | null = null;
+  private routineTimer: ReturnType<typeof setInterval> | null = null;
+  private routines: RoutineStore | null = null;
   private memoryFallback: MemoryService | null = null;
   private readonly nonces = new NonceCache(FRESHNESS_MS * 2);
   private server: Server | null = null;
@@ -152,6 +157,11 @@ export class AeonServer {
     if (interval > 0) this.timer = setInterval(() => void this.tick(), interval);
     // The feed makes its posts on its own timer, apart from tasks and chat. It sends no notification: the posts are there when the tab is opened.
     const feedTick = this.o.feedTickMs ?? (this.o.tickIntervalMs === 0 ? 0 : 60_000);
+    const routineTick = this.o.routineTickMs ?? (this.o.tickIntervalMs === 0 ? 0 : 60_000);
+    if (routineTick > 0) {
+      this.routineTimer = setInterval(() => void this.routineTick(), routineTick);
+      this.routineTimer.unref?.();
+    }
     if (feedTick > 0) {
       this.feedTimer = setInterval(() => void this.feedTick(), feedTick);
       this.feedTimer.unref?.();
@@ -163,6 +173,7 @@ export class AeonServer {
   async close(): Promise<void> {
     if (this.timer) clearInterval(this.timer);
     if (this.feedTimer) clearInterval(this.feedTimer);
+    if (this.routineTimer) clearInterval(this.routineTimer);
     for (const c of this.sseClients) c.destroy();
     this.sseClients.clear();
     const s = this.server;
@@ -185,6 +196,22 @@ export class AeonServer {
   private feedChat(rt: Runtime): FeedChat | undefined {
     if (rt.router.candidates().length === 0) return undefined;
     return async (system, user) => (await rt.router.chat({ messages: [{ role: "system", content: system }, { role: "user", content: user }], maxTokens: 3000, temperature: 0.3 }, { taskId: null })).content;
+  }
+
+  private routineStore(): RoutineStore {
+    return (this.routines ??= new RoutineStore(join(this.o.configDir, "routines.json")));
+  }
+
+  /** The routine timer: submits the goal of each routine that is due as an ordinary task (approvals still ask). Never throws. */
+  async routineTick(): Promise<number> {
+    try {
+      const engine = this.o.getRuntime().engine;
+      const made = await this.routineStore().tick(this.clock.now(), (goal) => engine.submit({ goal }));
+      if (made > 0) void this.tick();
+      return made;
+    } catch {
+      return 0;
+    }
   }
 
   private feedBusy = false;
@@ -577,6 +604,56 @@ export class AeonServer {
     }
 
     const conn = this.o.connections;
+    // Routines (D27): a goal and a time; at that time the server makes an ordinary task. Anyone paired reads them; making, changing,
+    // deleting and running one needs the machine or an admin device, because a routine starts tasks on its own.
+    const routineMatch = /^\/v1\/routines(?:\/(rtn_[a-f0-9]{10})(?:\/(run))?)?$/.exec(path);
+    if (routineMatch) {
+      const store = this.routineStore();
+      const id = routineMatch[1];
+      const run = routineMatch[2] === "run";
+      const admin = () => {
+        if (!this.canAdmin(req, deviceId)) throw new HttpError(403, "this device is not allowed to change routines");
+      };
+      const now = this.clock.now();
+      const view = () => ({ routines: store.list().map((r) => ({ ...r, nextRunAt: r.enabled ? nextDueAt(r.schedule, now) : null })), runsToday: store.runsToday(now), cap: DAILY_RUN_CAP });
+      if (!id && method === "GET") return this.json(res, 200, view());
+      if (!id && method === "POST") {
+        admin();
+        const b = this.parseJson(raw);
+        try {
+          const r = store.create(b.title, b.schedule, now);
+          return this.json(res, 201, { routine: r, ...view() });
+        } catch (e) {
+          throw new HttpError(400, (e as Error).message);
+        }
+      }
+      if (id && !run && method === "PATCH") {
+        admin();
+        const b = this.parseJson(raw);
+        let r;
+        try {
+          r = store.update(id, { title: b.title, schedule: b.schedule, enabled: b.enabled }, now);
+        } catch (e) {
+          throw new HttpError(400, (e as Error).message);
+        }
+        if (!r) throw new HttpError(404, "no such routine");
+        return this.json(res, 200, { routine: r, ...view() });
+      }
+      if (id && !run && method === "DELETE") {
+        admin();
+        if (!store.remove(id)) throw new HttpError(404, "no such routine");
+        return this.json(res, 200, view());
+      }
+      if (id && run && method === "POST") {
+        admin();
+        const task = await store.runNow(id, now, (goal) => rt.engine.submit({ goal }));
+        if (!task) throw new HttpError(store.list().some((r) => r.id === id) ? 409 : 404, store.list().some((r) => r.id === id) ? `routines may make at most ${DAILY_RUN_CAP} tasks a day` : "no such routine");
+        void this.tick();
+        return this.json(res, 200, { taskId: task.id, ...view() });
+      }
+      throw new HttpError(405, "that method is not allowed here");
+    }
+
     // The feed (D25): posts written from the owner's interests by a pipeline that runs beside the chat agent. Anyone paired reads
     // and reacts; the brief and the limits are changed by the machine or an admin device. A manual run counts against the day's limits.
     if (path === "/v1/feed" || path.startsWith("/v1/feed/")) {
