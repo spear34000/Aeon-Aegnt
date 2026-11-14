@@ -100,6 +100,6 @@ Delete the workspace's `.aeon/` folder and this repository folder. Phase 1 creat
 
 ## Docs
 
-[ARCHITECTURE](docs/ARCHITECTURE.md) · [DECISIONS](docs/DECISIONS.md) · [TESTING](docs/TESTING.md) · [THREAT_MODEL](docs/THREAT_MODEL.md) · [CLOUD_PROVIDERS](docs/CLOUD_PROVIDERS.md) · [ROADMAP](docs/ROADMAP.md) · [SECURITY](SECURITY.md) · [CONTRIBUTING](CONTRIBUTING.md) · [한국어 README](README.ko.md)
+[ARCHITECTURE](docs/ARCHITECTURE.md) · [DECISIONS](docs/DECISIONS.md) · [TESTING](docs/TESTING.md) · [THREAT_MODEL](docs/THREAT_MODEL.md) · [BRANCHING](docs/BRANCHING.md) · [CLOUD_PROVIDERS](docs/CLOUD_PROVIDERS.md) · [ROADMAP](docs/ROADMAP.md) · [SECURITY](SECURITY.md) · [CONTRIBUTING](CONTRIBUTING.md) · [한국어 README](README.ko.md)
 
 License: Apache-2.0.
