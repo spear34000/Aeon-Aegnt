@@ -17,6 +17,16 @@ const item = (title: string, source: string, h: number, link = `https://news.goo
 const rss = (...items: string[]) => `<?xml version="1.0"?><rss version="2.0"><channel><title>x</title>${items.join("")}</channel></rss>`;
 
 describe("reading headlines", () => {
+  it("a headline is shown as text: nested or broken tags leave no markup behind", async () => {
+    const { plainText } = await import("../src/node/feed.ts");
+    assert.equal(plainText("<scr<b>ipt>alert(1)</scr</b>ipt> 진짜 제목입니다"), "iptalert(1)ipt 진짜 제목입니다", "what looked like nested tags is taken out as one tag and no bracket is left");
+    assert.ok(!/[<>]/.test(plainText("<<script>script>alert(1)<</script>/script> x 제목")), "tags that appear only after the first pass are taken out too");
+    assert.equal(plainText("5 > 3 이라는 소식 제목"), "5 3 이라는 소식 제목", "a lone bracket is dropped, not kept");
+    assert.equal(plainText("  <b>굵은</b>   제목  "), "굵은 제목");
+    const items = parseRss(rss(`<item><title>&lt;scr&lt;b&gt;ipt&gt;x&lt;/scr&lt;/b&gt;ipt&gt; 헤드라인 본문 - 출처</title><link>https://x.example/a</link><pubDate>${hoursAgo(1)}</pubDate><source url="https://m.example">출처</source></item>`));
+    assert.ok(items.length === 1 && !/[<>]/.test(items[0]!.title), JSON.stringify(items[0]?.title));
+  });
+
   it("reads RSS items, decodes entities, strips the outlet from the title, and leaves out what is not a plain https link", () => {
     const xml = rss(
       item("삼성 &amp; LG, 2분기 영업이익 1.2조 발표", "연합뉴스", 2),

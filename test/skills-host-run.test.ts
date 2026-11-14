@@ -29,6 +29,9 @@ function skillWith(scripts: Record<string, string>) {
   return { t, ws, lib, dir };
 }
 
+/** The probe script receives paths as base64, so no text of a path is ever spliced into code. */
+const b64 = (p: string): string => Buffer.from(p).toString("base64");
+
 describe("running a script on this computer (D21)", () => {
   const supported = permissionFlag() !== null;
 
@@ -78,8 +81,8 @@ describe("running a script on this computer (D21)", () => {
       "const attempt = (name, f) => { try { out[name] = f(); } catch (e) { out[name] = e.code || String(e).slice(0, 40); } };",
       'attempt("env", () => process.env.AEON_SECRET_FOR_TEST || "absent");',
       'attempt("ownSkillFile", () => fs.readFileSync(path.join(__dirname, "..", "SKILL.md"), "utf8").length > 0);',
-      `attempt("outsideRead", () => fs.readFileSync(${JSON.stringify(join(outside.dir, "secret.txt"))}, "utf8"));`,
-      `attempt("outsideWrite", () => fs.writeFileSync(${JSON.stringify(join(outside.dir, "planted.txt"))}, "x"));`,
+      `attempt("outsideRead", () => fs.readFileSync(Buffer.from("${b64(join(outside.dir, "secret.txt"))}", "base64").toString(), "utf8"));`,
+      `attempt("outsideWrite", () => fs.writeFileSync(Buffer.from("${b64(join(outside.dir, "planted.txt"))}", "base64").toString(), "x"));`,
       'attempt("scratchWrite", () => { fs.writeFileSync("made.txt", "ok"); return fs.readFileSync("made.txt", "utf8"); });',
       'attempt("spawn", () => require("node:child_process").spawnSync("node", ["-v"]).status);',
       "console.log(JSON.stringify(out));",
