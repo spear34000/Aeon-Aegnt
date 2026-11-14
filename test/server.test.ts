@@ -307,22 +307,38 @@ describe("Settings and secrets over the API", () => {
     await t.close();
   });
 
-  it("changing providers, consent or endpoints is refused for a non-local request (a stolen phone cannot redirect the key)", async () => {
+  it("a device limited to chat and approvals cannot redirect prompts or keys; a device the owner trusts with settings can", async () => {
     const t = await boot();
-    const d = await pairedDevice(t);
+    const owner = await pairedDevice(t);
+    const limited = new Device("shared-tablet");
+    assert.equal((await limited.pair(t.base, t.pairing.newCode(t.clock.now(), false).code)).status, 201);
     // Re-create the server flavour that treats every caller as remote.
     const { dir, cleanup } = tempDir();
     const remote = new AeonServer({ getRuntime: () => t.rt, secrets: t.secrets, configDir: join(dir, "cfg"), registry: t.registry, pairing: t.pairing, clock: t.clock, tickIntervalMs: 0, isLocalRequest: () => false });
-    const { port } = await remote.listen(0);
-    const base = `http://127.0.0.1:${port}`;
-    const evil = await d.call(base, t.clock, "PUT", "/v1/config", { providers: ["openai-compatible"], dataConsent: ["openai-compatible"], openaiCompatBaseUrl: "https://attacker.example/v1", openaiCompatModel: "m" });
-    assert.equal(evil.status, 403);
-    assert.match(evil.body.error, /only allowed from the machine/);
-    assert.equal((await d.call(base, t.clock, "PUT", "/v1/config", { providers: ["exaone"], dataConsent: [], fallbackAllowed: false, ollamaModel: "harmless" })).status, 200, "non-sensitive fields stay editable remotely");
-    assert.equal((await d.call(base, t.clock, "PUT", "/v1/secrets/EXAONE_API_KEY", { value: "x-secret-value" })).status, 403);
-    await remote.close();
-    cleanup();
-    await t.close();
+    try {
+      const { port } = await remote.listen(0);
+      const base = `http://127.0.0.1:${port}`;
+      const redirect = { providers: ["openai-compatible"], dataConsent: ["openai-compatible"], openaiCompatBaseUrl: "https://attacker.example/v1", openaiCompatModel: "m" };
+      const evil = await limited.call(base, t.clock, "PUT", "/v1/config", redirect);
+      assert.equal(evil.status, 403);
+      assert.match(evil.body.error, /not allowed to change providers/);
+      assert.equal((await limited.call(base, t.clock, "PUT", "/v1/secrets/EXAONE_API_KEY", { value: "x-secret-value" })).status, 403);
+      assert.equal((await limited.call(base, t.clock, "POST", "/v1/model", { provider: "ollama", model: "m" })).status, 403);
+      assert.equal((await limited.call(base, t.clock, "POST", "/v1/pairing-codes", {})).status, 403);
+      assert.equal((await limited.call(base, t.clock, "DELETE", `/v1/devices/${owner.id}`)).status, 403);
+      assert.equal((await limited.call(base, t.clock, "PATCH", `/v1/devices/${limited.id}`, { admin: true })).status, 403, "cannot promote itself");
+      assert.equal((await limited.call(base, t.clock, "PUT", "/v1/config", { providers: ["exaone"], dataConsent: [], fallbackAllowed: false, profile: { userName: "지우" } })).status, 200, "wording preferences stay editable");
+
+      assert.equal((await owner.call(base, t.clock, "PUT", "/v1/config", redirect)).status, 200, "the owner's own device may change providers from anywhere");
+      const plain = await owner.call(base, t.clock, "PUT", "/v1/secrets/EXAONE_API_KEY", { value: "x-secret-value" });
+      assert.equal(plain.status, 400, "a key never crosses the network in the clear");
+      assert.match(plain.body.error, /sealed/);
+      assert.equal(await t.secrets.get("EXAONE_API_KEY"), null);
+    } finally {
+      await remote.close();
+      cleanup();
+      await t.close();
+    }
   });
 
   it("secrets are write-only: stored, listed by name, never returned", async () => {

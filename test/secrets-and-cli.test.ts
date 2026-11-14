@@ -105,7 +105,9 @@ describe("Secret exposure (EXAONE provider wired through createRuntime, MOCKED t
 describe("CLI smoke (real process)", () => {
   const cli = join(import.meta.dirname, "..", "src", "node", "cli.ts");
   const run = (args: string[], cwd: string, env: Record<string, string> = {}) =>
-    spawnSync(process.execPath, [cli, ...args], { cwd, encoding: "utf8", env: { ...process.env, EXAONE_API_KEY: "", ...env } });
+    // AEON_CONFIG_DIR keeps the child away from the developer's real settings and stored keys: without it, a key
+    // saved on this machine would turn "the key is missing" into a real model call.
+    spawnSync(process.execPath, [cli, ...args], { cwd, encoding: "utf8", env: { ...process.env, EXAONE_API_KEY: "", AEON_CONFIG_DIR: join(cwd, ".aeon-test-config"), ...env } });
 
   it("prints help, lists an empty task table, and reports a clear error when the key is missing", () => {
     const { dir, cleanup } = tempDir();

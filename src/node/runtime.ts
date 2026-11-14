@@ -1,7 +1,8 @@
 import { mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { Agent } from "../core/agent.ts";
 import { systemClock, type Clock } from "../core/clock.ts";
+import { isLoopbackUrl, type EndpointConfig, type Profile } from "../core/config.ts";
 import { ModelRouter } from "../core/models/router.ts";
 import type { ModelProvider } from "../core/models/types.ts";
 import { exaoneProvider, llamaCppProvider, ollamaProvider, openAiCompatible } from "../core/models/providers.ts";
@@ -10,12 +11,26 @@ import { Redactor } from "../core/redact.ts";
 import type { Store } from "../core/store.ts";
 import { ToolRegistry } from "../core/tools.ts";
 import { WorkflowEngine } from "../core/workflow.ts";
+import { verify as verifyCriteria } from "../core/verify.ts";
 import { WorkspaceGuard } from "./fs-guard.ts";
-import { SqliteStore } from "./sqlite-store.ts";
+import { FileStore } from "./file-store.ts";
 import { fsTools } from "./tools/fs-tools.ts";
 import { httpTools } from "./tools/http-tools.ts";
-import { sandboxTool, type SandboxRunner } from "./tools/sandbox-tool.ts";
+import { DEFAULT_SANDBOX, dockerRunner, sandboxTool, type SandboxRunner } from "./tools/sandbox-tool.ts";
+import { skillTools } from "./tools/skill-tools.ts";
+import { skillRunTool } from "./tools/skill-run-tool.ts";
+import { nodeHostRunner, type HostRunner } from "./tools/host-script-runner.ts";
+import { SkillLibrary } from "./skill-library.ts";
+import { MemoryService } from "./memory.ts";
+import { memoryTools } from "./tools/memory-tools.ts";
+import type { FetchLike } from "./skill-sources.ts";
 import { nodeVerifierEnv } from "./verifier-env.ts";
+
+/**
+ * The SQLite store needs `node:sqlite` (Node 22 and later). Where it is missing, such as Node 18 inside the Android
+ * app, the file-backed store is used instead; both pass the same conformance tests.
+ */
+const SqliteStoreClass = await import("./sqlite-store.ts").then((m) => m.SqliteStore).catch(() => null);
 
 export interface RuntimeOptions {
   workspace: string;
@@ -37,6 +52,24 @@ export interface RuntimeOptions {
   fetchImpl?: typeof fetch;
   /** Release builds set this: refuse to wire providers marked `unreleased` . */
   releaseMode?: boolean;
+  /** OpenAI-compatible services from the settings; `providers` may name them by id. */
+  endpoints?: EndpointConfig[];
+  profile?: Profile;
+  /** Folder of skills (Agent Skills format). When set the agent can read skills and propose new ones. */
+  skillsDir?: string;
+  /** Skills of this project; defaults to `<workspace>/.agents/skills`. */
+  projectSkillsDir?: string;
+  /** Which skills the owner trusts; defaults to `skills-lock.json` next to skillsDir. Keep it outside the workspace. */
+  skillsLockFile?: string;
+  /** File of what the owner wants remembered across tasks (memory.json next to the settings). Without it the agent has no memory. */
+  memoryFile?: string;
+  /** Injected transport for fetching skills from GitHub (tests). */
+  skillFetch?: FetchLike;
+  /**
+   * Runs skill scripts on this computer when a task asks for isolation "host" (D21). Default: the real runner, except inside the
+   * phone app. Pass null to switch host runs off, or a fake in tests.
+   */
+  hostRunner?: HostRunner | null;
 }
 
 /**
@@ -86,8 +119,25 @@ export function buildProviders(opts: RuntimeOptions, redactor: Redactor): ModelP
         );
         break;
       }
-      default:
-        throw new Error(`Unknown provider: ${id}`);
+      default: {
+        const ep = (opts.endpoints ?? []).find((e) => e.id === id);
+        if (!ep) throw new Error(`Unknown provider: ${id}`);
+        const local = isLoopbackUrl(ep.baseUrl);
+        const key = ep.keyName ? env[ep.keyName] : undefined;
+        if (ep.keyName && !key && !local) throw new Error(`Provider '${ep.name ?? id}' needs ${ep.keyName}.`);
+        out.push(
+          openAiCompatible({
+            id,
+            baseUrl: ep.baseUrl,
+            model: ep.model,
+            redactor,
+            external: !local,
+            ...(key ? { apiKey: key } : {}),
+            ...(ep.reasoningEffort ? { reasoningEffort: ep.reasoningEffort } : {}),
+            ...(opts.fetchImpl ? { fetch: opts.fetchImpl } : {}),
+          }),
+        );
+      }
     }
   }
   return out;
@@ -98,7 +148,7 @@ export function createRuntime(opts: RuntimeOptions) {
   const redactor = new Redactor();
   const guard = new WorkspaceGuard(opts.workspace);
   mkdirSync(join(guard.root, ".aeon"), { recursive: true });
-  const store: Store = opts.store ?? new SqliteStore(join(guard.root, ".aeon", "aeon.db"));
+  const store: Store = opts.store ?? (SqliteStoreClass ? new SqliteStoreClass(join(guard.root, ".aeon", "aeon.db")) : new FileStore(join(guard.root, ".aeon", "aeon.json")));
 
   const providers = opts.providerOverrides ?? buildProviders(opts, redactor);
   if (opts.releaseMode) {
@@ -117,9 +167,33 @@ export function createRuntime(opts: RuntimeOptions) {
   for (const t of fsTools(guard)) tools.register(t);
   for (const t of httpTools()) tools.register(t);
   tools.register(sandboxTool(guard, ...(opts.sandboxRunner ? [opts.sandboxRunner] : [])));
+  const skills = opts.skillsDir
+    ? new SkillLibrary({
+        userDir: opts.skillsDir, workspace: guard.root, projectDir: opts.projectSkillsDir ?? join(guard.root, ".agents", "skills"),
+        lockFile: opts.skillsLockFile ?? join(dirname(opts.skillsDir), "skills-lock.json"), ...(opts.skillFetch ? { fetchImpl: opts.skillFetch } : {}), ...(opts.clock ? { now: () => opts.clock!.now() } : {}),
+      })
+    : undefined;
+  if (skills) {
+    for (const t of skillTools(skills)) tools.register(t);
+    tools.register(skillRunTool(skills, guard, opts.sandboxRunner ?? dockerRunner, DEFAULT_SANDBOX, opts.hostRunner === undefined ? (process.platform === "android" ? null : nodeHostRunner) : opts.hostRunner));
+  }
+
+  const memory = opts.memoryFile ? new MemoryService(opts.memoryFile, () => clock.now()) : undefined;
+  // Earlier tasks (finished ones) can be searched, read only, through memory.search.
+  const pastTasks = async () => (await store.listTasks({ status: ["COMPLETED"] })).map((t) => ({ goal: t.goal, result: t.result ?? "", at: t.updatedAt }));
+  if (memory) for (const t of memoryTools(memory, redactor, pastTasks, () => clock.now())) tools.register(t);
 
   const policy = new PolicyEngine(opts.policyRules ?? DEFAULT_RULES);
-  const agent = new Agent({ router, tools, policy, store, clock, redactor });
+  const agent = new Agent({
+    router, tools, policy, store, clock, redactor,
+    // The agent looks at its own result against the real files before it says it is done (it may then repair, twice at most).
+    verify: (criteria) => verifyCriteria(criteria, nodeVerifierEnv(guard), clock.now()),
+    ...(opts.profile ? { profile: opts.profile } : {}),
+    // Only skills the owner trusts, that are switched on and follow the format, are offered to the model.
+    ...(skills ? { skills: () => skills.catalog() } : {}),
+    // What the owner asked to be remembered: the few items that fit the goal go into the prompt.
+    ...(memory ? { memory: { relevant: (goal: string) => memory.relevant(goal), markUsed: (ids: string[]) => memory.markUsed(ids) } } : {}),
+  });
   const engine = new WorkflowEngine({
     store,
     clock,
@@ -128,6 +202,8 @@ export function createRuntime(opts: RuntimeOptions) {
     redactor,
     holderId: opts.holderId ?? `local-${process.pid}`,
     ...(opts.leaseTtlMs ? { leaseTtlMs: opts.leaseTtlMs } : {}),
+    // What a finished task suggests keeping waits in the memory page for the owner; nothing is kept and no task sees it until accepted.
+    ...(memory ? { afterDone: (task: { id: string }, done: { remember: unknown }) => void memory.propose(done.remember, task.id, (text: string) => redactor.redact(text) !== text) } : {}),
   });
-  return { engine, store, router, tools, policy, guard, redactor, clock };
+  return { engine, store, router, tools, policy, guard, redactor, clock, skills, memory };
 }

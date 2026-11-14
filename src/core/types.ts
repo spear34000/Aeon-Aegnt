@@ -71,6 +71,8 @@ export interface Task {
   /** Id of the approval the task is blocked on. */
   pendingApprovalId?: string;
   pendingAction?: PendingAction;
+  /** Remembered facts about the owner were shown to the model during this task. Once true it stays true, even if the memory changes later: the model has seen them. */
+  sawOwnerFacts?: boolean;
 }
 
 export type TaskPatch = Partial<
@@ -89,6 +91,7 @@ export type TaskPatch = Partial<
     | "pendingApprovalId"
     | "pendingAction"
     | "cancelRequested"
+    | "sawOwnerFacts"
   >
 >;
 
@@ -113,6 +116,12 @@ export interface Approval {
   /** Paths or URLs the action touches, shown on the card (first 3, plus a count). */
   resources: string[];
   irreversible: boolean;
+  /** Longer text to read before deciding, shown behind a "details" control. */
+  detail?: string;
+  /** "question": the agent needs an answer in words (`summary` is the question, `resources` are suggested answers), not a yes or no. */
+  kind?: "approval" | "question";
+  /** The owner's answer to a question. */
+  answer?: string;
   status: ApprovalStatus;
   createdAt: number;
   expiresAt: number;

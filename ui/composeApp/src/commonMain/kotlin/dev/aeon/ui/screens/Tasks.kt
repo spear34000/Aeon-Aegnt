@@ -5,6 +5,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import dev.aeon.ui.design.AeonIcons
+import androidx.compose.material3.Icon
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -69,81 +73,80 @@ fun TaskList(state: UiState, model: AppModel, modifier: Modifier = Modifier, sho
 fun TaskRow(t: TaskSummary, selected: Boolean, onClick: () -> Unit) {
     val s = LocalAeonStatus.current
     val bg = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.background
+    val (dot, text) = taskStatusLine(t)
     Column(
         Modifier.fillMaxWidth().background(bg, RoundedCornerShape(AeonShape.CONTROL.dp)).clickable(onClick = onClick).padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Text(t.goal, maxLines = 1, style = MaterialTheme.typography.bodyLarge)
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TaskStatusChip(t.status)
-            val v = t.verification?.status
-            if (t.status == "COMPLETED" && v != null) {
-                Text(
-                    when (v) {
-                        "verified" -> "실제 파일로 확인됨"
-                        "unverified" -> "확인 안 됨"
-                        "user_confirmed" -> "사용자가 확인함"
-                        else -> "확인 실패"
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (v == "failed") s.danger else s.fg3,
-                )
-            }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            androidx.compose.foundation.layout.Box(Modifier.size(7.dp).background(dot, androidx.compose.foundation.shape.CircleShape))
+            Text(text, style = MaterialTheme.typography.bodySmall, color = s.fg3)
             Spacer(Modifier.weight(1f))
             Text(koreanClock(t.updatedAt), style = MaterialTheme.typography.bodySmall, color = s.fg3)
         }
     }
 }
 
-/** 작업 상세: 검증 증거 first, then the run record (or the plan). Arguments and output are copyable mono text. */
+/**
+ * 작업 상세: what the task was, how it ended, what was checked against the real files, and what the agent did, in
+ * plain words. The raw arguments and output of each action are behind "자세히".
+ */
 @Composable
 fun TaskDetailPanel(state: UiState, model: AppModel, onBack: () -> Unit, modifier: Modifier = Modifier) {
     val summary = state.tasks.firstOrNull { it.id == state.selectedTaskId }
     val d = state.selectedTask?.takeIf { it.id == state.selectedTaskId }
-    Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        AeonButton("← 대화", onBack, kind = ButtonKind.Ghost)
+    val s = LocalAeonStatus.current
+    Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, bottom = 24.dp, top = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        CircleButton(dev.aeon.ui.design.AeonIcons.Back, "뒤로", onBack)
         if (summary == null || d == null) {
             EmptyState("불러오는 중", "작업 정보를 가져오고 있습니다.")
             return@Column
         }
-        Text(d.goal, style = MaterialTheme.typography.titleLarge)
+        Text(d.goal, style = MaterialTheme.typography.headlineMedium)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             TaskStatusChip(d.status)
-            Text("${d.steps.size}단계 · ${if (d.status == "COMPLETED") "에이전트 보고: 완료" else ""}", style = MaterialTheme.typography.bodySmall, color = LocalAeonStatus.current.fg3)
+            VerifyBadge(d.verificationDetail?.status, d.verificationDetail?.evidence?.count { !it.passed } ?: 0)
+            Spacer(Modifier.weight(1f))
+            Text(koreanClock(d.updatedAt), style = MaterialTheme.typography.bodySmall, color = s.fg3)
+        }
+        val report = d.result?.takeIf { it.isNotBlank() } ?: d.error?.takeIf { it.isNotBlank() }?.let { friendlyError(it) }
+        if (report != null) {
+            Card {
+                Text(if (d.status == "FAILED") "실패 이유" else "에이전트 보고", style = MaterialTheme.typography.labelLarge, color = s.fg3)
+                SelectionContainer { Text(report, style = MaterialTheme.typography.bodyLarge, color = if (d.status == "FAILED") s.danger else MaterialTheme.colorScheme.onSurface) }
+            }
         }
         EvidenceCard(d)
-        RunTabs(d)
+        if (d.steps.isNotEmpty()) {
+            Card {
+                Text("한 일 ${d.steps.size}", style = MaterialTheme.typography.titleMedium)
+                d.steps.forEach { StepRow(it) }
+            }
+        } else if (d.plan.isNotEmpty()) {
+            Card {
+                Text("계획", style = MaterialTheme.typography.titleMedium)
+                d.plan.forEachIndexed { i, p -> Text("${i + 1}. $p", style = MaterialTheme.typography.bodyMedium) }
+            }
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (d.status !in setOf("COMPLETED", "FAILED", "CANCELLED")) AeonButton("멈추기", { model.cancel(d.id) }, kind = ButtonKind.Secondary)
             if (d.status == "COMPLETED" || d.status == "FAILED") AeonButton("다시 확인", { model.reverify(d.id) }, kind = ButtonKind.Secondary)
-            if (d.status == "COMPLETED" && d.verificationDetail?.status == "unverified") AeonButton("확인함으로 표시", { model.confirm(d.id) }, kind = ButtonKind.Ghost)
+            if (d.status == "COMPLETED" && d.verificationDetail?.status == "unverified") AeonButton("확인했어요", { model.confirm(d.id) }, kind = ButtonKind.Ghost)
         }
     }
 }
 
-/** 검증 증거: what was checked against the real files. Shown above the run record. */
+/** What was checked against the real files, one plain line per check. Hidden when nothing was checked and nothing failed. */
 @Composable
 fun EvidenceCard(d: TaskDetail) {
     val s = LocalAeonStatus.current
     val v = d.verificationDetail
+    if (v == null || v.evidence.isEmpty()) return
     Card {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("검증 증거", style = MaterialTheme.typography.titleMedium)
-            Spacer(Modifier.weight(1f))
-            VerifyBadge(v?.status, v?.evidence?.count { !it.passed } ?: 0)
-        }
-        if (v == null || v.evidence.isEmpty()) {
-            Text(
-                "이 작업에는 자동 검사 기준이 없습니다. 파일을 열어 직접 확인하세요.",
-                style = MaterialTheme.typography.bodySmall,
-                color = s.fg3,
-            )
-        } else {
-            v.evidence.forEach { e -> EvidenceRow(e) }
-            if (!v.userDefined) {
-                Text("이 검사 기준은 모델이 제안한 것입니다. 기준을 직접 정하려면 작업을 새로 만드세요.", style = MaterialTheme.typography.bodySmall, color = s.fg3)
-            }
-        }
+        Text("확인한 것", style = MaterialTheme.typography.titleMedium)
+        v.evidence.forEach { e -> EvidenceRow(e) }
+        if (!v.userDefined) Text("확인 기준은 모델이 정했어요.", style = MaterialTheme.typography.bodySmall, color = s.fg3)
     }
 }
 
@@ -151,12 +154,12 @@ fun EvidenceCard(d: TaskDetail) {
 private fun EvidenceRow(e: Evidence) {
     val s = LocalAeonStatus.current
     val crit = e.criterion?.toString().orEmpty()
-    Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Glyph(if (e.passed) "✓" else "✕", color = if (e.passed) s.ok else s.danger, style = MaterialTheme.typography.labelLarge)
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(evidenceLabel(crit, e.passed), style = MaterialTheme.typography.bodyMedium)
-            SelectionContainer { Text(crit, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, color = s.fg3) }
+    val target = Regex("\"(?:path|url)\":\"([^\"]+)\"").find(crit)?.groupValues?.get(1)?.trimEnd('/')?.substringAfterLast('/')
+    Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Box(Modifier.size(20.dp).background(if (e.passed) s.okSoft else s.dangerSoft, CircleShape), contentAlignment = Alignment.Center) {
+            Icon(if (e.passed) AeonIcons.Check else AeonIcons.Close, contentDescription = if (e.passed) "통과" else "실패", tint = if (e.passed) s.ok else s.danger, modifier = Modifier.size(12.dp))
         }
+        Text(listOfNotNull(target, evidenceLabel(crit, e.passed)).joinToString(" · "), style = MaterialTheme.typography.bodyMedium)
     }
 }
 
@@ -164,51 +167,44 @@ private fun EvidenceRow(e: Evidence) {
 fun evidenceLabel(criterionJson: String, passed: Boolean): String {
     val kind = Regex("\"kind\":\"([a-z_0-9]+)\"").find(criterionJson)?.groupValues?.get(1)
     val label = when (kind) {
-        "file_exists" -> "파일이 있음"
-        "file_contains" -> "파일 내용 포함"
-        "file_sha256" -> "SHA-256 일치"
-        "http_status" -> "HTTP 응답 확인"
-        else -> "검사"
+        "file_exists" -> if (passed) "파일이 있어요" else "파일이 없어요"
+        "file_contains" -> if (passed) "내용이 맞아요" else "내용이 달라요"
+        "file_sha256" -> if (passed) "내용이 같아요" else "내용이 달라요"
+        "http_status" -> if (passed) "응답이 맞아요" else "응답이 달라요"
+        else -> if (passed) "통과" else "실패"
     }
-    return if (passed) label else "$label · 실패"
+    return label
 }
 
-@Composable
-private fun RunTabs(d: TaskDetail) {
-    var tab by remember(d.id) { mutableStateOf(0) }
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        AeonButton("실행 기록", { tab = 0 }, kind = if (tab == 0) ButtonKind.Primary else ButtonKind.Ghost)
-        AeonButton("계획", { tab = 1 }, kind = if (tab == 1) ButtonKind.Primary else ButtonKind.Ghost)
-    }
-    if (tab == 0) {
-        if (d.steps.isEmpty()) Text("아직 실행한 단계가 없습니다.", style = MaterialTheme.typography.bodySmall, color = LocalAeonStatus.current.fg3)
-        d.steps.forEach { StepRow(it) }
-    } else {
-        if (d.plan.isEmpty()) Text("계획이 없습니다.", style = MaterialTheme.typography.bodySmall, color = LocalAeonStatus.current.fg3)
-        d.plan.forEachIndexed { i, p -> Text("${i + 1}. $p", style = MaterialTheme.typography.bodyMedium) }
-    }
+private fun stepLabel(tool: String): String = when (tool) {
+    "fs.list" -> "폴더 목록 보기"
+    "fs.read" -> "파일 읽기"
+    "fs.write" -> "파일 쓰기"
+    "fs.delete" -> "파일 삭제"
+    "http.get" -> "웹 주소 읽기"
+    "http.post" -> "외부로 보내기"
+    "sandbox.exec" -> "격리된 명령 실행"
+    else -> tool
 }
 
 @Composable
 private fun StepRow(st: Step) {
     val s = LocalAeonStatus.current
     var open by remember(st.index, st.tool) { mutableStateOf(false) }
-    Column(
-        Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(AeonShape.CONTROL.dp))
-            .clickable { open = !open }.padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Glyph(if (st.ok) "✓" else "✕", color = if (st.ok) s.ok else s.danger, style = MaterialTheme.typography.labelLarge)
-            Text(st.tool, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodyMedium)
-            Spacer(Modifier.weight(1f))
-            Text(if (open) "접기" else "펼치기", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+    Column(Modifier.fillMaxWidth().clickable { open = !open }, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Box(Modifier.size(20.dp).background(if (st.ok) s.okSoft else s.dangerSoft, CircleShape), contentAlignment = Alignment.Center) {
+                Icon(if (st.ok) AeonIcons.Check else AeonIcons.Close, contentDescription = if (st.ok) "성공" else "실패", tint = if (st.ok) s.ok else s.danger, modifier = Modifier.size(12.dp))
+            }
+            Text(stepLabel(st.tool), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+            Text(if (open) "접기" else "자세히", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
         }
         if (open) {
-            SectionLabel("인자")
-            SelectionContainer { Text(st.args?.toString().orEmpty(), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall) }
-            SectionLabel("결과")
-            SelectionContainer { Text(st.output.take(2000), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall) }
+            Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(AeonShape.CONTROL.dp)).padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(st.tool, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelMedium)
+                SelectionContainer { Text(st.args?.toString().orEmpty(), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall) }
+                SelectionContainer { Text(st.output.take(2000), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            }
         }
     }
 }
@@ -220,20 +216,20 @@ fun ApprovalsPanel(state: UiState, model: AppModel, modifier: Modifier = Modifie
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("승인", style = MaterialTheme.typography.titleLarge)
         if (state.approvals.isEmpty()) {
-            EmptyState("승인 대기 없음", "Aeon이 위험한 일을 하기 전에 여기와 대화에 물어봅니다.")
+            EmptyState("승인 대기 없음", "승인이 필요한 일이 생기면 여기에 나타납니다.")
         }
         state.approvals.forEach { a ->
             val goal = state.tasks.firstOrNull { it.id == a.taskId }?.goal ?: "작업"
-            ApprovalCard(a, state.approvalSeenAt[a.id], "$goal · ${a.tool}", { model.decide(a.id, it) })
+            ApprovalCard(a, state.approvalSeenAt[a.id], goal, { model.decide(a.id, it) }, onAnswer = { model.decide(a.id, true, it) })
         }
         if (state.recentApprovals.isNotEmpty()) {
             SectionLabel("최근 처리")
             state.recentApprovals.forEach { a ->
                 val s = LocalAeonStatus.current
                 val (mark, word, color) = when (a.status) {
-                    "approved" -> Triple("✓", "허용함 · 이 한 번만", s.ok)
+                    "approved" -> Triple("✓", "허용함", s.ok)
                     "denied" -> Triple("✕", "거부함", s.danger)
-                    "expired" -> Triple("⌛", "만료됨 → 거부 처리", s.warn)
+                    "expired" -> Triple("⌛", "만료됨", s.warn)
                     else -> Triple("·", a.status, s.fg3)
                 }
                 Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {

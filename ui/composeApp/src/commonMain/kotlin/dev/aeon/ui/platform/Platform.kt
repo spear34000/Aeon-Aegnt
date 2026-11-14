@@ -20,7 +20,64 @@ interface DeviceCrypto {
 
     /** Forget the key pair (used when unpairing). */
     suspend fun reset()
+
+    /** ECDH P-256 with a one-time key pair against [peerSpki] (SPKI DER). Used to seal values for the server. */
+    suspend fun ecdh(peerSpki: ByteArray): EcdhResult
+
+    /** AES-256-GCM. Returns the ciphertext followed by the 16-byte tag. */
+    suspend fun aesGcmEncrypt(key: ByteArray, iv: ByteArray, plaintext: ByteArray, aad: ByteArray): ByteArray
+
+    /** AES-256-GCM. [data] is the ciphertext followed by the tag. Throws when the data or [aad] was changed. */
+    suspend fun aesGcmDecrypt(key: ByteArray, iv: ByteArray, data: ByteArray, aad: ByteArray): ByteArray
 }
+
+/** Our one-time public key (SPKI DER) and the 32-byte shared secret. */
+class EcdhResult(val publicKey: ByteArray, val shared: ByteArray)
+
+/** A file the owner chose to attach. */
+class PickedFile(val name: String, val bytes: ByteArray)
+
+/** Largest attachment the app will read into memory and send (the server's default limit). */
+const val MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
+
+/**
+ * Returns a function that opens the platform's file chooser. [onPicked] receives the file, or an error text
+ * (too large, unreadable). Nothing is called when the owner cancels.
+ */
+@androidx.compose.runtime.Composable
+expect fun rememberFilePicker(onPicked: (PickedFile?, String?) -> Unit): () -> Unit
+
+/** Makes the system bar icons readable on the app's own background (dark icons on a light theme and the reverse). */
+@androidx.compose.runtime.Composable
+expect fun PlatformSystemBars(dark: Boolean)
+
+/** Calls [onBack] for the system back gesture or button while [enabled]. No effect where there is none. */
+@androidx.compose.runtime.Composable
+expect fun PlatformBackHandler(enabled: Boolean, onBack: () -> Unit)
+
+/** Granted, Denied (can be asked again) or Blocked (only the system settings can change it now). */
+enum class PermissionStatus { Granted, Denied, Blocked }
+
+/** One runtime permission this platform has, with the reason shown before it is requested. */
+class PermissionItem(val id: String, val title: String, val reason: String)
+
+/** The runtime permissions of this platform. [items] is empty where the app needs none (desktop, web). */
+interface PermissionController {
+    val items: List<PermissionItem>
+    fun status(id: String): PermissionStatus
+    fun request(id: String)
+    /** Opens the system page where a blocked permission can be turned on again. */
+    fun openSettings()
+}
+
+@androidx.compose.runtime.Composable
+expect fun rememberPermissionController(): PermissionController
+
+/** Whether this platform can check for waiting approvals while the app is closed (Android only). */
+expect val supportsBackgroundCheck: Boolean
+
+/** Turns the periodic background check for waiting approvals on or off. Safe to call repeatedly. */
+expect fun setBackgroundApprovalCheck(enabled: Boolean)
 
 /** Small persistent string store for non-secret client state (server URL, device id). */
 interface KeyValueStore {
@@ -40,6 +97,16 @@ expect fun defaultDeviceName(): String
 
 /** Local, human-readable date and time. */
 expect fun formatDateTime(millis: Long): String
+
+/** Which feed group a moment belongs to: 오늘, 어제 or 이전, by the local calendar day. */
+fun dayBucket(millis: Long, now: Long = nowMillis()): String {
+    val day = formatDateTime(millis).take(10)
+    return when (day) {
+        formatDateTime(now).take(10) -> "오늘"
+        formatDateTime(now - 86_400_000L).take(10) -> "어제"
+        else -> "이전"
+    }
+}
 
 /** Korean clock text such as "오후 3:44", built from the local time string so it works on every platform. */
 fun koreanClock(millis: Long): String {

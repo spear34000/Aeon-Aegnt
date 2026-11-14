@@ -17,7 +17,14 @@ export interface Device {
   createdAt: number;
   lastSeenAt: number;
   revoked: boolean;
+  /**
+   * May change settings, keys, connections and devices. Missing means true: one owner, and every device is theirs
+   * (D6). The owner can turn it off per device to leave a device with chat and approvals only.
+   */
+  admin?: boolean;
 }
+
+export const isAdmin = (d: Device | undefined): boolean => d !== undefined && !d.revoked && d.admin !== false;
 
 export class DeviceRegistry {
   private devices = new Map<string, Device>();
@@ -38,8 +45,8 @@ export class DeviceRegistry {
     renameSync(tmp, this.path);
   }
 
-  add(name: string, publicKey: string, now: number): Device {
-    const d: Device = { id: `dev_${randomBytes(9).toString("hex")}`, name: name.slice(0, 64), publicKey, createdAt: now, lastSeenAt: now, revoked: false };
+  add(name: string, publicKey: string, now: number, admin = true): Device {
+    const d: Device = { id: `dev_${randomBytes(9).toString("hex")}`, name: name.slice(0, 64), publicKey, createdAt: now, lastSeenAt: now, revoked: false, admin };
     this.devices.set(d.id, d);
     this.save();
     return d;
@@ -55,6 +62,15 @@ export class DeviceRegistry {
       d.lastSeenAt = now;
       this.save();
     }
+  }
+
+  update(id: string, change: { name?: string; admin?: boolean }): Device | undefined {
+    const d = this.devices.get(id);
+    if (!d || d.revoked) return undefined;
+    if (change.name !== undefined) d.name = change.name.slice(0, 64);
+    if (change.admin !== undefined) d.admin = change.admin;
+    this.save();
+    return d;
   }
 
   revoke(id: string): boolean {
@@ -125,6 +141,8 @@ function base32(buf: Buffer): string {
 export interface PairingCode {
   code: string;
   expiresAt: number;
+  /** Whether the device paired with this code may change settings. */
+  admin: boolean;
 }
 
 export interface PairRequest {
@@ -135,7 +153,7 @@ export interface PairRequest {
 }
 
 export type PairResult =
-  | { ok: true; device: Device; serverProof: string }
+  | { ok: true; device: Device; serverProof: string; serverKey?: string; serverKeyProof?: string }
   | { ok: false; reason: "invalid" | "locked" | "bad_request" };
 
 /**
@@ -150,16 +168,18 @@ export class PairingManager {
   private readonly registry: DeviceRegistry;
   private readonly ttlMs: number;
   private readonly maxFailures: number;
+  /** The server's sealing key (SPKI, base64). When set, a pairing device receives and pins it. */
+  serverKey: string | null = null;
   constructor(registry: DeviceRegistry, ttlMs = 5 * 60_000, maxFailures = 5) {
     this.registry = registry;
     this.ttlMs = ttlMs;
     this.maxFailures = maxFailures;
   }
 
-  newCode(now: number): PairingCode {
+  newCode(now: number, admin = true): PairingCode {
     this.codes = this.codes.filter((c) => c.expiresAt > now);
     const code = base32(randomBytes(10)); // 16 chars = 80 bits, shown as 4-4-4-4
-    const c = { code, expiresAt: now + this.ttlMs };
+    const c = { code, expiresAt: now + this.ttlMs, admin };
     this.codes.push(c);
     return c;
   }
@@ -180,6 +200,11 @@ export class PairingManager {
     return createHmac("sha256", code).update(`aeon-pair-server|${deviceId}|${clientNonce}|${publicKey}`).digest("base64");
   }
 
+  /** Proves the sealing key came from the server that knew the code, so the device can pin it. */
+  static serverKeyProof(code: string, serverKey: string, clientNonce: string, deviceId: string): string {
+    return createHmac("sha256", code).update(`aeon-pair-key|${serverKey}|${clientNonce}|${deviceId}`).digest("base64");
+  }
+
   complete(req: PairRequest, now: number): PairResult {
     if (now < this.lockedUntil) return { ok: false, reason: "locked" };
     if (typeof req.deviceName !== "string" || !req.deviceName || typeof req.publicKey !== "string" || typeof req.clientNonce !== "string" || typeof req.proof !== "string") {
@@ -197,8 +222,14 @@ export class PairingManager {
       if (expected.length === given.length && timingSafeEqual(expected, given)) {
         this.codes = this.codes.filter((x) => x !== c); // single use
         this.failures = [];
-        const device = this.registry.add(req.deviceName, req.publicKey, now);
-        return { ok: true, device, serverProof: PairingManager.serverProof(c.code, device.id, req.clientNonce, req.publicKey) };
+        const device = this.registry.add(req.deviceName, req.publicKey, now, c.admin);
+        const key = this.serverKey;
+        return {
+          ok: true,
+          device,
+          serverProof: PairingManager.serverProof(c.code, device.id, req.clientNonce, req.publicKey),
+          ...(key ? { serverKey: key, serverKeyProof: PairingManager.serverKeyProof(c.code, key, req.clientNonce, device.id) } : {}),
+        };
       }
     }
     this.failures = [...this.failures.filter((t) => now - t < 5 * 60_000), now];

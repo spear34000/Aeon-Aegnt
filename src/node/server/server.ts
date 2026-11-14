@@ -1,14 +1,27 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { extname, join, normalize, resolve, sep } from "node:path";
+import { dirname, extname, join, normalize, resolve, sep } from "node:path";
 import { systemClock, type Clock } from "../../core/clock.ts";
 import { parseConfig } from "../../core/config.ts";
+import { builtinProviders, currentModel, selectModel, type CatalogProvider, type ModelPick } from "../../core/models/catalog.ts";
 import { assertSecretName, type SecretStore } from "../../core/secrets.ts";
 import type { AuditEvent, Task } from "../../core/types.ts";
 import { parseCriterion } from "../../core/verify.ts";
 import { loadConfig, saveConfig } from "../config-file.ts";
+import type { ConnectionService } from "../connections.ts";
+import { SkillError } from "../skills.ts";
+import { FeedPipeline } from "../feed-pipeline.ts";
+import { GoogleNewsAdapter } from "../feed-sources.ts";
+import { FeedStore, mergeSettings } from "../feed-store.ts";
+import { feedState } from "../feed-view.ts";
+import type { FeedChat } from "../feed.ts";
+import { DAILY_RUN_CAP, nextDueAt, RoutineStore } from "../routines.ts";
+import { MemoryService, MEMORY_MAX_ITEMS, MEMORY_TEXT_MAX } from "../memory.ts";
+import { articleFetcher, ImageStore } from "../feed-images.ts";
+import type { ProviderCatalog } from "../provider-catalog.ts";
+import { isSealedBox, type ServerIdentity } from "./seal.ts";
 import type { createRuntime } from "../runtime.ts";
-import { canonicalRequest, DeviceRegistry, NonceCache, PairingManager, verifySignature, type PairRequest } from "./device-auth.ts";
+import { canonicalRequest, DeviceRegistry, isAdmin, NonceCache, PairingManager, verifySignature, type PairRequest } from "./device-auth.ts";
 
 type Runtime = ReturnType<typeof createRuntime>;
 
@@ -19,6 +32,21 @@ export interface AeonServerOptions {
   /** Called after settings change so the caller can rebuild the runtime (providers, consent). */
   onConfigChanged?: () => Promise<void> | void;
   secrets: SecretStore;
+  /** Lists built-in tools, added MCP servers, skills and what a registry offers. Without it those routes answer 404. */
+  connections?: ConnectionService;
+  /** Provider and model catalogue. Without it only the built-in providers are listed. */
+  providers?: ProviderCatalog;
+  /** The feed pipeline. Defaults to one that keeps its posts in the config folder and reads Google News. */
+  feed?: FeedPipeline;
+  /** How often the feed timer looks whether a run is due; 0 switches it off. Default: a minute, or off when tickIntervalMs is 0. */
+  feedTickMs?: number;
+  /** How often the routine timer looks whether something is due; 0 switches it off. Default: a minute, or off when tickIntervalMs is 0. */
+  routineTickMs?: number;
+  /** Sealing key. With it, paired devices can send keys and receive pairing codes encrypted. */
+  identity?: ServerIdentity;
+  /** Addresses other devices can use to reach this server (shown when pairing a new device). */
+  addresses?: () => string[];
+  maxUploadBytes?: number;
   configDir: string;
   registry: DeviceRegistry;
   pairing: PairingManager;
@@ -77,9 +105,17 @@ function taskSummary(t: Task) {
   };
 }
 
+/** Tools whose approval changes what steers every later task. */
+const STANDING_TOOLS = new Set(["memory.save", "memory.forget", "skill.create", "skill.update"]);
+
 export class AeonServer {
   private readonly o: AeonServerOptions;
   private readonly clock: Clock;
+  private feedService: FeedPipeline | null = null;
+  private feedTimer: ReturnType<typeof setInterval> | null = null;
+  private routineTimer: ReturnType<typeof setInterval> | null = null;
+  private routines: RoutineStore | null = null;
+  private memoryFallback: MemoryService | null = null;
   private readonly nonces = new NonceCache(FRESHNESS_MS * 2);
   private server: Server | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -89,12 +125,28 @@ export class AeonServer {
   constructor(o: AeonServerOptions) {
     this.o = o;
     this.clock = o.clock ?? systemClock;
+    if (o.identity) o.pairing.serverKey = o.identity.publicKey;
+  }
+
+  /** False when the owner declined internet lookups for lists and logos (config.onlineLookups). */
+  private online(): boolean {
+    return loadConfig(this.o.configDir).onlineLookups !== false;
+  }
+
+  private async catalog(): Promise<CatalogProvider[]> {
+    return this.o.providers ? this.o.providers.providers(this.online()) : builtinProviders();
+  }
+
+  /** Settings, keys, connections and devices can be changed by the machine itself or by a device the owner trusts with it. */
+  private canAdmin(req: IncomingMessage, deviceId: string): boolean {
+    return this.isLocal(req) || isAdmin(this.o.registry.get(deviceId));
   }
 
   async listen(port: number, host = "127.0.0.1"): Promise<{ port: number; host: string }> {
     this.server = createServer((req, res) => {
       this.handle(req, res).catch((e: unknown) => {
         const status = e instanceof HttpError ? e.status : 500;
+        if (!(e instanceof HttpError) && process.env.AEON_DEBUG) console.error("internal error:", e); // for the owner's console, never sent to the client
         const msg = e instanceof HttpError ? e.message : "internal error"; // never leak internals
         if (!res.headersSent) this.json(res, status, { error: msg });
         else res.end();
@@ -103,12 +155,25 @@ export class AeonServer {
     await new Promise<void>((r) => this.server!.listen(port, host, r));
     const interval = this.o.tickIntervalMs ?? 2000;
     if (interval > 0) this.timer = setInterval(() => void this.tick(), interval);
+    // The feed makes its posts on its own timer, apart from tasks and chat. It sends no notification: the posts are there when the tab is opened.
+    const feedTick = this.o.feedTickMs ?? (this.o.tickIntervalMs === 0 ? 0 : 60_000);
+    const routineTick = this.o.routineTickMs ?? (this.o.tickIntervalMs === 0 ? 0 : 60_000);
+    if (routineTick > 0) {
+      this.routineTimer = setInterval(() => void this.routineTick(), routineTick);
+      this.routineTimer.unref?.();
+    }
+    if (feedTick > 0) {
+      this.feedTimer = setInterval(() => void this.feedTick(), feedTick);
+      this.feedTimer.unref?.();
+    }
     const addr = this.server.address() as { port: number };
     return { port: addr.port, host };
   }
 
   async close(): Promise<void> {
     if (this.timer) clearInterval(this.timer);
+    if (this.feedTimer) clearInterval(this.feedTimer);
+    if (this.routineTimer) clearInterval(this.routineTimer);
     for (const c of this.sseClients) c.destroy();
     this.sseClients.clear();
     const s = this.server;
@@ -116,6 +181,53 @@ export class AeonServer {
     const closed = new Promise<void>((r) => s.close(() => r()));
     s.closeAllConnections();
     await closed;
+  }
+
+  private feedPipeline(): FeedPipeline {
+    return (this.feedService ??= this.o.feed ?? new FeedPipeline({
+      store: new FeedStore(join(this.o.configDir, "feed-posts.json")),
+      adapters: [new GoogleNewsAdapter({ articles: articleFetcher() })],
+      images: new ImageStore(join(this.o.configDir, "feed-images")),
+      now: () => this.clock.now(),
+    }));
+  }
+
+  /** Asks the model the owner has set up, with nothing from the chat: the feed sends public article text and the owner's brief. Undefined when no model may be used. */
+  private feedChat(rt: Runtime): FeedChat | undefined {
+    if (rt.router.candidates().length === 0) return undefined;
+    return async (system, user) => (await rt.router.chat({ messages: [{ role: "system", content: system }, { role: "user", content: user }], maxTokens: 3000, temperature: 0.3 }, { taskId: null })).content;
+  }
+
+  private routineStore(): RoutineStore {
+    return (this.routines ??= new RoutineStore(join(this.o.configDir, "routines.json")));
+  }
+
+  /** The routine timer: submits the goal of each routine that is due as an ordinary task (approvals still ask). Never throws. */
+  async routineTick(): Promise<number> {
+    try {
+      const engine = this.o.getRuntime().engine;
+      const made = await this.routineStore().tick(this.clock.now(), (goal) => engine.submit({ goal }));
+      if (made > 0) void this.tick();
+      return made;
+    } catch {
+      return 0;
+    }
+  }
+
+  private feedBusy = false;
+
+  /** The feed's own timer: makes posts when the owner's interval is over and no daily limit is reached. Never throws. */
+  async feedTick(): Promise<void> {
+    if (this.feedBusy) return;
+    this.feedBusy = true;
+    try {
+      const cfg = loadConfig(this.o.configDir);
+      await this.feedPipeline().runIfDue({ interests: cfg.profile?.interests ?? [], chat: this.feedChat(this.o.getRuntime()), images: cfg.feedImages !== false, online: this.online() });
+    } catch {
+      /* a failing run must not kill the timer; the run report keeps what happened */
+    } finally {
+      this.feedBusy = false;
+    }
   }
 
   /** One scheduler pass (also called by the background loop). */
@@ -147,8 +259,7 @@ export class AeonServer {
     res.end(data);
   }
 
-  private async readBody(req: IncomingMessage): Promise<Buffer> {
-    const limit = this.o.maxBodyBytes ?? 256 * 1024;
+  private async readBody(req: IncomingMessage, limit = this.o.maxBodyBytes ?? 256 * 1024): Promise<Buffer> {
     const chunks: Buffer[] = [];
     let size = 0;
     for await (const c of req) {
@@ -215,10 +326,23 @@ export class AeonServer {
       const body = this.parseJson(await this.readBody(req));
       const r = this.o.pairing.complete(body as unknown as PairRequest, this.clock.now());
       if (!r.ok) return this.json(res, r.reason === "locked" ? 429 : r.reason === "bad_request" ? 400 : 403, { error: r.reason === "invalid" ? "pairing failed" : r.reason });
-      return this.json(res, 201, { deviceId: r.device.id, serverProof: r.serverProof, serverName: this.o.serverName ?? "Aeon" });
+      return this.json(res, 201, {
+        deviceId: r.device.id,
+        serverProof: r.serverProof,
+        serverName: this.o.serverName ?? "Aeon",
+        admin: r.device.admin !== false,
+        ...(r.serverKey ? { serverKey: r.serverKey, serverKeyProof: r.serverKeyProof } : {}),
+      });
     }
 
-    const raw = await this.readBody(req);
+    // Uploads are large, so the cheap checks (known device, fresh timestamp) run before the body is read.
+    const upload = method === "POST" && path === "/v1/files";
+    if (upload) {
+      const dev = this.o.registry.get(typeof req.headers["x-aeon-device"] === "string" ? req.headers["x-aeon-device"] : "");
+      const ts = Number(req.headers["x-aeon-timestamp"]);
+      if (!dev || dev.revoked || !Number.isFinite(ts) || Math.abs(this.clock.now() - ts) > FRESHNESS_MS) throw new HttpError(401, "unauthorized");
+    }
+    const raw = await this.readBody(req, upload ? (this.o.maxUploadBytes ?? 20 * 1024 * 1024) : undefined);
     const { deviceId } = this.authenticate(req, raw);
     const rt = this.o.getRuntime();
     const { store, engine } = rt;
@@ -227,7 +351,86 @@ export class AeonServer {
       const tasks = await store.listTasks();
       const counts: Record<string, number> = {};
       for (const t of tasks) counts[t.status] = (counts[t.status] ?? 0) + 1;
-      return this.json(res, 200, { name: this.o.serverName ?? "Aeon", device: deviceId, tasks: counts, secretsBackend: this.o.secrets.kind, providers: rt.router.health(), setupProblem: this.o.getProblem?.() ?? null });
+      const me = this.o.registry.get(deviceId);
+      return this.json(res, 200, {
+        name: this.o.serverName ?? "Aeon",
+        device: deviceId,
+        deviceName: me?.name ?? "",
+        admin: this.canAdmin(req, deviceId),
+        tasks: counts,
+        secretsBackend: this.o.secrets.kind,
+        providers: rt.router.health(),
+        setupProblem: this.o.getProblem?.() ?? null,
+        host: { platform: process.platform, arch: process.arch },
+        addresses: this.o.addresses?.() ?? [],
+        sealing: this.o.identity !== undefined,
+      });
+    }
+
+    if (upload) {
+      const name = (url.searchParams.get("name") ?? "")
+        .normalize("NFC")
+        .replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_")
+        .replace(/^\.+/, "")
+        .trim()
+        .slice(0, 120);
+      if (!name) throw new HttpError(400, "name is required");
+      if (raw.length === 0) throw new HttpError(400, "the file is empty");
+      const stamp = new Date(this.clock.now()).toISOString().replace(/[-:T.]/g, "").slice(0, 14);
+      const rel = `uploads/${stamp}-${name}`;
+      const target = rt.guard.resolve(rel);
+      if (!target.ok) throw new HttpError(400, target.violation);
+      mkdirSync(dirname(target.abs), { recursive: true });
+      try {
+        writeFileSync(target.abs, raw, { flag: "wx" });
+      } catch {
+        throw new HttpError(409, "a file with that name was uploaded in the same second");
+      }
+      return this.json(res, 201, { path: rel, size: raw.length });
+    }
+
+    if (path === "/v1/providers" && method === "GET") {
+      const catalog = await this.catalog();
+      const cfg = loadConfig(this.o.configDir);
+      const names = new Set(await this.o.secrets.list());
+      const used = new Set(cfg.providers);
+      return this.json(res, 200, {
+        providers: catalog.map((p) => ({ id: p.id, name: p.name, baseUrl: p.baseUrl, keyName: p.keyName, hasKey: p.keyName ? names.has(p.keyName) : true, local: p.local, doc: p.doc, efforts: p.efforts, modelCount: p.models.length, inUse: used.has(p.id), consented: p.local || cfg.dataConsent.includes(p.id), icon: this.online() ? (this.o.connections?.providerIcon(p.id) ?? null) : null })),
+        current: currentModel(cfg, catalog),
+        catalogError: this.online() ? (this.o.providers?.error ?? null) : null,
+        online: this.online(),
+      });
+    }
+    const modelsMatch = /^\/v1\/providers\/([a-z0-9][a-z0-9._-]{0,63})\/models$/.exec(path);
+    if (modelsMatch && method === "GET") {
+      const p = (await this.catalog()).find((x) => x.id === modelsMatch[1]);
+      if (!p) throw new HttpError(404, "provider not found");
+      return this.json(res, 200, { provider: p.id, models: p.models });
+    }
+    if (path === "/v1/model" && method === "POST") {
+      if (!this.canAdmin(req, deviceId)) throw new HttpError(403, "this device is not allowed to change settings");
+      const b = this.parseJson(raw);
+      const catalog = await this.catalog();
+      let next;
+      try {
+        if (typeof b.provider !== "string" || typeof b.model !== "string") throw new Error("provider and model are required");
+        const custom = b.custom !== undefined && b.custom !== null && typeof b.custom === "object" ? (b.custom as Record<string, unknown>) : null;
+        const pick: ModelPick = {
+          provider: b.provider,
+          model: b.model,
+          ...(typeof b.reasoningEffort === "string" ? { reasoningEffort: b.reasoningEffort } : {}),
+          ...(b.consent === true ? { consent: true } : {}),
+          ...(custom && typeof custom.baseUrl === "string"
+            ? { custom: { baseUrl: custom.baseUrl, ...(typeof custom.name === "string" ? { name: custom.name } : {}), ...(custom.needsKey === false ? { needsKey: false } : {}) } }
+            : {}),
+        };
+        next = parseConfig(selectModel(loadConfig(this.o.configDir), pick, catalog));
+      } catch (e) {
+        throw new HttpError(400, (e as Error).message);
+      }
+      saveConfig(this.o.configDir, next);
+      await this.o.onConfigChanged?.();
+      return this.json(res, 200, { config: next, current: currentModel(next, catalog), setupProblem: this.o.getProblem?.() ?? null });
     }
 
     if (path === "/v1/tasks" && method === "GET") {
@@ -276,8 +479,15 @@ export class AeonServer {
     if (apprMatch && method === "POST") {
       const b = this.parseJson(raw);
       if (b.decision !== "approved" && b.decision !== "denied") throw new HttpError(400, 'decision must be "approved" or "denied"');
+      // What steers every later task (a memory, a skill) is changed by the machine or an admin device, as it is through the settings routes: a limited device may refuse these but not approve them.
+      if (b.decision === "approved" && !this.canAdmin(req, deviceId)) {
+        const before = await store.getApproval(apprMatch[1]!);
+        if (before && STANDING_TOOLS.has(before.tool)) throw new HttpError(403, "this device is not allowed to approve a change to what the agent remembers or knows");
+      }
       try {
-        const a = await engine.decideApproval(apprMatch[1]!, b.decision);
+        // A question is answered in words: `answer` (at most 1000 characters). Approving one without an answer is refused.
+        if (b.answer !== undefined && typeof b.answer !== "string") throw new HttpError(400, "answer must be text");
+        const a = await engine.decideApproval(apprMatch[1]!, b.decision, b.answer as string | undefined);
         void this.tick();
         return this.json(res, 200, { approval: a });
       } catch (e) {
@@ -295,28 +505,41 @@ export class AeonServer {
       } catch (e) {
         throw new HttpError(400, (e as Error).message);
       }
-      // Changing where prompts and keys go (providers, consent, endpoints) is as sensitive as a secret: a lost or
-      // compromised phone must not be able to point the stored key at another host. Local machine only.
+      // Changing where prompts and keys go (providers, consent, endpoints, MCP servers) is as sensitive as a secret.
+      // It is accepted from the machine itself and from devices the owner lets change settings; a device limited
+      // to chat and approvals cannot point a stored key at another host.
       const cur = loadConfig(this.o.configDir);
-      const sensitive = ["providers", "dataConsent", "fallbackAllowed", "ollamaBaseUrl", "openaiCompatBaseUrl"] as const;
+      const sensitive = ["providers", "dataConsent", "fallbackAllowed", "ollamaBaseUrl", "openaiCompatBaseUrl", "mcpServers", "endpoints", "onlineLookups"] as const;
       const changed = sensitive.filter((k) => JSON.stringify(cur[k] ?? null) !== JSON.stringify(cfg[k] ?? null));
-      if (changed.length > 0 && !this.isLocal(req)) throw new HttpError(403, `changing ${changed.join(", ")} is only allowed from the machine running Aeon`);
+      if (changed.length > 0 && !this.canAdmin(req, deviceId)) throw new HttpError(403, `this device is not allowed to change ${changed.join(", ")}`);
       saveConfig(this.o.configDir, cfg);
       await this.o.onConfigChanged?.();
       return this.json(res, 200, { config: cfg });
     }
 
-    // Secrets are write-only over the API, and only from the PC itself: the transport is plain HTTP on a LAN.
+    // Secrets are write-only over the API. The transport may be plain HTTP on a LAN, so a value from another device
+    // must arrive sealed for this server's key (seal.ts); a plain value is accepted from the machine itself only.
     if (path === "/v1/secrets" && method === "GET") return this.json(res, 200, { backend: this.o.secrets.kind, names: await this.o.secrets.list() });
     const secMatch = /^\/v1\/secrets\/([A-Z][A-Z0-9_]{1,63})$/.exec(path);
     if (secMatch) {
-      if (!this.isLocal(req)) throw new HttpError(403, "secrets can only be changed from the machine running Aeon");
+      if (!this.canAdmin(req, deviceId)) throw new HttpError(403, "this device is not allowed to change keys");
       const name = secMatch[1]!;
       assertSecretName(name);
       if (method === "PUT") {
         const b = this.parseJson(raw);
-        if (typeof b.value !== "string" || b.value.length === 0 || b.value.length > 4096) throw new HttpError(400, "value must be a non-empty string");
-        await this.o.secrets.set(name, b.value);
+        let value: unknown = b.value;
+        if (b.sealed !== undefined) {
+          if (!this.o.identity || !isSealedBox(b.sealed)) throw new HttpError(400, "sealed value not accepted");
+          try {
+            value = this.o.identity.open(b.sealed, `secret|${deviceId}|${name}`).toString("utf8");
+          } catch {
+            throw new HttpError(400, "sealed value could not be opened");
+          }
+        } else if (!this.isLocal(req)) {
+          throw new HttpError(400, "send the value sealed: this connection is not encrypted");
+        }
+        if (typeof value !== "string" || value.length === 0 || value.length > 4096) throw new HttpError(400, "value must be a non-empty string");
+        await this.o.secrets.set(name, value);
         await this.o.onConfigChanged?.();
         res.writeHead(204).end();
         return;
@@ -330,13 +553,389 @@ export class AeonServer {
     }
 
     if (path === "/v1/devices" && method === "GET") {
-      return this.json(res, 200, { devices: this.o.registry.list().map(({ id, name, createdAt, lastSeenAt, revoked }) => ({ id, name, createdAt, lastSeenAt, revoked })) });
+      return this.json(res, 200, {
+        devices: this.o.registry.list().map(({ id, name, createdAt, lastSeenAt, revoked, admin }) => ({ id, name, createdAt, lastSeenAt, revoked, admin: admin !== false, current: id === deviceId })),
+      });
     }
     const devMatch = /^\/v1\/devices\/(dev_[a-f0-9]+)$/.exec(path);
-    if (devMatch && method === "DELETE") {
-      if (!this.o.registry.revoke(devMatch[1]!)) throw new HttpError(404, "device not found");
-      res.writeHead(204).end();
-      return;
+    if (devMatch && (method === "DELETE" || method === "PATCH")) {
+      const id = devMatch[1]!;
+      // A device may always remove itself (signing out); anything else needs the right to manage devices.
+      if (!(method === "DELETE" && id === deviceId) && !this.canAdmin(req, deviceId)) throw new HttpError(403, "this device is not allowed to manage devices");
+      if (method === "DELETE") {
+        if (!this.o.registry.revoke(id)) throw new HttpError(404, "device not found");
+        res.writeHead(204).end();
+        return;
+      }
+      const b = this.parseJson(raw);
+      const change: { name?: string; admin?: boolean } = {};
+      if (b.name !== undefined) {
+        if (typeof b.name !== "string" || !b.name.trim() || b.name.length > 64) throw new HttpError(400, "name must be 1-64 characters");
+        change.name = b.name.trim();
+      }
+      if (b.admin !== undefined) {
+        if (typeof b.admin !== "boolean") throw new HttpError(400, "admin must be true or false");
+        if (id === deviceId && b.admin === false) throw new HttpError(409, "a device cannot remove its own right to change settings");
+        change.admin = b.admin;
+      }
+      const d = this.o.registry.update(id, change);
+      if (!d) throw new HttpError(404, "device not found");
+      return this.json(res, 200, { device: { id: d.id, name: d.name, createdAt: d.createdAt, lastSeenAt: d.lastSeenAt, revoked: d.revoked, admin: d.admin !== false, current: d.id === deviceId } });
+    }
+
+    // A paired device can let another device in. The code is returned sealed for the asking device, because anyone
+    // who reads a pairing code on the wire could pair a device of their own.
+    if (path === "/v1/pairing-codes" && method === "POST") {
+      if (!this.canAdmin(req, deviceId)) throw new HttpError(403, "this device is not allowed to pair devices");
+      const b = this.parseJson(raw);
+      const c = this.o.pairing.newCode(this.clock.now(), b.admin !== false);
+      const body = { expiresAt: c.expiresAt, admin: c.admin, addresses: this.o.addresses?.() ?? [] };
+      if (typeof b.epk === "string" && this.o.identity) {
+        let sealed;
+        try {
+          sealed = this.o.identity.sealFor(b.epk, Buffer.from(c.code, "utf8"), `pairing-code|${deviceId}`);
+        } catch {
+          throw new HttpError(400, "epk is not a P-256 public key");
+        }
+        return this.json(res, 201, { ...body, sealed });
+      }
+      if (!this.isLocal(req)) throw new HttpError(400, "send a one-time key (epk): this connection is not encrypted");
+      return this.json(res, 201, { ...body, code: c.code });
+    }
+
+    const conn = this.o.connections;
+    // Routines (D27): a goal and a time; at that time the server makes an ordinary task. Anyone paired reads them; making, changing,
+    // deleting and running one needs the machine or an admin device, because a routine starts tasks on its own.
+    const routineMatch = /^\/v1\/routines(?:\/(rtn_[a-f0-9]{10})(?:\/(run))?)?$/.exec(path);
+    if (routineMatch) {
+      const store = this.routineStore();
+      const id = routineMatch[1];
+      const run = routineMatch[2] === "run";
+      const admin = () => {
+        if (!this.canAdmin(req, deviceId)) throw new HttpError(403, "this device is not allowed to change routines");
+      };
+      const now = this.clock.now();
+      const view = () => ({ routines: store.list().map((r) => ({ ...r, nextRunAt: r.enabled ? nextDueAt(r.schedule, now) : null })), runsToday: store.runsToday(now), cap: DAILY_RUN_CAP, utcOffsetMinutes: -new Date(now).getTimezoneOffset() });
+      if (!id && method === "GET") return this.json(res, 200, view());
+      if (!id && method === "POST") {
+        admin();
+        const b = this.parseJson(raw);
+        try {
+          const r = store.create(b.title, b.schedule, now);
+          return this.json(res, 201, { routine: r, ...view() });
+        } catch (e) {
+          throw new HttpError(400, (e as Error).message);
+        }
+      }
+      if (id && !run && method === "PATCH") {
+        admin();
+        const b = this.parseJson(raw);
+        let r;
+        try {
+          r = store.update(id, { title: b.title, schedule: b.schedule, enabled: b.enabled }, now);
+        } catch (e) {
+          throw new HttpError(400, (e as Error).message);
+        }
+        if (!r) throw new HttpError(404, "no such routine");
+        return this.json(res, 200, { routine: r, ...view() });
+      }
+      if (id && !run && method === "DELETE") {
+        admin();
+        if (!store.remove(id)) throw new HttpError(404, "no such routine");
+        return this.json(res, 200, view());
+      }
+      if (id && run && method === "POST") {
+        admin();
+        const task = await store.runNow(id, now, (goal) => rt.engine.submit({ goal }));
+        if (!task) throw new HttpError(store.list().some((r) => r.id === id) ? 409 : 404, store.list().some((r) => r.id === id) ? `routines may make at most ${DAILY_RUN_CAP} tasks a day` : "no such routine");
+        void this.tick();
+        return this.json(res, 200, { taskId: task.id, ...view() });
+      }
+      throw new HttpError(405, "that method is not allowed here");
+    }
+
+    // The feed (D25): posts written from the owner's interests by a pipeline that runs beside the chat agent. Anyone paired reads
+    // and reacts; the brief and the limits are changed by the machine or an admin device. A manual run counts against the day's limits.
+    if (path === "/v1/feed" || path.startsWith("/v1/feed/")) {
+      const feed = this.feedPipeline();
+      const interests = loadConfig(this.o.configDir).profile?.interests ?? [];
+      const state = () => feedState(feed, interests, this.online(), this.clock.now());
+      const imageMatch = /^\/v1\/feed\/image\/([a-f0-9]{12})$/.exec(path);
+      if (imageMatch && method === "GET") {
+        const img = feed.image(imageMatch[1]!);
+        if (!img) throw new HttpError(404, "no image");
+        res.writeHead(200, { "content-type": img.type, "content-length": img.bytes.length, "cache-control": "private, max-age=86400", "x-content-type-options": "nosniff" });
+        res.end(img.bytes);
+        return;
+      }
+      if (path === "/v1/feed" && method === "GET") return this.json(res, 200, state());
+      if (path === "/v1/feed/generate" && method === "POST") {
+        const report = await feed.generate({ interests, chat: this.feedChat(rt), images: loadConfig(this.o.configDir).feedImages !== false, manual: true, online: this.online() });
+        return this.json(res, 200, { report, ...state() });
+      }
+      if (path === "/v1/feed/settings" && method === "PUT") {
+        if (!this.canAdmin(req, deviceId)) throw new HttpError(403, "this device is not allowed to change the feed settings");
+        try {
+          const next = mergeSettings(feed.store.read().settings, this.parseJson(raw));
+          feed.store.update((f) => {
+            f.settings = next;
+          });
+        } catch (e) {
+          if (e instanceof HttpError) throw e;
+          throw new HttpError(400, (e as Error).message);
+        }
+        return this.json(res, 200, state());
+      }
+      // Reactions: any paired device (it is the owner's own reading, not a setting). The taste summary is made when enough have come.
+      const postMatch = /^\/v1\/feed\/posts\/([a-f0-9]{12})\/(seen|react|move)$/.exec(path);
+      if (postMatch && method === "POST") {
+        const id = postMatch[1]!;
+        const b = postMatch[2] === "seen" ? {} : this.parseJson(raw);
+        let ok = false;
+        if (postMatch[2] === "seen") ok = feed.markSeen(id);
+        else if (postMatch[2] === "react") {
+          if (b.reaction !== "like" && b.reaction !== "unlike" && b.reaction !== "dismiss") throw new HttpError(400, 'reaction must be "like", "unlike" or "dismiss"');
+          ok = feed.react(id, b.reaction);
+          if (ok) await feed.refreshTaste(this.feedChat(rt)).catch(() => false);
+        } else {
+          if (b.to !== "top" && b.to !== "bottom") throw new HttpError(400, 'to must be "top" or "bottom"');
+          ok = feed.move(id, b.to);
+        }
+        if (!ok) throw new HttpError(404, "no such post");
+        return this.json(res, 200, state());
+      }
+      if (path === "/v1/feed/taste" && (method === "PUT" || method === "DELETE")) {
+        if (!this.canAdmin(req, deviceId)) throw new HttpError(403, "this device is not allowed to change the taste summary");
+        if (method === "DELETE") feed.setTaste(null);
+        else {
+          const b = this.parseJson(raw);
+          if (typeof b.text !== "string") throw new HttpError(400, "text must be text");
+          feed.setTaste(b.text);
+        }
+        return this.json(res, 200, state());
+      }
+    }
+
+    // What the owner wants remembered across tasks: read by any paired device, changed only by the machine or an admin device.
+    // The agent only suggests (proposals); nothing it suggests is kept or used before the owner accepts it here.
+    const memoryMatch = /^\/v1\/memory(?:\/(mem_[a-f0-9]{10})|\/proposals\/(prop_[a-f0-9]{10})(?:\/(accept))?)?$/.exec(path);
+    if (memoryMatch) {
+      const memory = rt.memory ?? (this.memoryFallback ??= new MemoryService(join(this.o.configDir, "memory.json"), () => this.clock.now()));
+      const id = memoryMatch[1];
+      const proposalId = memoryMatch[2];
+      const accept = memoryMatch[3] === "accept";
+      const deny = () => {
+        if (!this.canAdmin(req, deviceId)) throw new HttpError(403, "this device is not allowed to change what is remembered");
+      };
+      /** A period for a memory: a date as YYYY-MM-DD (end of that day), null for no end, or undefined for "leave as it is". */
+      const until = (v: unknown): number | null | undefined => {
+        if (v === undefined) return undefined;
+        if (v === null) return null;
+        const m = typeof v === "string" ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(v) : null;
+        const t = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 23, 59, 59).getTime() : NaN;
+        if (!Number.isFinite(t) || new Date(t).getDate() !== Number(m![3])) throw new HttpError(400, 'expires must be a date as "YYYY-MM-DD" or null');
+        return t;
+      };
+      /** Either [expires] (a date, or null for no end) or [expiresInDays] (1 to 3650, counted from today, to the end of that day). */
+      const period = (b: Record<string, unknown>): number | null | undefined => {
+        if (b.expiresInDays === undefined) return until(b.expires);
+        const n = b.expiresInDays;
+        if (typeof n !== "number" || !Number.isInteger(n) || n < 1 || n > 3650) throw new HttpError(400, "expiresInDays must be a whole number from 1 to 3650");
+        const d = new Date(this.clock.now());
+        return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n, 23, 59, 59).getTime();
+      };
+      const view = () => {
+        memory.purgePast();
+        const all = memory.list();
+        const at = this.clock.now();
+        const newest = (xs: typeof all) => xs.reverse().sort((x, y) => y.createdAt - x.createdAt);
+        return {
+          items: newest(all.filter((i) => !memory.isPast(i, at))),
+          past: newest(all.filter((i) => memory.isPast(i, at))),
+          proposals: memory.proposals().reverse(),
+          tidy: memory.tidy(),
+          max: MEMORY_MAX_ITEMS, textMax: MEMORY_TEXT_MAX,
+        };
+      };
+      if (!id && !proposalId && method === "GET") return this.json(res, 200, view());
+      if (!id && !proposalId && method === "POST") {
+        deny();
+        const b = this.parseJson(raw);
+        const text = MemoryService.clean(b.text);
+        if (!text) throw new HttpError(400, "text must be a sentence of 3 to 300 characters");
+        if (rt.redactor.redact(text) !== text) throw new HttpError(400, "that looks like a secret (a key, token or password): it would be sent to the model with every task");
+        if (b.kind !== undefined && b.kind !== "preference" && b.kind !== "fact") throw new HttpError(400, 'kind must be "preference" or "fact"');
+        const end = period(b);
+        return this.json(res, 201, { item: memory.add(text, b.kind === "preference" ? "preference" : "fact", { type: "owner" }, end ? { expiresAt: end } : {}) });
+      }
+      if (id && method === "PATCH") {
+        deny();
+        const b = this.parseJson(raw);
+        const patch: { text?: string; kind?: "preference" | "fact"; expiresAt?: number | null } = {};
+        if (b.text !== undefined) {
+          const text = MemoryService.clean(b.text);
+          if (!text) throw new HttpError(400, "text must be a sentence of 3 to 300 characters");
+          if (rt.redactor.redact(text) !== text) throw new HttpError(400, "that looks like a secret (a key, token or password): it would be sent to the model with every task");
+          patch.text = text;
+        }
+        if (b.kind !== undefined) {
+          if (b.kind !== "preference" && b.kind !== "fact") throw new HttpError(400, 'kind must be "preference" or "fact"');
+          patch.kind = b.kind;
+        }
+        const end = period(b);
+        if (end !== undefined) patch.expiresAt = end;
+        const item = memory.update(id, patch);
+        if (!item) throw new HttpError(404, "nothing remembered with that id");
+        return this.json(res, 200, { item, ...view() });
+      }
+      if (id && method === "DELETE") {
+        deny();
+        if (!memory.remove(id)) throw new HttpError(404, "nothing remembered with that id");
+        return this.json(res, 200, { ok: true });
+      }
+      if (proposalId && accept && method === "POST") {
+        deny();
+        const b = this.parseJson(raw);
+        let text: string | undefined;
+        if (b.text !== undefined) {
+          const t = MemoryService.clean(b.text);
+          if (!t) throw new HttpError(400, "text must be a sentence of 3 to 300 characters");
+          if (rt.redactor.redact(t) !== t) throw new HttpError(400, "that looks like a secret (a key, token or password): it would be sent to the model with every task");
+          text = t;
+        }
+        const end = period(b);
+        const item = memory.accept(proposalId, text, end ?? undefined);
+        if (!item) throw new HttpError(404, "no such suggestion");
+        return this.json(res, 200, { item, ...view() });
+      }
+      if (proposalId && !accept && method === "DELETE") {
+        deny();
+        if (!memory.ignore(proposalId)) throw new HttpError(404, "no such suggestion");
+        return this.json(res, 200, view());
+      }
+      throw new HttpError(405, "that method is not allowed here");
+    }
+
+    const lib = rt.skills ?? this.o.connections?.library;
+    const skillMatch = /^\/v1\/skills(?:\/([a-z0-9][a-z0-9-]{0,63})(?:\/(enable|trust|update-preview|file|auto-run))?)?$/.exec(path);
+    const sourceMatch = /^\/v1\/skill-sources\/(inspect|install|updates)$/.exec(path);
+    if (lib && (skillMatch || sourceMatch)) {
+      const scopeOf = (v: unknown, fallback: "user" | "project" = "user"): "user" | "project" => (v === "user" || v === "project" ? v : fallback);
+      const admin = (what: string) => {
+        if (!this.canAdmin(req, deviceId)) throw new HttpError(403, `this device is not allowed to ${what}`);
+      };
+      try {
+        if (sourceMatch) {
+          // The owner's acts: look at a source, install from it, check for newer versions. Nothing is installed by looking.
+          admin("install skills");
+          const what = sourceMatch[1];
+          if (what === "updates" && method === "GET") {
+            if (!this.online()) throw new HttpError(403, "internet lookups are off in the settings");
+            return this.json(res, 200, { updates: await lib.check() });
+          }
+          if (method !== "POST") throw new HttpError(405, "use POST");
+          const b = this.parseJson(raw);
+          if (what === "inspect") {
+            if (typeof b.source !== "string") throw new HttpError(400, "source is required");
+            if (!/^(\/|\.|~|[A-Za-z]:[\\/])/.test(b.source.trim()) && !this.online()) throw new HttpError(403, "internet lookups are off in the settings");
+            return this.json(res, 200, { preview: await lib.inspect(b.source) });
+          }
+          if (what === "install") {
+            if (typeof b.previewId !== "string" || typeof b.name !== "string") throw new HttpError(400, "previewId and name are required");
+            const skill = lib.install({ previewId: b.previewId, name: b.name, scope: scopeOf(b.scope), ...(typeof b.rename === "string" ? { rename: b.rename } : {}), ...(b.replace === true ? { replace: true } : {}), ...(b.autoRun === false ? { autoRun: false } : {}) });
+            return this.json(res, 201, { skill });
+          }
+        }
+        if (skillMatch) {
+          const folder = skillMatch[1];
+          const action = skillMatch[2];
+          const scope = scopeOf(url.searchParams.get("scope"));
+          if (method === "GET" && !folder) return this.json(res, 200, { skills: lib.list(), dir: lib.userDir, projectDir: lib.project?.dir ?? null, canEdit: this.canAdmin(req, deviceId) });
+          if (method === "GET" && folder && action === "file") {
+            // Reading a file of a skill (any state) so the owner can read it before approving. Open to any paired device like the rest of the reads.
+            const rel = url.searchParams.get("path") ?? "";
+            const f = lib.readSupportFile(scope, folder, rel);
+            if (!f) throw new HttpError(404, "file not found");
+            return this.json(res, 200, { path: rel, ...f });
+          }
+          if (method === "GET" && folder && !action) {
+            // With a scope: that one, whatever its state (an unapproved skill has to be readable). Without: the one in use, else the first.
+            const same = lib.list().filter((x) => x.folder === folder);
+            const hit = url.searchParams.has("scope") ? same.find((x) => x.scope === scope) : (same.find((x) => x.active) ?? same[0]);
+            const full = hit ? (hit.scope === "project" ? lib.project : lib.user)?.read(folder) : null;
+            if (!hit || !full) throw new HttpError(404, "skill not found");
+            return this.json(res, 200, { skill: { ...full, scope: hit.scope, status: hit.status, enabled: hit.enabled, active: hit.active, inactiveBecause: hit.inactiveBecause, ...(hit.source ? { source: hit.source } : {}), hash: hit.hash } });
+          }
+          if (folder && method === "PUT" && !action) {
+            admin("change skills");
+            // Skills are made by the agent (the owner approves each one). The owner can correct or delete what exists, not create one.
+            const b = this.parseJson(raw);
+            if (typeof b.description !== "string" || typeof b.body !== "string") throw new HttpError(400, "description and body are required");
+            const strings = (v: unknown): Record<string, string> | undefined => (v !== null && typeof v === "object" && !Array.isArray(v) && Object.values(v).every((x) => typeof x === "string") ? (v as Record<string, string>) : undefined);
+            const saved = lib.writeAsOwner({
+              name: folder, description: b.description, body: b.body,
+              ...(typeof b.license === "string" ? { license: b.license } : {}),
+              ...(typeof b.compatibility === "string" ? { compatibility: b.compatibility } : {}),
+              ...(strings(b.metadata) ? { metadata: strings(b.metadata)! } : {}),
+            });
+            return this.json(res, 200, { skill: saved, trusted: saved.trusted });
+          }
+          if (folder && method === "DELETE" && !action) {
+            admin("change skills");
+            if (!lib.remove(scope, folder)) throw new HttpError(404, "skill not found");
+            res.writeHead(204).end();
+            return;
+          }
+          if (folder && method === "POST" && action) {
+            admin("change skills");
+            const b = this.parseJson(raw);
+            const sc = scopeOf(b.scope);
+            if (action === "auto-run") return this.json(res, 200, { skill: lib.setAutoRun(sc, folder, b.enabled !== false) });
+            if (action === "enable") return this.json(res, 200, { skill: lib.setEnabled(sc, folder, b.enabled !== false) });
+            if (action === "trust") {
+              if (typeof b.hash !== "string") throw new HttpError(400, "hash is required: the hash of the skill you were shown");
+              return this.json(res, 200, { skill: lib.trust(sc, folder, b.hash) });
+            }
+            if (!this.online() && lib.get(sc, folder)?.source?.type === "github") throw new HttpError(403, "internet lookups are off in the settings");
+            return this.json(res, 200, await lib.previewUpdate(sc, folder));
+          }
+        }
+      } catch (e) {
+        if (e instanceof SkillError) throw new HttpError(e.status, e.message);
+        throw e;
+      }
+    }
+    if (conn && method === "GET") {
+      if (path === "/v1/connections") {
+        return this.json(res, 200, { connections: conn.installed(rt.tools.list(), loadConfig(this.o.configDir)), skillsDir: conn.skillsDir, canEdit: this.canAdmin(req, deviceId) });
+      }
+      if (path === "/v1/catalog/collections") return this.json(res, 200, { collections: conn.collections() });
+      if (path === "/v1/catalog") {
+        const q = url.searchParams.get("q") ?? "";
+        const collection = url.searchParams.get("collection");
+        const cursor = url.searchParams.get("cursor") ?? undefined;
+        if (q.length > 60 || (cursor !== undefined && cursor.length > 300)) throw new HttpError(400, "query too long");
+        const cfg = loadConfig(this.o.configDir);
+        if (cfg.onlineLookups === false) return this.json(res, 200, { connections: [], nextCursor: null, disabled: true });
+        try {
+          if (collection) {
+            const list = await conn.collection(collection, cfg);
+            if (!list) throw new HttpError(404, "collection not found");
+            return this.json(res, 200, { connections: list, nextCursor: null });
+          }
+          return this.json(res, 200, await conn.search(q, cfg, cursor));
+        } catch (e) {
+          if (e instanceof HttpError) throw e;
+          throw new HttpError(502, "catalog unavailable");
+        }
+      }
+      const iconMatch = /^\/v1\/icons\/([a-f0-9]{24})$/.exec(path);
+      if (iconMatch) {
+        if (!this.online()) throw new HttpError(404, "no icon");
+        const icon = await conn.icon(iconMatch[1]!);
+        if (!icon) throw new HttpError(404, "no icon");
+        return this.json(res, 200, { icon });
+      }
     }
 
     if (path === "/v1/events" && method === "GET") return this.sse(req, res, url, store);

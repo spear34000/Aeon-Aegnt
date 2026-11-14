@@ -13,6 +13,14 @@ export interface ToolAssessment {
   irreversible?: boolean;
   /** The request can carry data to a remote host (e.g. a URL with a query string). */
   exfilRisk?: boolean;
+  /** Longer text the owner may want to read before deciding (for example the instructions of a new skill). */
+  detail?: string;
+  /**
+   * Set only when the owner approved this kind of action in advance (a skill installed with automatic runs, checked
+   * when it was installed). The text says why it needs no question now. The policy allows it, and the audit log keeps the text.
+   * A tool must set this from stored consent, never from the arguments it was given.
+   */
+  preApproved?: string;
 }
 
 export interface ToolContext {
@@ -38,6 +46,11 @@ export interface Tool {
   run(args: unknown, ctx: ToolContext): Promise<ToolResult>;
   /** True if the output can contain workspace-derived data (file contents, listings, command output). */
   exposesWorkspaceData?: boolean;
+  /**
+   * True if the output is text the owner approved as instructions (a skill), not data. The agent then gives it to the
+   * model as instructions instead of wrapping it as untrusted. Policy and approvals still apply to everything it does.
+   */
+  instructions?: boolean;
 }
 
 export class ToolRegistry {

@@ -69,6 +69,7 @@ kotlin {
             getByName("androidMain").dependencies {
                 implementation(libs.ktor.client.cio)
                 implementation(libs.kotlinx.coroutines.android)
+                implementation(libs.androidx.activity.compose)
             }
         }
         wasmJsMain.dependencies {
@@ -92,7 +93,8 @@ compose.desktop {
     application {
         mainClass = "dev.aeon.ui.MainKt"
         nativeDistributions {
-            targetFormats(TargetFormat.Msi, TargetFormat.Exe)
+            // jpackage builds only for the machine it runs on: Windows x64/ARM64 give msi/exe, Linux gives deb/rpm.
+            targetFormats(TargetFormat.Msi, TargetFormat.Exe, TargetFormat.Deb, TargetFormat.Rpm)
             packageName = "Aeon"
             packageVersion = "0.1.0"
         }

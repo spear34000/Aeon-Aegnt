@@ -43,7 +43,8 @@ export interface Store {
   createApproval(approval: Approval): Promise<void>;
   getApproval(id: string): Promise<Approval | null>;
   findApproval(taskId: string, actionKey: string): Promise<Approval | null>;
-  decideApproval(id: string, status: Extract<ApprovalStatus, "approved" | "denied">, now: number): Promise<Approval>;
+  /** [answer] is the owner's words for an approval of kind "question". */
+  decideApproval(id: string, status: Extract<ApprovalStatus, "approved" | "denied">, now: number, answer?: string): Promise<Approval>;
   /** Marks pending approvals past their deadline as expired and returns them. */
   expireApprovals(now: number): Promise<Approval[]>;
   listApprovals(status?: ApprovalStatus): Promise<Approval[]>;

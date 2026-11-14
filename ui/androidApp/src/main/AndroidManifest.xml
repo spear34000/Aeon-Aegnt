@@ -1,12 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Only network access; no storage, location, contacts or any other permission. -->
+    <!-- Network access, and (optional, asked in the app) notifications for waiting approvals.
+         No storage, location, contacts or any other permission: files are chosen through the system picker. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Needed to schedule the background approval check "only while there is a network" (no prompt; reads no location). -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <application
         android:name=".AeonApplication"
         android:label="Aeon"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="false"
@@ -17,11 +23,25 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTop"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- A pairing QR code scanned with the phone's camera: aeon://pair?u=<address>&c=<code>. It only pre-fills the connect screen. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="aeon" android:host="pair" />
+            </intent-filter>
         </activity>
+
+        <!-- Runs only if the owner turned on the background approval check (JobScheduler, about every 15 minutes). -->
+        <service
+            android:name="dev.aeon.ui.platform.ApprovalCheckService"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
     </application>
 </manifest>

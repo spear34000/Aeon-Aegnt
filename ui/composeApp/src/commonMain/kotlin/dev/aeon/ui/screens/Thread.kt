@@ -67,12 +67,13 @@ fun ConversationScreen(state: UiState, model: AppModel, wide: Boolean, modifier:
     val listState = rememberLazyListState()
 
     Column(modifier.fillMaxSize()) {
-        ConversationHeader(summary?.goal, summary?.status, detail?.verificationDetail?.status, wide, onDetail = { state.selectedTaskId?.let { model.selectTask(it, asDetail = true) } }, hasTask = state.selectedTaskId != null)
+        // On the phone the top bar already says who this is; the title row appears only once a task is open.
+        if (wide || state.selectedTaskId != null) ConversationHeader(summary?.goal, wide, onDetail = { state.selectedTaskId?.let { model.selectTask(it, asDetail = true) } }, hasTask = state.selectedTaskId != null)
         if (offline) {
-            Banner("서버 연결이 끊겼습니다. PC가 켜져 있고 Aeon 서버가 실행 중인지 확인하세요.", Tone.Danger, "⚠", null)
+            Banner("에이전트에 연결할 수 없어요. 컴퓨터가 켜져 있고 같은 와이파이에 있는지 확인해 주세요.", Tone.Danger, "⚠", null)
         }
         state.status?.setupProblem?.let {
-            Banner("모델 키가 필요합니다. API 키를 넣거나 로컬 모델을 켜세요.", Tone.Warn, "•")
+            Banner("지금 고른 모델은 키가 없어서 쓸 수 없어요. 입력창의 모델 버튼에서 키를 넣거나 다른 모델을 골라 주세요.", Tone.Warn, "•")
         }
         state.message?.let { Banner(it, Tone.Neutral, "·", model::dismissMessage) }
 
@@ -84,9 +85,7 @@ fun ConversationScreen(state: UiState, model: AppModel, wide: Boolean, modifier:
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 16.dp),
             ) {
                 if (detail == null) {
-                    item(key = "welcome") {
-                        EmptyState("무엇을 도와드릴까요?", "목표를 말하면 Aeon이 계획을 세우고, 삭제나 명령 실행은 먼저 묻습니다.")
-                    }
+                    item(key = "welcome") { WelcomeBlock(state, model) }
                 } else {
                     item(key = "user-${detail.id}") { UserBubble(detail.goal) }
                     if (detail.plan.isNotEmpty()) {
@@ -98,23 +97,19 @@ fun ConversationScreen(state: UiState, model: AppModel, wide: Boolean, modifier:
                             }
                         }
                     }
-                    items(detail.steps.size, key = { "step-${detail.id}-${it}" }) { i ->
-                        val st = detail.steps[i]
-                        Row(Modifier.padding(start = 40.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Glyph(if (st.ok) "✓" else "✕", color = if (st.ok) LocalAeonStatus.current.ok else LocalAeonStatus.current.danger, style = MaterialTheme.typography.labelLarge)
-                            Spacer(Modifier.size(8.dp))
-                            Text(st.tool, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
                     val pending: Approval? = state.approvals.firstOrNull { it.id == detail.pendingApprovalId && it.status == "pending" }
+                    if (detail.steps.isNotEmpty()) {
+                        item(key = "progress-${detail.id}") { ProgressCard(detail, waiting = pending != null) }
+                    }
                     if (pending != null) {
                         item(key = "approval-${pending.id}") {
                             Column(Modifier.padding(start = 40.dp)) {
                                 ApprovalCard(
                                     a = pending,
                                     seenAt = state.approvalSeenAt[pending.id],
-                                    sourceLabel = "${detail.goal} · ${pending.tool}",
+                                    sourceLabel = detail.goal,
                                     onDecide = { model.decide(pending.id, it) },
+                                    onAnswer = { model.decide(pending.id, true, it) },
                                 )
                             }
                         }
@@ -125,7 +120,6 @@ fun ConversationScreen(state: UiState, model: AppModel, wide: Boolean, modifier:
                     when (detail.status) {
                         "RUNNING", "PENDING", "RETRY_WAIT" -> item(key = "running-${detail.id}") {
                             Row(Modifier.padding(start = 40.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Text("실행 중 · ${detail.steps.size}단계", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
                                 Spacer(Modifier.weight(1f))
                                 AeonButton("멈추기", { model.cancel(detail.id) }, kind = ButtonKind.Ghost)
                             }
@@ -133,16 +127,17 @@ fun ConversationScreen(state: UiState, model: AppModel, wide: Boolean, modifier:
                         "COMPLETED" -> item(key = "result-${detail.id}") { ResultBlock(detail) }
                         "FAILED" -> item(key = "failed-${detail.id}") {
                             AgentMessage("작업이 끝나지 않았습니다.") {
-                                Text(detail.error ?: "원인을 알 수 없습니다.", color = LocalAeonStatus.current.danger, style = MaterialTheme.typography.bodyMedium)
+                                Text(detail.error?.let { friendlyError(it) } ?: "원인을 알 수 없어요.", color = LocalAeonStatus.current.danger, style = MaterialTheme.typography.bodyMedium)
                             }
                         }
-                        "CANCELLED" -> item(key = "cancel-${detail.id}") { Chip("멈춤 · 에이전트 보고 없음", Tone.Neutral, "■") }
+                        "CANCELLED" -> item(key = "cancel-${detail.id}") { Chip("중단됨", Tone.Neutral) }
                     }
                 }
             }
         }
 
         Composer(
+            state, model,
             enabled = !offline,
             initialText = state.prefill.orEmpty(),
             onSend = { text -> model.createTask(text, emptyList()); model.consumePrefill() },
@@ -156,20 +151,12 @@ fun ConversationScreen(state: UiState, model: AppModel, wide: Boolean, modifier:
 }
 
 @Composable
-private fun ConversationHeader(title: String?, status: String?, verify: String?, wide: Boolean, onDetail: () -> Unit, hasTask: Boolean) {
+private fun ConversationHeader(title: String?, wide: Boolean, onDetail: () -> Unit, hasTask: Boolean) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(title ?: "새 대화", style = MaterialTheme.typography.titleMedium, maxLines = 1)
-            if (status != null) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TaskStatusChip(status)
-                    if (status == "COMPLETED") VerifyBadge(verify)
-                }
-            }
-        }
+        Text(title ?: "새 대화", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, maxLines = 1)
         if (hasTask) AeonButton(if (wide) "작업 상세" else "상세", onDetail, kind = ButtonKind.Ghost, wide = wide)
     }
 }
@@ -179,10 +166,10 @@ fun UserBubble(text: String) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
         Box(
             Modifier.widthIn(max = 480.dp)
-                .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(AeonShape.BUBBLE.dp))
-                .padding(horizontal = 14.dp, vertical = 10.dp),
+                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 20.dp, bottomEnd = 6.dp))
+                .padding(horizontal = 15.dp, vertical = 11.dp),
         ) {
-            Text(text, color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.bodyLarge)
+            Text(text, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyLarge)
         }
     }
 }
@@ -191,7 +178,7 @@ fun UserBubble(text: String) {
 @Composable
 fun AgentMessage(text: String, body: (@Composable () -> Unit)? = null) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-        Text("Æ", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 2.dp).widthIn(min = 28.dp))
+        androidx.compose.material3.Icon(dev.aeon.ui.design.AeonIcons.Mark, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 2.dp, end = 8.dp).size(20.dp))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(text, style = MaterialTheme.typography.bodyLarge)
             if (body != null) body()
@@ -201,16 +188,9 @@ fun AgentMessage(text: String, body: (@Composable () -> Unit)? = null) {
 
 @Composable
 private fun ResultBlock(d: TaskDetail) {
-    AgentMessage("에이전트 보고: 완료") {
-        if (d.result != null) SelectionContainer { Text(d.result, style = MaterialTheme.typography.bodyLarge) }
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            VerifyBadge(d.verificationDetail?.status, d.verificationDetail?.evidence?.count { !it.passed } ?: 0)
-        }
-        Text(
-            "위 보고는 에이전트의 말입니다. 확인 배지만 실제 파일을 보고 판단한 결과입니다.",
-            style = MaterialTheme.typography.bodySmall,
-            color = LocalAeonStatus.current.fg3,
-        )
+    // The agent's own report and the check against the real files are shown apart: only the badge is a check.
+    AgentMessage(d.result?.takeIf { it.isNotBlank() } ?: "작업을 마쳤습니다.") {
+        VerifyBadge(d.verificationDetail?.status, d.verificationDetail?.evidence?.count { !it.passed } ?: 0)
     }
 }
 
@@ -223,8 +203,7 @@ private fun QuotaCard(d: TaskDetail, model: AppModel) {
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text("한도 대기", color = s.warn, style = MaterialTheme.typography.labelLarge)
-        Text(d.note ?: "모델 사용 한도에 걸렸습니다. 잠시 뒤 자동으로 이어서 합니다.", style = MaterialTheme.typography.bodyMedium)
+        Text("모델 사용 한도에 걸렸어요. 잠시 뒤 이어서 할게요.", style = MaterialTheme.typography.bodyMedium)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             AeonButton("작업 정지", { model.cancel(d.id) }, kind = ButtonKind.Secondary)
             AeonButton("설정 바꾸기", { model.openSettings(dev.aeon.ui.state.SettingsPage.Models) }, kind = ButtonKind.Ghost)
@@ -232,52 +211,70 @@ private fun QuotaCard(d: TaskDetail, model: AppModel) {
     }
 }
 
-/** Composer: multi-line field, send button, Enter sends and Shift+Enter adds a line (desktop keyboards). */
+
+private fun toolLabel(tool: String): String = when (tool) {
+    "fs.list" -> "폴더 목록 보기"
+    "fs.read" -> "파일 읽기"
+    "fs.write" -> "파일 쓰기"
+    "fs.delete" -> "파일 삭제"
+    "http.get" -> "웹 주소 읽기"
+    "http.post" -> "외부로 보내기"
+    "sandbox.exec" -> "격리된 명령 실행"
+    else -> tool
+}
+
+/** What the agent has done so far, one line per action, with the real tool name beside each. */
 @Composable
-fun Composer(enabled: Boolean, onSend: (String) -> Unit, hint: String?, modifier: Modifier = Modifier, initialText: String = "") {
-    var text by remember(initialText) { mutableStateOf(initialText) }
+private fun ProgressCard(d: TaskDetail, waiting: Boolean) {
     val s = LocalAeonStatus.current
-    val canSend = enabled && text.isNotBlank()
-    fun send() {
-        if (!canSend) return
-        onSend(text)
-        text = ""
-    }
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(
-            Modifier.fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(26.dp))
-                .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.Bottom,
-        ) {
-            Box(Modifier.weight(1f).heightIn(min = 36.dp, max = 160.dp), contentAlignment = Alignment.CenterStart) {
-                if (text.isEmpty()) Text("목표를 말해 주세요", color = s.fg3, style = MaterialTheme.typography.bodyLarge)
-                BasicTextField(
-                    value = text,
-                    onValueChange = { text = it },
-                    enabled = enabled,
-                    textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, fontSize = 15.sp),
-                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                    modifier = Modifier.fillMaxWidth().onPreviewKeyEvent { ev ->
-                        if (ev.type == KeyEventType.KeyDown && ev.key == Key.Enter && !ev.isShiftPressed) {
-                            send()
-                            true
-                        } else {
-                            false
-                        }
-                    },
-                )
-            }
-            Spacer(Modifier.size(8.dp))
-            Box(
-                Modifier.size(36.dp).background(if (canSend) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant, CircleShape)
-                    .clickable(enabled = canSend) { send() },
-                contentAlignment = Alignment.Center,
-            ) {
-                Glyph("↑", color = if (canSend) MaterialTheme.colorScheme.onPrimary else s.fg3, style = MaterialTheme.typography.titleMedium)
+    val scheme = MaterialTheme.colorScheme
+    Column(
+        Modifier.fillMaxWidth().background(scheme.surface, RoundedCornerShape(AeonShape.CARD.dp)).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("한 일 ${d.steps.size}", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+            TaskStatusChip(d.status)
+        }
+        d.steps.forEach { st ->
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Box(Modifier.size(20.dp).background(if (st.ok) s.okSoft else s.dangerSoft, CircleShape), contentAlignment = Alignment.Center) {
+                    androidx.compose.material3.Icon(if (st.ok) dev.aeon.ui.design.AeonIcons.Check else dev.aeon.ui.design.AeonIcons.Close, contentDescription = if (st.ok) "성공" else "실패", tint = if (st.ok) s.ok else s.danger, modifier = Modifier.size(12.dp))
+                }
+                Text(toolLabel(st.tool), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                Text(st.tool, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
             }
         }
-        if (hint != null) Text(hint, style = MaterialTheme.typography.bodySmall, color = s.fg3, modifier = Modifier.padding(start = 16.dp))
-        else Text("삭제·명령 실행·외부 전송은 항상 먼저 묻습니다. Shift+Enter 줄바꿈", style = MaterialTheme.typography.bodySmall, color = s.fg3, modifier = Modifier.padding(start = 16.dp))
+    }
+}
+
+private val SUGGESTIONS = listOf(
+    "다운로드 폴더에서 오래된 설치 파일을 찾아 목록으로 알려 줘",
+    "회의록 폴더의 파일을 읽고 요약 문서를 새로 만들어 줘",
+    "작업 폴더에서 내용이 같은 파일을 찾아 줘",
+)
+
+/** New conversation: greets the owner the way they asked to be addressed and offers a few things to start from. */
+@Composable
+private fun WelcomeBlock(state: UiState, model: AppModel) {
+    val p = state.profile
+    val name = p.userName?.trim()?.takeIf { it.isNotEmpty() }
+    val greeting = when {
+        p.language == "en" -> if (name != null) "What can I take care of, $name?" else "What can I take care of?"
+        p.tone == "casual" -> if (name != null) "$name, 뭘 맡길까?" else "뭘 맡길까?"
+        else -> if (name != null) "${name}님, 무엇을 맡길까요?" else "무엇을 맡길까요?"
+    }
+    Column(Modifier.fillMaxWidth().padding(top = 40.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        androidx.compose.material3.Icon(dev.aeon.ui.design.AeonIcons.Mark, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(44.dp))
+        Text(greeting, style = MaterialTheme.typography.headlineMedium)
+        ListSurface(Modifier.padding(top = 12.dp)) {
+            SUGGESTIONS.forEachIndexed { i, text ->
+                if (i > 0) RowDivider(16.dp)
+                Row(Modifier.fillMaxWidth().clickable { model.startWith(text) }.padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(text, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                    androidx.compose.material3.Icon(dev.aeon.ui.design.AeonIcons.Chevron, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                }
+            }
+        }
     }
 }

@@ -28,6 +28,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -38,9 +39,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-enum class ButtonKind { Primary, Secondary, Destructive, Ghost }
+/** Primary = accent fill, Strong = ink fill (the safe, decisive answer), Secondary = soft fill, Destructive = red outline. */
+enum class ButtonKind { Primary, Strong, Secondary, Destructive, Ghost }
 
-/** Buttons follow the design: 44dp tall on phones, 40dp on wide screens; one primary per screen. */
+/** Pill buttons, 48dp tall on phones and 40dp on wide screens; one primary per screen. */
 @Composable
 fun AeonButton(
     text: String,
@@ -55,18 +57,21 @@ fun AeonButton(
     val scheme = MaterialTheme.colorScheme
     val (bg, fg, border) = when (kind) {
         ButtonKind.Primary -> Triple(scheme.primary, scheme.onPrimary, null)
-        ButtonKind.Secondary -> Triple(Color.Transparent, scheme.onSurface, scheme.outline)
+        ButtonKind.Strong -> Triple(scheme.onSurface, scheme.background, null)
+        ButtonKind.Secondary -> Triple(scheme.surfaceVariant, scheme.onSurface, null)
         ButtonKind.Destructive -> Triple(Color.Transparent, s.danger, s.danger)
         ButtonKind.Ghost -> Triple(Color.Transparent, scheme.onSurfaceVariant, null)
     }
     val alpha = if (enabled) 1f else 0.4f
+    val shape = RoundedCornerShape(50)
     Row(
         modifier
-            .defaultMinSize(minHeight = if (wide) 40.dp else 44.dp)
-            .background(bg.copy(alpha = if (kind == ButtonKind.Primary) alpha else bg.alpha))
-            .then(if (border != null) Modifier.border(if (kind == ButtonKind.Destructive) 1.5.dp else 1.dp, border.copy(alpha = alpha), RoundedCornerShape(AeonShape.CONTROL.dp)) else Modifier)
+            .defaultMinSize(minHeight = if (wide) 40.dp else 48.dp)
+            .clip(shape)
+            .background(bg.copy(alpha = bg.alpha * alpha))
+            .then(if (border != null) Modifier.border(1.5.dp, border.copy(alpha = alpha), shape) else Modifier)
             .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+            .padding(horizontal = 20.dp, vertical = 10.dp),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -105,64 +110,35 @@ fun Chip(text: String, tone: Tone, icon: String? = null, modifier: Modifier = Mo
     }
 }
 
-/** The task-status chip (design: 계획 중, 실행 중, 승인 대기, 한도 대기, 끝남, 실패, 멈춤). */
+/** The task-status chip. One word per state: 진행 중, 승인 대기, 완료, 실패, 중단됨. */
 @Composable
 fun TaskStatusChip(status: String) {
-    val (text, tone, icon) = when (status) {
-        "PENDING" -> Triple("계획 중", Tone.Neutral, "◌")
-        "RUNNING" -> Triple("실행 중", Tone.Accent, "◌")
-        "RETRY_WAIT" -> Triple("다시 시도 중", Tone.Warn, "◌")
-        "WAITING_FOR_APPROVAL" -> Triple("승인 대기", Tone.Warn, "✋")
-        "WAITING_FOR_QUOTA" -> Triple("한도 대기", Tone.Warn, "⌛")
-        "WAITING_FOR_DEVICE" -> Triple("기기 대기", Tone.Warn, "▭")
-        "COMPLETED" -> Triple("끝남", Tone.Ok, "⚑")
-        "FAILED" -> Triple("실패", Tone.Danger, "✕")
-        "CANCELLED" -> Triple("멈춤", Tone.Neutral, "■")
-        else -> Triple(status, Tone.Neutral, "·")
+    val (text, tone) = when (status) {
+        "PENDING", "RUNNING" -> "진행 중" to Tone.Accent
+        "RETRY_WAIT" -> "다시 시도 중" to Tone.Warn
+        "WAITING_FOR_APPROVAL" -> "승인 대기" to Tone.Warn
+        "WAITING_FOR_QUOTA" -> "한도 대기" to Tone.Warn
+        "WAITING_FOR_DEVICE" -> "기기 대기" to Tone.Warn
+        "COMPLETED" -> "완료" to Tone.Ok
+        "FAILED" -> "실패" to Tone.Danger
+        "CANCELLED" -> "중단됨" to Tone.Neutral
+        else -> status to Tone.Neutral
     }
-    Chip(text, tone, icon)
+    Chip(text, tone)
 }
 
 /**
- * Verification badge. The agent's own "done" is shown separately (see [AgentReport]); this badge only
- * states what was checked against the real files.
+ * What was checked against the real files. Says something only when it carries information: a check that passed, one
+ * the owner did, or one that failed. A task without a check shows nothing here (the agent's own "done" is not a check).
  */
 @Composable
 fun VerifyBadge(status: String?, failedCount: Int = 0) {
     when (status) {
-        "verified" -> Chip("실제 파일로 확인됨", Tone.Ok, "✓")
-        "user_confirmed" -> Chip("사용자가 확인함", Tone.Accent, "✓")
-        "failed" -> Chip(if (failedCount > 0) "확인 실패 · 파일 ${failedCount}개 없음" else "확인 실패", Tone.Danger, "✕")
-        "unverified" -> Chip("확인 안 됨 · 검사 기준 없음", Tone.Neutral, "○")
-        null -> Chip("확인 전", Tone.Neutral, "◌")
-        else -> Chip(status, Tone.Neutral, "·")
+        "verified" -> Chip("확인됨", Tone.Ok, "✓")
+        "user_confirmed" -> Chip("내가 확인함", Tone.Accent, "✓")
+        "failed" -> Chip(if (failedCount > 0) "확인 실패 · ${failedCount}개" else "확인 실패", Tone.Danger, "✕")
+        else -> {}
     }
-}
-
-/** Risk band: kind + word + three bars. Colour is secondary to the bars and the word. */
-@Composable
-fun RiskBand(kind: String, level: Int, label: String, reversibleLine: String?) {
-    val s = LocalAeonStatus.current
-    val tone = when (level) {
-        1 -> Tone.Neutral
-        2 -> Tone.Warn
-        else -> Tone.Danger
-    }
-    val fg = when (tone) {
-        Tone.Danger -> s.danger
-        Tone.Warn -> s.warn
-        else -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(kind, color = fg, style = MaterialTheme.typography.labelLarge)
-        Text("· 위험도 $label", color = fg, style = MaterialTheme.typography.labelMedium)
-        Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-            repeat(3) { i ->
-                Box(Modifier.width(10.dp).height(6.dp).background(if (i < level) fg else MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(2.dp)))
-            }
-        }
-    }
-    if (reversibleLine != null) Text(reversibleLine, color = fg, style = MaterialTheme.typography.bodySmall)
 }
 
 @Composable
@@ -201,6 +177,7 @@ fun AeonTextField(
     keyboard: KeyboardType = KeyboardType.Text,
     /** Shows a dash every N characters without changing the stored value (used for pairing codes). */
     group: Int = 0,
+    minHeight: androidx.compose.ui.unit.Dp = 44.dp,
 ) {
     val s = LocalAeonStatus.current
     var focused by remember { mutableStateOf(false) }
@@ -212,11 +189,11 @@ fun AeonTextField(
     Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(label, style = MaterialTheme.typography.labelMedium, color = if (enabled) MaterialTheme.colorScheme.onSurface else s.fg3)
         Box(
-            Modifier.fillMaxWidth().defaultMinSize(minHeight = 44.dp)
+            Modifier.fillMaxWidth().defaultMinSize(minHeight = minHeight)
                 .background(if (enabled) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(AeonShape.CONTROL.dp))
                 .border(if (focused || error != null) 1.5.dp else 1.dp, borderColor, RoundedCornerShape(AeonShape.CONTROL.dp))
                 .padding(horizontal = 12.dp, vertical = 10.dp),
-            contentAlignment = Alignment.CenterStart,
+            contentAlignment = if (singleLine) Alignment.CenterStart else Alignment.TopStart,
         ) {
             run {
                 BasicTextField(
@@ -251,13 +228,14 @@ fun AeonTextField(
 
 /** Switch 44x24 with the on/off word next to it (design: never a bare toggle for meaningful settings). */
 @Composable
-fun AeonSwitch(on: Boolean, onChange: (Boolean) -> Unit, label: String, modifier: Modifier = Modifier, enabled: Boolean = true) {
+/** [showLabel] false hides the label text (the row it sits in already says what it is) and keeps the on/off word. */
+fun AeonSwitch(on: Boolean, onChange: (Boolean) -> Unit, label: String, modifier: Modifier = Modifier, enabled: Boolean = true, showLabel: Boolean = true) {
     val scheme = MaterialTheme.colorScheme
     Row(
         modifier.defaultMinSize(minHeight = 48.dp).clickable(enabled = enabled) { onChange(!on) },
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, color = if (enabled) scheme.onSurface else LocalAeonStatus.current.fg3)
+        if (showLabel) Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, color = if (enabled) scheme.onSurface else LocalAeonStatus.current.fg3)
         Text(if (on) "켬" else "끔", style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant)
         Spacer(Modifier.width(10.dp))
         Box(
@@ -271,14 +249,14 @@ fun AeonSwitch(on: Boolean, onChange: (Boolean) -> Unit, label: String, modifier
     }
 }
 
-/** Card surface used across screens: 1px hairline, 12dp radius, no shadows (design rule). */
+/** Card surface used across screens: 20dp radius, no border and no shadow; the page behind it is slightly darker. */
 @Composable
 fun Card(modifier: Modifier = Modifier, tint: Color? = null, content: @Composable () -> Unit) {
     Column(
         modifier
             .fillMaxWidth()
-            .background(tint ?: MaterialTheme.colorScheme.surface, RoundedCornerShape(AeonShape.CARD.dp))
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(AeonShape.CARD.dp))
+            .clip(RoundedCornerShape(AeonShape.CARD.dp))
+            .background(tint ?: MaterialTheme.colorScheme.surface)
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
         content = { content() },

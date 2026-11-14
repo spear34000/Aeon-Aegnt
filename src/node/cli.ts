@@ -1,3 +1,4 @@
+import "./polyfills.ts";
 import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
 import type { VerificationCriterion } from "../core/verify.ts";
@@ -248,6 +249,14 @@ async function drive(rt: ReturnType<typeof createRuntime>, taskId: string): Prom
       const a = await store.getApproval(t.pendingApprovalId);
       if (!a) return;
       const rl = createInterface({ input: process.stdin, output: process.stdout });
+      if (a.kind === "question") {
+        const hint = a.resources.length > 0 ? ` (${a.resources.join(" / ")})` : "";
+        const text = (await rl.question(`The agent asks: ${a.summary}${hint}
+Your answer (empty to skip): `)).trim();
+        rl.close();
+        await engine.decideApproval(a.id, text ? "approved" : "denied", text);
+        continue;
+      }
       const ans = (await rl.question(`Approve? ${a.summary} [y/N] `)).trim().toLowerCase();
       rl.close();
       await engine.decideApproval(a.id, ans === "y" || ans === "yes" ? "approved" : "denied");

@@ -9,7 +9,8 @@ import { verify, type VerificationCriterion, type VerifierEnv } from "./verify.t
 
 /** What a runner reports back to the engine after one run attempt. */
 export type RunOutcome =
-  | { kind: "done"; result: string }
+  /** [remember] is what the agent suggests keeping from the task (untrusted; the hook below decides what becomes of it). */
+  | { kind: "done"; result: string; remember?: unknown }
   | { kind: "waiting_approval"; approvalId: string; note: string }
   | { kind: "wait_quota"; until: number; note: string }
   | { kind: "fail"; error: string; retryable: boolean; retryAfterMs?: number }
@@ -49,6 +50,12 @@ export interface EngineConfig {
   leaseTtlMs?: number;
   retryBaseMs?: number;
   retryMaxMs?: number;
+  /**
+   * Called once, after a task finished and its checks did not fail, with what the agent suggested remembering. It runs after the
+   * result is saved, so a repair round that finishes more than once cannot queue the same suggestion twice, and an error here
+   * never changes the task.
+   */
+  afterDone?: (task: Task, done: { result: string; remember: unknown }) => Promise<void> | void;
 }
 
 export interface SubmitOptions {
@@ -149,7 +156,15 @@ export class WorkflowEngine {
             verification,
           });
         }
-        return this.finish(task.id, token, { status: "COMPLETED", result: outcome.result, verification });
+        const summary = await this.finish(task.id, token, { status: "COMPLETED", result: outcome.result, verification });
+        if (outcome.remember !== undefined && this.cfg.afterDone) {
+          try {
+            await this.cfg.afterDone(fresh ?? task, { result: outcome.result, remember: outcome.remember });
+          } catch (e) {
+            await this.audit(task.id, "after_done_failed", { error: (e as Error).message.slice(0, 200) });
+          }
+        }
+        return summary;
       }
       case "waiting_approval":
         return this.finish(task.id, token, {
@@ -208,9 +223,13 @@ export class WorkflowEngine {
     }
   }
 
-  async decideApproval(approvalId: string, decision: "approved" | "denied"): Promise<Approval> {
+  /** [answer] is required to approve a question (the owner's words, cut to 1000 characters) and ignored for anything else. */
+  async decideApproval(approvalId: string, decision: "approved" | "denied", answer?: string): Promise<Approval> {
     const { store, clock } = this.cfg;
-    const a = await store.decideApproval(approvalId, decision, clock.now());
+    const before = await store.getApproval(approvalId);
+    const text = answer?.replace(/[\u0000-\u0008\u000b-\u001f]/g, " ").trim().slice(0, 1000);
+    if (before?.kind === "question" && decision === "approved" && !text) throw new Error("an answer is needed");
+    const a = await store.decideApproval(approvalId, decision, clock.now(), before?.kind === "question" ? text : undefined);
     await this.audit(a.taskId, `approval_${decision}`, { approvalId, tool: a.tool, summary: a.summary });
     await this.resumeIfBlocked(a);
     return a;

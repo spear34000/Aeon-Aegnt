@@ -25,6 +25,7 @@ fun aeonTypography(): Typography {
     val f = pretendardFamily()
     fun s(size: Int, line: Int, w: FontWeight) = TextStyle(fontFamily = f, fontSize = size.sp, lineHeight = line.sp, fontWeight = w)
     return Typography(
+        headlineMedium = s(28, 34, FontWeight.SemiBold),
         displaySmall = s(24, 32, FontWeight.SemiBold),
         titleLarge = s(18, 26, FontWeight.SemiBold),
         titleMedium = s(15, 22, FontWeight.SemiBold),

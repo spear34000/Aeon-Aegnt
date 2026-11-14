@@ -15,6 +15,7 @@ import java.security.spec.X509EncodedKeySpec
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlinx.coroutines.launch
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
@@ -126,6 +127,28 @@ class DesktopDeviceCrypto(private val dir: File = desktopConfigDir()) : DeviceCr
         File(dir, "device-key.pub").delete()
     }
 
+    override suspend fun ecdh(peerSpki: ByteArray): EcdhResult {
+        val pair = KeyPairGenerator.getInstance("EC").apply { initialize(ECGenParameterSpec("secp256r1")) }.generateKeyPair()
+        val peer = java.security.KeyFactory.getInstance("EC").generatePublic(java.security.spec.X509EncodedKeySpec(peerSpki))
+        val agreement = javax.crypto.KeyAgreement.getInstance("ECDH")
+        agreement.init(pair.private)
+        agreement.doPhase(peer, true)
+        return EcdhResult(pair.public.encoded, agreement.generateSecret())
+    }
+
+    private fun aesGcm(mode: Int, key: ByteArray, iv: ByteArray, data: ByteArray, aad: ByteArray): ByteArray {
+        val c = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+        c.init(mode, SecretKeySpec(key, "AES"), javax.crypto.spec.GCMParameterSpec(128, iv))
+        c.updateAAD(aad)
+        return c.doFinal(data)
+    }
+
+    override suspend fun aesGcmEncrypt(key: ByteArray, iv: ByteArray, plaintext: ByteArray, aad: ByteArray): ByteArray =
+        aesGcm(javax.crypto.Cipher.ENCRYPT_MODE, key, iv, plaintext, aad)
+
+    override suspend fun aesGcmDecrypt(key: ByteArray, iv: ByteArray, data: ByteArray, aad: ByteArray): ByteArray =
+        aesGcm(javax.crypto.Cipher.DECRYPT_MODE, key, iv, data, aad)
+
     private fun dpapi(op: String, base64In: String): String {
         val script = listOf(
             "\$ErrorActionPreference='Stop'",
@@ -165,7 +188,51 @@ class FileKeyValueStore(private val file: File = File(desktopConfigDir(), "setti
 
 actual fun createDeviceCrypto(): DeviceCrypto = DesktopDeviceCrypto()
 
+/** Native file dialog (Windows, Linux, macOS). */
+@androidx.compose.runtime.Composable
+actual fun rememberFilePicker(onPicked: (PickedFile?, String?) -> Unit): () -> Unit {
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    return {
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val dialog = java.awt.FileDialog(null as java.awt.Frame?, "파일 선택", java.awt.FileDialog.LOAD)
+            dialog.isVisible = true
+            val name = dialog.file ?: return@launch
+            val file = File(dialog.directory, name)
+            try {
+                if (file.length() > MAX_ATTACHMENT_BYTES) onPicked(null, "20MB보다 큰 파일은 올릴 수 없습니다.")
+                else onPicked(PickedFile(name, file.readBytes()), null)
+            } catch (e: Exception) {
+                onPicked(null, "파일을 읽지 못했습니다.")
+            }
+        }
+    }
+}
+
 actual fun createKeyValueStore(): KeyValueStore = FileKeyValueStore()
+
+/** Desktop windows have no system back gesture. */
+@androidx.compose.runtime.Composable
+actual fun PlatformBackHandler(enabled: Boolean, onBack: () -> Unit) {
+}
+
+private object NoPermissions : PermissionController {
+    override val items: List<PermissionItem> = emptyList()
+    override fun status(id: String) = PermissionStatus.Granted
+    override fun request(id: String) {}
+    override fun openSettings() {}
+}
+
+@androidx.compose.runtime.Composable
+actual fun rememberPermissionController(): PermissionController = NoPermissions
+
+actual val supportsBackgroundCheck: Boolean = false
+
+@androidx.compose.runtime.Composable
+actual fun PlatformSystemBars(dark: Boolean) {
+}
+
+actual fun setBackgroundApprovalCheck(enabled: Boolean) {
+}
 
 actual fun nowMillis(): Long = System.currentTimeMillis()
 

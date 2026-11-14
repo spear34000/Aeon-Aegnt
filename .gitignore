@@ -11,3 +11,9 @@ ui/**/build/
 local.properties
 *.class
 !kotlin-js-store/
+ui/.idea/
+ui/gradle/gradle-daemon-jvm.properties
+dist-mobile/
+ui/androidApp/nodejs-mobile/
+ui/androidApp/.cxx/
+ui/androidApp/src/main/jniLibs/

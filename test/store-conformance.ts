@@ -131,6 +131,18 @@ export function runStoreConformance(name: string, make: () => Promise<{ store: S
       cleanup();
     });
 
+    it("a question keeps the owner's answer; an ordinary approval never takes one", async () => {
+      const { store, cleanup } = await make();
+      await store.createTask(mkTask("t1"));
+      await store.createApproval({ ...mkApproval("q1", "t1", 5000), kind: "question", actionKey: "kq", tool: "agent.ask", summary: "Which day?" });
+      const answered = await store.decideApproval("q1", "approved", 4000, "Friday");
+      assert.deepEqual([answered.status, answered.answer], ["approved", "Friday"]);
+      assert.equal((await store.getApproval("q1"))?.answer, "Friday", "kept, not only returned");
+      await store.createApproval({ ...mkApproval("p1", "t1", 5000), actionKey: "kp" });
+      assert.equal((await store.decideApproval("p1", "approved", 4000, "sneaky")).answer, undefined);
+      cleanup();
+    });
+
     it("approvals: decide once, expire, and never resurrect an expired approval", async () => {
       const { store, cleanup } = await make();
       await store.createTask(mkTask("t1"));

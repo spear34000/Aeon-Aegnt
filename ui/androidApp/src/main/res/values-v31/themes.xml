@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 12+ shows its own launch screen first: the same mark on the brand colour, then the app's splash takes over. -->
+    <style name="Theme.Aeon" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:windowSplashScreenBackground">@color/aeon_accent</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_aeon_foreground</item>
+    </style>
+</resources>

@@ -30,6 +30,10 @@ export interface HarnessOptions {
   holderId?: string;
   workspace?: string;
   consent?: string[];
+  /** Folder of skills; the agent can then read and propose them. */
+  skillsDir?: string;
+  /** File of what the owner wants remembered; the agent then has the memory tools and sees what fits its goal. */
+  memoryFile?: string;
 }
 
 /** Full runtime wired to mock models, a temp workspace and an in-memory (or supplied) store. */
@@ -49,6 +53,8 @@ export function harness(opts: HarnessOptions) {
     sandboxRunner: fakeSandbox(sandboxCalls),
     ...(opts.holderId ? { holderId: opts.holderId } : {}),
     ...(opts.rules ? { policyRules: opts.rules } : {}),
+    ...(opts.skillsDir ? { skillsDir: opts.skillsDir } : {}),
+    ...(opts.memoryFile ? { memoryFile: opts.memoryFile } : {}),
   });
   return { ...rt, clock, workspace, sandboxCalls, cleanup: () => own?.cleanup() };
 }

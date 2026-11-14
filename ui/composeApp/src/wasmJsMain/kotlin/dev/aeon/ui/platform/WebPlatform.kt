@@ -3,6 +3,7 @@ package dev.aeon.ui.platform
 import dev.aeon.ui.api.fromBase64
 import dev.aeon.ui.api.toBase64
 import kotlinx.coroutines.await
+import kotlinx.coroutines.launch
 import kotlin.js.JsAny
 import kotlin.js.JsString
 import kotlin.js.Promise
@@ -38,6 +39,32 @@ private fun installHelpers(): Unit = js(
       hmac: async (key, msg) => { const k = await need().importKey('raw', unb64(key), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']); return b64(new Uint8Array(await need().sign('HMAC', k, unb64(msg)))); },
       random: async (n) => b64(window.crypto.getRandomValues(new Uint8Array(n))),
       reset: async () => { await idbOp('readwrite', (s) => s.delete('device')); return ''; },
+      ecdh: async (peer) => {
+        const s = need();
+        const kp = await s.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']);
+        const pk = await s.importKey('spki', unb64(peer), { name: 'ECDH', namedCurve: 'P-256' }, false, []);
+        const bits = await s.deriveBits({ name: 'ECDH', public: pk }, kp.privateKey, 256);
+        return b64(new Uint8Array(await s.exportKey('spki', kp.publicKey))) + '.' + b64(new Uint8Array(bits));
+      },
+      aes: async (op, key, iv, data, aad) => {
+        const k = await need().importKey('raw', unb64(key), 'AES-GCM', false, [op]);
+        const p = { name: 'AES-GCM', iv: unb64(iv), additionalData: unb64(aad), tagLength: 128 };
+        return b64(new Uint8Array(op === 'encrypt' ? await need().encrypt(p, k, unb64(data)) : await need().decrypt(p, k, unb64(data))));
+      },
+      pick: (max) => new Promise((res) => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.onchange = () => {
+          const f = input.files && input.files[0];
+          if (!f) return res('');
+          if (f.size > max) return res('!big');
+          const r = new FileReader();
+          r.onload = () => res(f.name.replace(/\n/g, ' ') + '\n' + String(r.result).split(',')[1]);
+          r.onerror = () => res('!read');
+          r.readAsDataURL(f);
+        };
+        input.click();
+      }),
     };
   }
 }""",
@@ -49,6 +76,9 @@ private fun jsSha256(data: String): Promise<JsString> = js("window.__aeon.sha256
 private fun jsHmac(key: String, msg: String): Promise<JsString> = js("window.__aeon.hmac(key, msg)")
 private fun jsRandom(n: Int): Promise<JsString> = js("window.__aeon.random(n)")
 private fun jsReset(): Promise<JsString> = js("window.__aeon.reset()")
+private fun jsEcdh(peer: String): Promise<JsString> = js("window.__aeon.ecdh(peer)")
+private fun jsAes(op: String, key: String, iv: String, data: String, aad: String): Promise<JsString> = js("window.__aeon.aes(op, key, iv, data, aad)")
+private fun jsPick(max: Int): Promise<JsString> = js("window.__aeon.pick(max)")
 
 private suspend fun Promise<JsString>.str(): String = await<JsString>().toString()
 
@@ -64,6 +94,35 @@ class WebDeviceCrypto : DeviceCrypto {
     override suspend fun randomBytes(count: Int): ByteArray = jsRandom(count).str().fromBase64()
     override suspend fun reset() {
         jsReset().str()
+    }
+
+    override suspend fun ecdh(peerSpki: ByteArray): EcdhResult {
+        val parts = jsEcdh(peerSpki.toBase64()).str().split('.')
+        return EcdhResult(parts[0].fromBase64(), parts[1].fromBase64())
+    }
+
+    override suspend fun aesGcmEncrypt(key: ByteArray, iv: ByteArray, plaintext: ByteArray, aad: ByteArray): ByteArray =
+        jsAes("encrypt", key.toBase64(), iv.toBase64(), plaintext.toBase64(), aad.toBase64()).str().fromBase64()
+
+    override suspend fun aesGcmDecrypt(key: ByteArray, iv: ByteArray, data: ByteArray, aad: ByteArray): ByteArray =
+        jsAes("decrypt", key.toBase64(), iv.toBase64(), data.toBase64(), aad.toBase64()).str().fromBase64()
+}
+
+/** Browser file chooser. */
+@androidx.compose.runtime.Composable
+actual fun rememberFilePicker(onPicked: (PickedFile?, String?) -> Unit): () -> Unit {
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    return {
+        installHelpers()
+        scope.launch {
+            val r = jsPick(MAX_ATTACHMENT_BYTES).str()
+            when {
+                r.isEmpty() -> {}
+                r == "!big" -> onPicked(null, "20MB보다 큰 파일은 올릴 수 없습니다.")
+                r == "!read" -> onPicked(null, "파일을 읽지 못했습니다.")
+                else -> onPicked(PickedFile(r.substringBefore('\n'), r.substringAfter('\n').fromBase64()), null)
+            }
+        }
     }
 }
 
@@ -89,6 +148,30 @@ class WebKeyValueStore : KeyValueStore {
 actual fun createDeviceCrypto(): DeviceCrypto = WebDeviceCrypto()
 
 actual fun createKeyValueStore(): KeyValueStore = WebKeyValueStore()
+
+/** The browser's own back button leaves the page; it is not intercepted. */
+@androidx.compose.runtime.Composable
+actual fun PlatformBackHandler(enabled: Boolean, onBack: () -> Unit) {
+}
+
+private object NoPermissions : PermissionController {
+    override val items: List<PermissionItem> = emptyList()
+    override fun status(id: String) = PermissionStatus.Granted
+    override fun request(id: String) {}
+    override fun openSettings() {}
+}
+
+@androidx.compose.runtime.Composable
+actual fun rememberPermissionController(): PermissionController = NoPermissions
+
+actual val supportsBackgroundCheck: Boolean = false
+
+@androidx.compose.runtime.Composable
+actual fun PlatformSystemBars(dark: Boolean) {
+}
+
+actual fun setBackgroundApprovalCheck(enabled: Boolean) {
+}
 
 actual fun nowMillis(): Long = jsNow().toLong()
 

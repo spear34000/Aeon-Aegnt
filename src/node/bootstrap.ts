@@ -1,3 +1,5 @@
+import { join } from "node:path";
+import { keyNameFor } from "../core/config.ts";
 import { loadConfig } from "./config-file.ts";
 import { createRuntime } from "./runtime.ts";
 import { defaultSecretStore } from "./secret-backends.ts";
@@ -37,12 +39,21 @@ export async function bootRuntime(cfgDir: string, workspace: string, ov: BootOve
     ["OPENAI_COMPAT_MODEL", saved.openaiCompatModel],
   ];
   for (const [k, v] of fromCfg) if (!env[k] && v) env[k] = v;
+  if (!env.EXAONE_REASONING_EFFORT && saved.exaoneReasoning) env.EXAONE_REASONING_EFFORT = saved.exaoneReasoning;
+  const endpoints = saved.endpoints ?? [];
+  for (const e of endpoints) {
+    if (e.keyName && e.keyName === keyNameFor(e.id) && providers.includes(e.id) && !env[e.keyName]) {
+      const v = await store.get(e.keyName);
+      if (v) env[e.keyName] = v;
+    }
+  }
+  const extra = { endpoints, skillsDir: join(cfgDir, "skills"), skillsLockFile: join(cfgDir, "skills-lock.json"), memoryFile: join(cfgDir, "memory.json"), ...(saved.profile ? { profile: saved.profile } : {}) };
 
   try {
-    return { runtime: createRuntime({ workspace, providers, fallbackAllowed, dataConsent, env }), secrets: store, problem: null as string | null };
+    return { runtime: createRuntime({ workspace, providers, fallbackAllowed, dataConsent, env, ...extra }), secrets: store, problem: null as string | null };
   } catch (e) {
     // The server must still start without a key or model, otherwise the UI could never be used to enter one.
     if (!lenient) throw e;
-    return { runtime: createRuntime({ workspace, providers: [], providerOverrides: [], fallbackAllowed: false, dataConsent: [], env }), secrets: store, problem: (e as Error).message };
+    return { runtime: createRuntime({ workspace, providers: [], providerOverrides: [], fallbackAllowed: false, dataConsent: [], env, ...extra }), secrets: store, problem: (e as Error).message };
   }
 }

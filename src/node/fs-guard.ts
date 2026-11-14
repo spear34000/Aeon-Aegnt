@@ -4,7 +4,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 export type Resolved = { ok: true; abs: string } | { ok: false; violation: string };
 
 /** Directories inside the workspace that tools may never touch (our own state and VCS data). */
-const PROTECTED = [".aeon", ".git"];
+const PROTECTED = [".aeon", ".git", ".agents"];
 
 /**
  * Confines file access to the workspace root. Handles `..` traversal, absolute paths,

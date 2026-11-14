@@ -88,7 +88,7 @@ export function llamaCppProvider(opts: Common & { model?: string; baseUrl?: stri
 
 /** Any OpenAI-compatible service (user-supplied URL and key). `external` must be stated by the caller. */
 export function openAiCompatible(
-  opts: Common & { id?: string; baseUrl: string; model: string; apiKey?: string; external: boolean },
+  opts: Common & { id?: string; baseUrl: string; model: string; apiKey?: string; external: boolean; reasoningEffort?: "low" | "medium" | "high" },
 ): OpenAICompatibleProvider {
   return new OpenAICompatibleProvider({
     id: opts.id ?? "openai-compatible",
@@ -96,6 +96,7 @@ export function openAiCompatible(
     model: opts.model,
     external: opts.external,
     ...(opts.apiKey ? { apiKey: opts.apiKey } : {}),
+    ...(opts.reasoningEffort ? { optionalBody: { reasoning_effort: opts.reasoningEffort } } : {}),
     capabilities: {
       contextWindow: null,
       toolCalling: "unknown",

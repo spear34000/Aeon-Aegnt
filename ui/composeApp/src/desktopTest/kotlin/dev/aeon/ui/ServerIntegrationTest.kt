@@ -59,7 +59,11 @@ class ServerIntegrationTest {
         File(cfg, "config.json").writeText(
             """{"providers":["openai-compatible"],"dataConsent":["openai-compatible"],"fallbackAllowed":false,"openaiCompatBaseUrl":"http://127.0.0.1:$modelPort/v1","openaiCompatModel":"m"}""",
         )
-        val pb = ProcessBuilder("node", File(root, "src/node/cli.ts").absolutePath, "serve", "--workspace", ws.absolutePath, "--port", "0")
+        // AEON_NODE18 points at a Node 18 executable: the same tests then run against the compiled mobile bundle
+        // (`npm run build:mobile`), which is what runs inside the Android app.
+        val node18 = System.getenv("AEON_NODE18")
+        val command = if (node18 != null) listOf(node18, File(root, "dist-mobile/node/cli.js").absolutePath) else listOf("node", File(root, "src/node/cli.ts").absolutePath)
+        val pb = ProcessBuilder(command + listOf("serve", "--workspace", ws.absolutePath, "--port", "0"))
             .directory(root)
             .redirectErrorStream(true)
         pb.environment()["AEON_CONFIG_DIR"] = cfg.absolutePath
@@ -81,7 +85,7 @@ class ServerIntegrationTest {
             if (line.trim().matches(Regex("[A-Z2-7]{4}(-[A-Z2-7]{4}){3}"))) code = line.trim()
         }
         // Keep draining so the child never blocks on a full pipe.
-        Thread { runCatching { reader.forEachLine { } } }.apply { isDaemon = true }.start()
+        Thread { runCatching { reader.forEachLine { if (System.getenv("AEON_DEBUG") != null) System.err.println("[server] $it") } } }.apply { isDaemon = true }.start()
         return Fixture("http://127.0.0.1:${port ?: error("server did not start:\n${lines.joinToString("\n")}")}", code ?: error("no pairing code:\n${lines.joinToString("\n")}"), ws, cfg)
     }
 
@@ -218,13 +222,47 @@ class ServerIntegrationTest {
         model.stop()
     }
 
-    private suspend fun waitFor(timeoutMs: Long = 15_000, cond: () -> Boolean) {
+    private suspend fun waitFor(timeoutMs: Long = 15_000, label: String = "", cond: () -> Boolean) {
         val end = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < end) {
             if (cond()) return
             delay(50)
         }
-        error("condition not reached in ${timeoutMs}ms")
+        error("condition not reached in ${timeoutMs}ms: $label")
+    }
+
+    @Test
+    fun sealedKeysAndPairingCodesWorkAgainstTheRealServer() = runBlocking {
+        val fx = startAeon(startFakeModel(emptyList()))
+        val (client, _) = newClient(fx.base)
+        client.pair(fx.code, "kotlin test client")
+        assertTrue(client.serverKey.isNotEmpty(), "the sealing key is pinned while pairing")
+        assertTrue(client.status().sealing)
+
+        // The key is encrypted here (ECDH + AES-GCM in Kotlin) and opened by the Node server.
+        client.setSecret("AEON_EP_TEST_KEY", "sealed-value-0001")
+        assertTrue("AEON_EP_TEST_KEY" in client.secretNames().names)
+        assertFalse(File(fx.cfgDir, "config.json").readText().contains("sealed-value-0001"))
+
+        // A code for another device comes back sealed by Node and is opened here.
+        val (code, info) = client.newPairingCode(admin = false)
+        assertTrue(code.matches(Regex("[A-Z2-7]{16}")), "got: $code")
+        assertFalse(info.admin)
+        val (second, _) = newClient(fx.base)
+        second.pair(code, "second device")
+        // This test talks to the server over loopback, where every caller counts as the machine itself, so the
+        // limit is checked on the stored flag (test/models-and-devices.test.ts covers the refusals over a network).
+        val devices = client.devices()
+        assertEquals(listOf(true, false), devices.map { it.admin }, "the device was let in without the right to change settings")
+        assertEquals(listOf(true, false), devices.map { it.current })
+        val renamed = client.updateDevice(devices[1].id, name = "거실 태블릿", admin = true)
+        assertEquals("거실 태블릿", renamed.name)
+        assertTrue(renamed.admin)
+
+        // An uploaded file lands inside the workspace.
+        val up = client.upload("메모 1.txt", "hello".encodeToByteArray())
+        assertTrue(up.path.startsWith("uploads/") && up.path.endsWith("메모 1.txt"), up.path)
+        assertEquals("hello", File(fx.workspace, up.path).readText())
     }
 
     @Test
@@ -251,5 +289,333 @@ class ServerIntegrationTest {
         // Revoke ourselves: the next call must fail with 401.
         client.revokeDevice(devices[0].id)
         assertEquals(401, assertFailsWith<AeonException> { client.status() }.status)
+    }
+
+    /** A skill folder on this machine to install from (what the owner types as a path). */
+    private fun skillSource(root: File): File {
+        val dir = File(root, "src/tidy-notes").apply { File(this, "scripts").mkdirs() }
+        File(dir, "SKILL.md").writeText("---\nname: tidy-notes\ndescription: Tidy messy notes. Use when notes are untidy.\n---\n\nRun scripts/tidy.py on the notes.\n")
+        File(dir, "scripts/tidy.py").writeText("print('tidy')\n")
+        return dir
+    }
+
+    @Test
+    fun skillsAreInstalledReadApprovedAndSwitchedThroughTheRealServer() = runBlocking {
+        val fx = startAeon(startFakeModel(emptyList()))
+        val (client, _) = newClient(fx.base)
+        client.pair(fx.code, "kotlin test client")
+        val src = skillSource(fx.workspace.parentFile)
+
+        val preview = client.inspectSkillSource(src.absolutePath)
+        val c = preview.candidates.single()
+        assertEquals("tidy-notes", c.name)
+        assertTrue(c.scripts && c.scriptTexts.single().text.contains("print('tidy')"), "the script text is shown before installing")
+        assertTrue(client.skills().skills.isEmpty(), "looking installs nothing")
+
+        val installed = client.installSkill(preview.id, "tidy-notes", "user", null, false)
+        assertEquals(listOf("user", "tracked", true, true), listOf(installed.scope, installed.status, installed.enabled, installed.active))
+        assertTrue(installed.hash.length == 64 && installed.scripts)
+        assertTrue(installed.autoRun && installed.safety?.level == "clean", "scripts that pass the check run in Docker without a question")
+        assertEquals(false, client.setSkillAutoRun("tidy-notes", "user", false).autoRun)
+        assertEquals(true, client.setSkillAutoRun("tidy-notes", "user", true).autoRun)
+        assertEquals(409, assertFailsWith<AeonException> { client.installSkill(preview.id, "tidy-notes", "user", null, false) }.status, "the same name is not overwritten silently")
+        assertEquals("print('tidy')\n", client.skillFile("tidy-notes", "user", "scripts/tidy.py").text)
+        assertEquals(false, client.setSkillEnabled("tidy-notes", "user", false).active)
+        assertEquals(true, client.setSkillEnabled("tidy-notes", "user", true).active)
+
+        // A skill that merely appeared in the project is listed but never approved by itself.
+        val dropped = File(fx.workspace, ".agents/skills/from-a-clone").apply { mkdirs() }
+        File(dropped, "SKILL.md").writeText("---\nname: from-a-clone\ndescription: Arrived with a repository. Use never.\n---\n\nbody\n")
+        val clone = client.skills().skills.single { it.folder == "from-a-clone" }
+        assertEquals(listOf("project", "untracked", false), listOf(clone.scope, clone.status, clone.active))
+        assertEquals(409, assertFailsWith<AeonException> { client.setSkillEnabled("from-a-clone", "project", true) }.status, "switching on is not approving")
+        assertEquals(409, assertFailsWith<AeonException> { client.trustSkill("from-a-clone", "project", "0".repeat(64)) }.status, "a hash that was not shown is refused")
+        assertEquals(true, client.trustSkill("from-a-clone", "project", clone.hash).active)
+        client.deleteSkill("from-a-clone", "project")
+        assertTrue(client.skills().skills.none { it.folder == "from-a-clone" })
+    }
+
+    @Test
+    fun theSkillsManagerWalksFromASourceToAnInstalledSkill() = runBlocking {
+        val fx = startAeon(startFakeModel(emptyList()))
+        val (client, crypto) = newClient(fx.base)
+        val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
+        cleanup += { scope.cancel() }
+        val map = mutableMapOf<String, String>()
+        val store = object : dev.aeon.ui.platform.KeyValueStore {
+            override fun get(key: String) = map[key]
+            override fun put(key: String, value: String) { map[key] = value }
+            override fun remove(key: String) { map.remove(key) }
+        }
+        val m = dev.aeon.ui.state.AppModel(client, store, crypto, scope, pollMillis = 60_000, defaultServerUrl = fx.base)
+        m.pair(fx.base, fx.code)
+        waitFor(label = "step 1") { m.state.value.connection is dev.aeon.ui.state.Connection.Connected }
+        val src = skillSource(fx.workspace.parentFile)
+        val sk = { m.state.value.skills }
+
+        m.openSkills()
+        waitFor(label = "step 2") { sk().loaded }
+        assertEquals(dev.aeon.ui.state.SkillScreen.List, sk().screen)
+        m.openAddSkill()
+        m.changeSkillSource(src.absolutePath)
+        m.inspectSkillSource()
+        waitFor(label = "step 3") { sk().screen == dev.aeon.ui.state.SkillScreen.Review }
+        assertEquals("tidy-notes", sk().add.pick, "one skill that follows the format goes straight to its review")
+
+        m.installSkill()
+        waitFor(label = "step 4") { sk().screen == dev.aeon.ui.state.SkillScreen.Detail }
+        assertEquals("tracked", sk().detail?.skill?.status)
+
+        // Installing it again clashes: the sheet opens with a new name suggested, and a new name installs next to it.
+        m.openAddSkill(); m.changeSkillSource(src.absolutePath); m.inspectSkillSource()
+        waitFor(label = "step 5") { sk().screen == dev.aeon.ui.state.SkillScreen.Review }
+        m.installSkill()
+        waitFor(label = "step 6") { sk().add.conflict }
+        assertEquals("tidy-notes-2", sk().add.rename)
+        m.installSkill(renamed = true)
+        waitFor(label = "step 7") { sk().screen == dev.aeon.ui.state.SkillScreen.Detail && sk().detail?.skill?.folder == "tidy-notes-2" }
+
+        // Reading a skill loads its files; an unapproved skill is approved with the hash that was shown.
+        File(fx.workspace, ".agents/skills/dropped").mkdirs()
+        File(fx.workspace, ".agents/skills/dropped/SKILL.md").writeText("---\nname: dropped\ndescription: Dropped here. Use never.\n---\n\nbody\n")
+        m.openSkill("dropped", "project")
+        waitFor(label = "step 8") { sk().screen == dev.aeon.ui.state.SkillScreen.Detail && sk().detail?.skill?.folder == "dropped" }
+        assertEquals("untracked", sk().detail?.skill?.status)
+        m.readSkill()
+        waitFor(label = "step 9") { sk().read?.busy == false }
+        m.trustSkill()
+        waitFor(label = "step 10") { sk().detail?.skill?.status == "tracked" }
+        assertEquals(dev.aeon.ui.state.SkillScreen.Detail, sk().screen)
+
+        m.deleteSkill("dropped", "project")
+        waitFor(label = "step 11") { sk().list.none { it.folder == "dropped" } }
+        assertEquals(dev.aeon.ui.state.SkillScreen.List, sk().screen, "deleting returns to the list")
+        m.skillsBack()
+        assertEquals(null, sk().screen)
+        m.stop()
+    }
+
+    @Test
+    fun theFeedShowsWrittenPostsAndTheOwnerReadsLikesMovesAndRemovesThemAndSetsItsLimits() = runBlocking {
+        val fx = startAeon(startFakeModel(emptyList()))
+        val (client, crypto) = newClient(fx.base)
+        val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
+        cleanup += { scope.cancel() }
+        val map = mutableMapOf<String, String>()
+        val store = object : dev.aeon.ui.platform.KeyValueStore {
+            override fun get(key: String) = map[key]
+            override fun put(key: String, value: String) { map[key] = value }
+            override fun remove(key: String) { map.remove(key) }
+        }
+        val m = dev.aeon.ui.state.AppModel(client, store, crypto, scope, pollMillis = 60_000, defaultServerUrl = fx.base)
+        m.pair(fx.base, fx.code)
+        waitFor { m.state.value.connection is dev.aeon.ui.state.Connection.Connected }
+        val f = { m.state.value.feed }
+        val posts = { f().data?.posts.orEmpty().map { it.id } }
+
+        m.loadFeed()
+        waitFor(label = "empty feed loaded") { f().loaded }
+        assertEquals(emptyList(), f().data!!.interests, "no interests in the profile yet: the screen asks for them")
+        assertTrue(f().data!!.online && f().data!!.posts.isEmpty())
+
+        // Posts as the pipeline leaves them (it needs the open web to make new ones, so the file is written here).
+        val now = System.currentTimeMillis()
+        fun post(id: String, category: String, title: String, written: Boolean, ageHours: Int, extra: String = "") =
+            """{"id":"$id","kicker":"$category","title":"$title","body":"${if (written) "본문이 있는 글입니다. 사실만 적었습니다." else ""}","category":"$category","sources":[{"title":"$title","outlet":"예시경제","url":"https://news.example/$id","publishedAt":$now}],"reason":"관심사 ‘$category’의 소식이에요","written":$written,"image":false,"createdAt":${now - ageHours * 3_600_000L}$extra}"""
+        File(fx.cfgDir, "feed-posts.json").writeText(
+            """{"version":1,"posts":[${post("aaaaaaaaaaaa", "재테크", "한국은행 기준금리 동결", true, 1)},${post("bbbbbbbbbbbb", "AI", "AI 기본법 시행령 의견 접수", true, 2, ""","deadline":${now + 86_400_000L},"actionable":true""")},${post("cccccccccccc", "여행", "항공권 가격 하락", false, 3)}]}""",
+        )
+        client.saveConfig(client.config().copy(profile = dev.aeon.ui.api.Profile(interests = listOf("재테크", "AI", "여행")), onlineLookups = false))
+        m.loadFeed()
+        waitFor(label = "posts") { posts().size == 3 }
+        assertEquals(listOf("bbbbbbbbbbbb", "aaaaaaaaaaaa", "cccccccccccc"), posts(), "soon-due and to-do first, then unread, newest first")
+        assertEquals(false, f().data!!.posts.last().written)
+        assertEquals(false, f().data!!.online, "lookups off: the screen says new posts are not made")
+
+        m.openPost("aaaaaaaaaaaa")
+        waitFor(label = "read") { f().data!!.posts.first { it.id == "aaaaaaaaaaaa" }.seenAt != null }
+        assertEquals(listOf("bbbbbbbbbbbb", "cccccccccccc", "aaaaaaaaaaaa"), posts(), "a read post goes below the unread ones")
+        m.likePost("aaaaaaaaaaaa", true)
+        waitFor(label = "liked") { f().data!!.posts.first { it.id == "aaaaaaaaaaaa" }.liked }
+        m.movePost("aaaaaaaaaaaa", "top")
+        waitFor(label = "moved") { posts().first() == "aaaaaaaaaaaa" }
+        m.removePost("aaaaaaaaaaaa")
+        waitFor(label = "removed") { "aaaaaaaaaaaa" !in posts() }
+        assertEquals(null, f().openId, "removing a post closes its sheet")
+
+        // A run that may not start is a report, not an error: lookups are off.
+        m.generateFeed()
+        waitFor(label = "run answered") { !f().generating && f().report != null }
+        assertEquals(listOf("skipped", "offline"), listOf(f().report!!.status, f().report!!.reason))
+
+        // The brief, the limits and the taste summary.
+        m.editBrief("경제 소식만 짧게")
+        m.saveBrief()
+        waitFor(label = "brief saved") { f().data!!.settings.brief == "경제 소식만 짧게" && f().briefDraft == null }
+        m.setFeedDailyRuns(2)
+        m.setFeedAuto(false)
+        waitFor(label = "limits saved") { f().data!!.settings.dailyRuns == 2 && !f().data!!.settings.auto }
+        assertEquals(listOf("재테크", "AI", "여행"), f().data!!.queries.map { it.interest })
+        m.editTaste("짧고 숫자가 분명한 글을 좋아해요")
+        m.saveTaste()
+        waitFor(label = "taste saved") { f().data!!.taste?.source == "owner" }
+        m.clearTaste()
+        waitFor(label = "taste cleared") { f().data!!.taste == null }
+
+        m.setFeedFilter("AI")
+        m.loadFeed()
+        waitFor(label = "filter kept") { f().filter == "AI" && f().loaded }
+        client.saveConfig(client.config().copy(profile = dev.aeon.ui.api.Profile(interests = listOf("여행")), onlineLookups = false))
+        m.loadFeed()
+        waitFor(label = "filter dropped") { f().data!!.interests == listOf("여행") }
+        assertEquals(null, f().filter, "a filter for an interest that is gone is dropped")
+        assertEquals("방금", dev.aeon.ui.screens.agoText(1_000_000.0, 1_030_000))
+        assertEquals("5분 전", dev.aeon.ui.screens.agoText(1_000_000.0, 1_000_000 + 5 * 60_000))
+        assertEquals("3시간 전", dev.aeon.ui.screens.agoText(1_000_000.0, 1_000_000 + 3 * 3_600_000))
+        assertEquals("어제", dev.aeon.ui.screens.agoText(1_000_000.0, 1_000_000 + 30 * 3_600_000))
+        assertEquals("마감 지남" to false, dev.aeon.ui.screens.deadlineText(1_000_000.0, 2_000_000))
+        assertEquals("오늘 마감" to true, dev.aeon.ui.screens.deadlineText(2_000_000.0 + 3_600_000, 2_000_000))
+        assertEquals("마감 3일 남음" to true, dev.aeon.ui.screens.deadlineText(2_000_000.0 + 2 * 86_400_000L + 1_000, 2_000_000))
+        assertEquals("마감 8일 남음" to false, dev.aeon.ui.screens.deadlineText(2_000_000.0 + 7 * 86_400_000L + 1_000, 2_000_000))
+        m.stop()
+    }
+
+    @Test
+    fun theAgentAsksAQuestionTheOwnerAnswersInWordsAndTheTaskGoesOn() = runBlocking {
+        val port = startFakeModel(
+            listOf(
+                """{"plan":["ask which day"],"criteria":[]}""",
+                """{"action":"ask","question":"Which day should the report be for?","options":["Monday","Friday"]}""",
+                """{"action":"finish","summary":"made the Friday report"}""",
+            ),
+        )
+        val fx = startAeon(port)
+        val (client, _) = newClient(fx.base)
+        client.pair(fx.code, "kotlin test client")
+        val created = client.createTask("make the weekly report", emptyList())
+        awaitTask(client, created.id, "WAITING_FOR_APPROVAL")
+        val q = client.approvals("pending").single()
+        assertEquals(listOf("question", "Which day should the report be for?", "Monday,Friday"), listOf(q.kind, q.summary, q.resources.joinToString(",")))
+        assertEquals(409, assertFailsWith<AeonException> { client.decide(q.id, approve = true) }.status, "a question cannot be approved without an answer")
+        val answered = client.decide(q.id, approve = true, answer = "Friday")
+        assertEquals("Friday", answered.answer)
+        val done = awaitTask(client, created.id, "COMPLETED", "FAILED")
+        assertEquals("COMPLETED", done.status, done.error ?: "")
+        assertTrue(done.steps.any { it.tool == "agent.ask" && it.ok })
+    }
+
+    @Test
+    fun whatTheAgentRemembersIsWrittenByTheOwnerOrApprovedWordForWord() = runBlocking {
+        val port = startFakeModel(
+            listOf(
+                """{"plan":["remember it"],"criteria":[]}""",
+                """{"action":"tool","tool":"memory.save","args":{"text":"Give me reports as a short list","kind":"preference"}}""",
+                """{"action":"finish","summary":"noted"}""",
+            ),
+        )
+        val fx = startAeon(port)
+        val (client, _) = newClient(fx.base)
+        client.pair(fx.code, "kotlin test client")
+        assertEquals(emptyList(), client.memory().items)
+
+        val mine = client.addMemory("동생 민아는 부산에 살아요", "fact")
+        assertEquals(listOf("fact", "owner"), listOf(mine.kind, mine.source.type))
+        assertEquals(400, assertFailsWith<AeonException> { client.addMemory("my password = hunter2hunter2", "fact") }.status, "a secret is not kept")
+        assertEquals(400, assertFailsWith<AeonException> { client.addMemory("no", "fact") }.status)
+
+        // The agent proposes one: it waits as a card showing the exact sentence, and is kept only after a yes.
+        val created = client.createTask("from now on give me reports as a short list", emptyList())
+        awaitTask(client, created.id, "WAITING_FOR_APPROVAL")
+        val a = client.approvals("pending").single()
+        assertEquals("memory.save", a.tool)
+        assertEquals("Give me reports as a short list", a.detail)
+        assertEquals(listOf("memory:preference"), a.resources)
+        assertEquals("이걸 기억할까요?", dev.aeon.ui.screens.riskInfo(a).title(1), "the card says remembering, not sending something out")
+        assertEquals(1, client.memory().items.size, "nothing is kept before the owner agrees")
+        client.decide(a.id, approve = true)
+        assertEquals("COMPLETED", awaitTask(client, created.id, "COMPLETED", "FAILED").status)
+
+        val items = client.memory().items
+        assertEquals(listOf("Give me reports as a short list", "동생 민아는 부산에 살아요"), items.map { it.text }, "newest first")
+        val proposed = items.first()
+        assertEquals(listOf("preference", "agent", created.id), listOf(proposed.kind, proposed.source.type, proposed.source.taskId))
+
+        client.deleteMemory(proposed.id)
+        assertEquals(listOf(mine.id), client.memory().items.map { it.id })
+        assertEquals(404, assertFailsWith<AeonException> { client.deleteMemory(proposed.id) }.status)
+    }
+
+    @Test
+    fun aFinishedTaskSuggestsWhatToKeepAndTheOwnerAcceptsRewordsOrTurnsItDown() = runBlocking {
+        val port = startFakeModel(
+            listOf(
+                """{"plan":["say hello"],"criteria":[]}""",
+                """{"action":"finish","summary":"said hello","remember":[{"text":"The owner wants reports as a short list","kind":"preference"},{"text":"My sister Mina lives in Busan","kind":"fact"}]}""",
+            ),
+        )
+        val fx = startAeon(port)
+        val (client, _) = newClient(fx.base)
+        client.pair(fx.code, "kotlin test client")
+        val old = client.addMemory("My sister Mina lives in Daegu now", "fact")
+        val created = client.createTask("say hello", emptyList())
+        assertEquals("COMPLETED", awaitTask(client, created.id, "COMPLETED", "FAILED").status)
+
+        val page = client.memory()
+        assertEquals(listOf("The owner wants reports as a short list", "My sister Mina lives in Busan"), page.proposals.map { it.text }.sortedByDescending { it.startsWith("The") })
+        assertEquals(listOf(old.id), page.items.map { it.id }, "nothing is kept before the owner accepts")
+        val short = page.proposals.first { it.text.startsWith("The owner") }
+        val busan = page.proposals.first { it.text.startsWith("My sister") }
+        assertEquals(old.id, busan.replaces, "a close suggestion says which memory it would correct")
+
+        // Accepted in the owner's own words and with a period of a week.
+        val kept = client.acceptMemoryProposal(short.id, "Reports go to me as a short list", periodChanged = true, days = 7)
+        assertEquals("Reports go to me as a short list", kept.item!!.text)
+        assertEquals("owner", kept.item!!.source.type)
+        assertTrue((kept.item!!.expiresAt ?: 0.0) > System.currentTimeMillis())
+        // Accepted as worded: the kept memory is corrected and its older wording stays as history.
+        val fixed = client.acceptMemoryProposal(busan.id, busan.text, periodChanged = false, days = null)
+        assertEquals(listOf("My sister Mina lives in Busan", "My sister Mina lives in Daegu now"), listOf(fixed.item!!.text, fixed.item!!.history.single().text))
+        assertEquals(0, fixed.proposals.size)
+        // Taking the period away.
+        val open = client.editMemory(kept.item!!.id, kept.item!!.text, periodChanged = true, days = null)
+        assertEquals(null, open.item!!.expiresAt)
+        // Deleting removes the memory with its history.
+        client.deleteMemory(fixed.item!!.id)
+        assertEquals(listOf(kept.item!!.id), client.memory().items.map { it.id })
+        assertEquals("이 기억을 지울까요?", dev.aeon.ui.screens.riskInfo(dev.aeon.ui.api.Approval(id = "a", taskId = "t", tool = "memory.forget", summary = "Forget: x", risk = "delete", status = "pending")).title(1))
+        assertEquals("1월 5일", dev.aeon.ui.screens.shortDate(java.time.LocalDateTime.of(2027, 1, 5, 12, 0).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli().toDouble()))
+    }
+
+    @Test
+    fun aRoutineIsMadeSwitchedOffRunAndDeletedAndItsTaskIsAnOrdinaryOne() = runBlocking {
+        val port = startFakeModel(listOf("""{"plan":["say hello"],"criteria":[]}""", """{"action":"finish","summary":"said hello"}"""))
+        val fx = startAeon(port)
+        val (client, _) = newClient(fx.base)
+        client.pair(fx.code, "kotlin test client")
+        assertEquals(emptyList(), client.routines().routines.map { it.id })
+        assertEquals(400, assertFailsWith<AeonException> { client.createRoutine("x", "daily", "09:00", null) }.status)
+        assertEquals(400, assertFailsWith<AeonException> { client.createRoutine("Say hello to me", "daily", "9am", null) }.status)
+
+        val made = client.createRoutine("Say hello to me every weekday", "weekdays", "09:00", null)
+        val r = made.routine!!
+        assertEquals(listOf("weekdays", "09:00", true), listOf(r.schedule.repeat, r.schedule.time, r.enabled))
+        assertTrue((made.routines.single().nextRunAt ?: 0.0) > System.currentTimeMillis(), "the next time is known")
+        assertEquals("평일 오전 9:00", dev.aeon.ui.screens.scheduleText(r.schedule))
+        assertEquals("매주 월요일 오후 6:30", dev.aeon.ui.screens.scheduleText(dev.aeon.ui.api.RoutineSchedule("weekly", "18:30", 1)))
+        assertEquals("매일 오전 12:05", dev.aeon.ui.screens.scheduleText(dev.aeon.ui.api.RoutineSchedule("daily", "00:05")))
+
+        val off = client.setRoutineEnabled(r.id, false)
+        assertEquals(listOf(false, null), listOf(off.routines.single().enabled, off.routines.single().nextRunAt))
+        client.setRoutineEnabled(r.id, true)
+
+        // Run now: it becomes an ordinary task in the task list and completes like any other.
+        val ran = client.runRoutine(r.id)
+        assertEquals(1, ran.runsToday)
+        val task = awaitTask(client, ran.taskId!!, "COMPLETED", "FAILED")
+        assertEquals(listOf("Say hello to me every weekday", "COMPLETED"), listOf(task.goal, task.status))
+        assertEquals(ran.taskId, client.routines().routines.single().lastTaskId)
+
+        assertEquals(0, client.deleteRoutine(r.id).routines.size)
+        assertEquals(404, assertFailsWith<AeonException> { client.deleteRoutine(r.id) }.status)
     }
 }
