@@ -1,39 +1,106 @@
-name: Bug report
-description: Something does not work as described
-labels: [bug]
+name: Bug report / 버그 신고
+description: Report a reproducible problem / 문제와 재현 방법을 알려 주세요
+title: '[Bug] '
+labels:
+- bug
+- status/needs-triage
 body:
-  - type: markdown
-    attributes:
-      value: |
-        Security problem? Do **not** open an issue: use "Report a vulnerability" under the Security tab (see SECURITY.md).
-        Never paste API keys, pairing codes or private files.
-  - type: textarea
-    id: what
-    attributes:
-      label: What happened, and what did you expect?
-    validations:
+- type: markdown
+  attributes:
+    value: 'Security issue? Use the private security report link instead of a public issue. Never share API keys,
+      pairing codes, prompts, memory contents or private files.
+
+
+      보안 문제는 아래 비공개 보안 신고를 이용해 주세요. API 키·연결 코드·대화·메모리·개인 파일은 올리지 마세요.'
+- type: textarea
+  id: what
+  attributes:
+    label: What happened / 발생한 문제
+    description: What did you expect, and what actually happened? / 기대한 동작과 실제 동작을 적어 주세요.
+  validations:
+    required: true
+- type: textarea
+  id: steps
+  attributes:
+    label: Steps to reproduce / 재현 방법
+    placeholder: '1. Open ... / 열기
+
+      2. Select ... / 선택
+
+      3. ...'
+  validations:
+    required: true
+- type: dropdown
+  id: environment
+  attributes:
+    label: Environment / 실행 환경
+    options:
+    - Android app / Android 앱
+    - Android app (agent on the phone) / Android 기기 내 실행
+    - Windows app / Windows 앱
+    - Linux app / Linux 앱
+    - Web app / 웹 앱
+    - Node server / CLI
+    - macOS CLI
+    - Not sure / 잘 모르겠어요
+  validations:
+    required: true
+- type: dropdown
+  id: area
+  attributes:
+    label: Area / 기능 영역
+    options:
+    - Agent tasks and planning / 작업·계획
+    - App screens and accessibility / 앱 화면·접근성
+    - Models and providers / 모델·제공자
+    - Tools and sandbox / 도구·샌드박스
+    - Memory / 메모리
+    - Skills / 스킬
+    - Pairing and connections / 기기 연결·외부 연결
+    - Interest feed / 관심사 피드
+    - Routines / 예약·반복 작업
+    - Build, install or update / 빌드·설치·업데이트
+    - Documentation / 문서
+    - Not sure / 잘 모르겠어요
+  validations:
+    required: true
+- type: input
+  id: version
+  attributes:
+    label: Version or commit / 버전 또는 커밋
+    description: App version, release tag or commit SHA; write unknown if unavailable. / 앱 버전·태그·커밋을 적어 주세요. 모르면
+      “모름”으로 적어 주세요.
+  validations:
+    required: true
+- type: input
+  id: system
+  attributes:
+    label: OS and device / OS·기기
+    description: OS version, phone model or browser version. / OS 버전·휴대폰 모델 또는 브라우저 버전
+    placeholder: Android 16 / Pixel 9, Windows 11, Ubuntu 24.04 / Firefox ...
+  validations:
+    required: true
+- type: input
+  id: node
+  attributes:
+    label: Node version / Node 버전
+    description: 'For a separately installed server/CLI only: node --version. / 별도 서버·CLI를 쓰는 경우에만 입력해 주세요.'
+- type: input
+  id: provider
+  attributes:
+    label: Provider and model / 제공자·모델
+    description: If relevant, names only. Never include keys or private endpoints. / 관련이 있다면 이름만 적어 주세요. 키·비공개 주소는
+      제외해 주세요.
+- type: textarea
+  id: logs
+  attributes:
+    label: Logs or screenshots / 로그·화면
+    description: 'Optional: review and remove private information before attaching. There is no required diagnostics
+      export. / 선택 사항입니다. 첨부 전에 개인정보를 확인해 지워 주세요.'
+- type: checkboxes
+  id: privacy
+  attributes:
+    label: Before submitting / 보내기 전 확인
+    options:
+    - label: I removed secrets and private information. / 비밀키와 개인정보를 제외했습니다.
       required: true
-  - type: textarea
-    id: steps
-    attributes:
-      label: Steps to reproduce
-      placeholder: "1. ...\n2. ..."
-    validations:
-      required: true
-  - type: dropdown
-    id: where
-    attributes:
-      label: Where
-      options: [Android app, Android app (agent on the phone), Windows app, Linux app, Web app, Node server / CLI, Not sure]
-    validations:
-      required: true
-  - type: input
-    id: version
-    attributes:
-      label: Version or commit
-      placeholder: "git rev-parse --short HEAD"
-  - type: textarea
-    id: logs
-    attributes:
-      label: Logs or screenshots
-      description: Remove anything private first.

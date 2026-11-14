@@ -1,0 +1,296 @@
+{
+  "labels": [
+    {
+      "name": "accessibility",
+      "color": "f143ab",
+      "description": "Barrier affecting people with disabilities"
+    },
+    {
+      "name": "area/apps",
+      "color": "1d76db",
+      "description": "Kotlin apps (Android, desktop, web)"
+    },
+    {
+      "name": "area/core",
+      "color": "0e8a16",
+      "description": "TypeScript agent core and server"
+    },
+    {
+      "name": "area/docs",
+      "color": "c5def5",
+      "description": "Documentation"
+    },
+    {
+      "name": "bug",
+      "color": "d73a4a",
+      "description": "Something isn't working"
+    },
+    {
+      "name": "decision-needed",
+      "color": "b60205",
+      "description": "Needs the maintainer's decision before work starts (license, cost, dependency, permission)"
+    },
+    {
+      "name": "dependencies",
+      "color": "5319e7",
+      "description": "Dependency updates"
+    },
+    {
+      "name": "documentation",
+      "color": "0075ca",
+      "description": "Improvements or additions to documentation"
+    },
+    {
+      "name": "duplicate",
+      "color": "cfd3d7",
+      "description": "This issue or pull request already exists"
+    },
+    {
+      "name": "enhancement",
+      "color": "a2eeef",
+      "description": "New feature or request"
+    },
+    {
+      "name": "github_actions",
+      "color": "000000",
+      "description": "Pull requests that update GitHub Actions code"
+    },
+    {
+      "name": "good first issue",
+      "color": "7057ff",
+      "description": "Good for newcomers"
+    },
+    {
+      "name": "help wanted",
+      "color": "008672",
+      "description": "Extra attention is needed"
+    },
+    {
+      "name": "invalid",
+      "color": "e4e669",
+      "description": "This doesn't seem right"
+    },
+    {
+      "name": "java",
+      "color": "ffa221",
+      "description": "Pull requests that update java code"
+    },
+    {
+      "name": "javascript",
+      "color": "168700",
+      "description": "Pull requests that update javascript code"
+    },
+    {
+      "name": "needs-test",
+      "color": "fbca04",
+      "description": "Behaviour changed without a test"
+    },
+    {
+      "name": "question",
+      "color": "d876e3",
+      "description": "Further information is requested"
+    },
+    {
+      "name": "security",
+      "color": "d93f0b",
+      "description": "Security-relevant change or report"
+    },
+    {
+      "name": "wontfix",
+      "color": "ffffff",
+      "description": "This will not be worked on"
+    },
+    {
+      "name": "status/needs-triage",
+      "color": "fbca04",
+      "description": "접수됨 · Maintainer review needed"
+    },
+    {
+      "name": "status/needs-info",
+      "color": "d876e3",
+      "description": "정보 대기 · Waiting for reporter details"
+    },
+    {
+      "name": "status/planned",
+      "color": "c2e0c6",
+      "description": "예정 · Accepted and waiting to start"
+    },
+    {
+      "name": "status/in-progress",
+      "color": "1d76db",
+      "description": "작업 중 · Being implemented"
+    },
+    {
+      "name": "status/blocked",
+      "color": "b60205",
+      "description": "진행 불가 · Waiting on a dependency or decision"
+    },
+    {
+      "name": "status/in-testing",
+      "color": "5319e7",
+      "description": "검증 중 · Waiting for test results"
+    },
+    {
+      "name": "platform/android",
+      "color": "bfdadc",
+      "description": "Android app / agent on the phone"
+    },
+    {
+      "name": "platform/windows",
+      "color": "bfdadc",
+      "description": "Windows desktop app or runtime"
+    },
+    {
+      "name": "platform/linux",
+      "color": "bfdadc",
+      "description": "Linux desktop app or runtime"
+    },
+    {
+      "name": "platform/macos",
+      "color": "bfdadc",
+      "description": "macOS CLI (no native app yet)"
+    },
+    {
+      "name": "platform/web",
+      "color": "bfdadc",
+      "description": "Web app in a browser"
+    },
+    {
+      "name": "platform/cli",
+      "color": "bfdadc",
+      "description": "Node server / command line"
+    },
+    {
+      "name": "area/providers",
+      "color": "c5def5",
+      "description": "Models, provider setup, quotas and API compatibility"
+    },
+    {
+      "name": "area/tools",
+      "color": "c5def5",
+      "description": "Agent tools, filesystem, network and sandbox"
+    },
+    {
+      "name": "area/memory",
+      "color": "c5def5",
+      "description": "Memory suggestions, retrieval and history"
+    },
+    {
+      "name": "area/skills",
+      "color": "c5def5",
+      "description": "Skill creation, installation and script execution"
+    },
+    {
+      "name": "area/connections",
+      "color": "c5def5",
+      "description": "Device pairing, local API and external connections"
+    },
+    {
+      "name": "area/feed",
+      "color": "c5def5",
+      "description": "Interest feed, sources and reactions"
+    },
+    {
+      "name": "area/routines",
+      "color": "c5def5",
+      "description": "Scheduled and repeating tasks"
+    },
+    {
+      "name": "area/ci",
+      "color": "c5def5",
+      "description": "CI, builds, packaging and releases"
+    },
+    {
+      "name": "priority/high",
+      "color": "b60205",
+      "description": "우선 · Maintainer-confirmed significant impact"
+    },
+    {
+      "name": "priority/normal",
+      "color": "fbca04",
+      "description": "보통 · Maintainer-selected normal priority"
+    },
+    {
+      "name": "priority/low",
+      "color": "c2e0c6",
+      "description": "낮음 · Maintainer-selected lower priority"
+    }
+  ],
+  "fields": [
+    {
+      "heading": "Environment / 실행 환경",
+      "options": {
+        "Android app / Android 앱": [
+          "platform/android",
+          "area/apps"
+        ],
+        "Android app (agent on the phone) / Android 기기 내 실행": [
+          "platform/android",
+          "area/apps"
+        ],
+        "Windows app / Windows 앱": [
+          "platform/windows",
+          "area/apps"
+        ],
+        "Linux app / Linux 앱": [
+          "platform/linux",
+          "area/apps"
+        ],
+        "Web app / 웹 앱": [
+          "platform/web",
+          "area/apps"
+        ],
+        "Node server / CLI": [
+          "platform/cli",
+          "area/core"
+        ],
+        "macOS CLI": [
+          "platform/macos",
+          "platform/cli",
+          "area/core"
+        ],
+        "Not sure / 잘 모르겠어요": []
+      }
+    },
+    {
+      "heading": "Area / 기능 영역",
+      "options": {
+        "Agent tasks and planning / 작업·계획": [
+          "area/core"
+        ],
+        "App screens and accessibility / 앱 화면·접근성": [
+          "area/apps"
+        ],
+        "Models and providers / 모델·제공자": [
+          "area/providers"
+        ],
+        "Tools and sandbox / 도구·샌드박스": [
+          "area/tools"
+        ],
+        "Memory / 메모리": [
+          "area/memory"
+        ],
+        "Skills / 스킬": [
+          "area/skills"
+        ],
+        "Pairing and connections / 기기 연결·외부 연결": [
+          "area/connections"
+        ],
+        "Interest feed / 관심사 피드": [
+          "area/feed"
+        ],
+        "Routines / 예약·반복 작업": [
+          "area/routines"
+        ],
+        "Build, install or update / 빌드·설치·업데이트": [
+          "area/ci"
+        ],
+        "Documentation / 문서": [
+          "area/docs",
+          "documentation"
+        ],
+        "Not sure / 잘 모르겠어요": []
+      }
+    }
+  ]
+}

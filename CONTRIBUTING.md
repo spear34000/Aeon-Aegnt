@@ -4,6 +4,8 @@ Thank you for helping. Aeon is a personal AI agent that runs on the owner's own 
 
 ## Before you start
 
+- Use the bilingual issue forms for bug reports and feature ideas. See [issue labels and triage](docs/ISSUES.md) for the information to include and how status, platform, area and priority labels work.
+
 - **Read [docs/DECISIONS.md](docs/DECISIONS.md).** It records what the owner approved (and why). A change that conflicts with an approved decision needs a new decision first: open an issue and wait for a yes.
 - **Ask before building anything big.** Open an issue describing the problem and the idea; small fixes and docs can go straight to a pull request.
 - **Things only the maintainer decides:** the license, any paid or rate-limited service, a new dependency, a new model provider, new permissions for the agent, anything that sends data off the machine. Please raise these in an issue first.

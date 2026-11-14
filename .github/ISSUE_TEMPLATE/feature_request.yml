@@ -1,27 +1,74 @@
-name: Feature request
-description: An idea for something Aeon should do
-labels: [enhancement]
+name: Feature request / 기능 제안
+description: Suggest an improvement / 개선할 점을 알려 주세요
+title: '[Feature] '
+labels:
+- enhancement
+- status/needs-triage
 body:
-  - type: textarea
-    id: problem
-    attributes:
-      label: What problem would this solve, and for whom?
-    validations:
-      required: true
-  - type: textarea
-    id: idea
-    attributes:
-      label: What would you like to happen?
-    validations:
-      required: true
-  - type: textarea
-    id: cost
-    attributes:
-      label: Cost and safety
-      description: Does it need a paid service, a new dependency, a new permission, or send data anywhere? Aeon's rules (docs/DECISIONS.md) need the maintainer's approval for these.
-  - type: checkboxes
-    id: help
-    attributes:
-      label: Would you work on it?
-      options:
-        - label: I would like to build this (see CONTRIBUTING.md; please wait for a yes on the issue first)
+- type: markdown
+  attributes:
+    value: 'Security issue? Use the private security report link instead of a public issue. Never share API keys,
+      pairing codes, prompts, memory contents or private files.
+
+
+      보안 문제는 아래 비공개 보안 신고를 이용해 주세요. API 키·연결 코드·대화·메모리·개인 파일은 올리지 마세요.'
+- type: textarea
+  id: problem
+  attributes:
+    label: Problem / 해결할 문제
+    description: Who needs this, and what is difficult today? / 누구에게 어떤 어려움이 있나요?
+  validations:
+    required: true
+- type: textarea
+  id: idea
+  attributes:
+    label: Proposal / 제안
+    description: What should Aeon do? / 어떻게 동작하면 좋을까요?
+  validations:
+    required: true
+- type: dropdown
+  id: environment
+  attributes:
+    label: Environment / 실행 환경
+    options:
+    - Android app / Android 앱
+    - Android app (agent on the phone) / Android 기기 내 실행
+    - Windows app / Windows 앱
+    - Linux app / Linux 앱
+    - Web app / 웹 앱
+    - Node server / CLI
+    - macOS CLI
+    - Not sure / 잘 모르겠어요
+  validations:
+    required: true
+- type: dropdown
+  id: area
+  attributes:
+    label: Area / 기능 영역
+    options:
+    - Agent tasks and planning / 작업·계획
+    - App screens and accessibility / 앱 화면·접근성
+    - Models and providers / 모델·제공자
+    - Tools and sandbox / 도구·샌드박스
+    - Memory / 메모리
+    - Skills / 스킬
+    - Pairing and connections / 기기 연결·외부 연결
+    - Interest feed / 관심사 피드
+    - Routines / 예약·반복 작업
+    - Build, install or update / 빌드·설치·업데이트
+    - Documentation / 문서
+    - Not sure / 잘 모르겠어요
+  validations:
+    required: true
+- type: textarea
+  id: cost
+  attributes:
+    label: Cost and safety / 비용·권한·정보 전송
+    description: Mention new services, dependencies, permissions or data leaving the device. These need the maintainer’s
+      decision before implementation. / 새 서비스·의존성·권한·외부 정보 전송이 있다면 적어 주세요. 구현 전에 관리자의 결정이 필요합니다.
+- type: checkboxes
+  id: help
+  attributes:
+    label: Contribution / 기여
+    options:
+    - label: I would like to implement this after maintainer agreement. / 관리자와 협의한 뒤 구현하고 싶습니다.

@@ -1,0 +1,28 @@
+name: Issue triage
+
+on:
+  issues:
+    types: [opened, reopened, edited, closed, labeled]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: issue-triage-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const { manageIssue } = require('./.github/scripts/issue-management.cjs');
+            await manageIssue({ github, context });
