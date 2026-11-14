@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { looksLikeInjection } from "../core/untrusted.ts";
+import { NOT_WORD_OR_SPACE } from "../core/word-chars.ts";
 import { dice } from "./feed-text.ts";
 
 /**
@@ -73,7 +74,7 @@ const STOP_KO = new Set("에서 으로 에게 에는 에도 니다 습니 합니
 /** Words of a text: lower-cased letters and digits, plus character pairs for Hangul and CJK so that endings do not hide a match. */
 export function memoryTokens(s: string): Set<string> {
   const out = new Set<string>();
-  const words = s.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter(Boolean);
+  const words = s.toLowerCase().replace(NOT_WORD_OR_SPACE, " ").split(/\s+/).filter(Boolean);
   for (const w of words) {
     const cjk = /[ㄱ-ㆎ가-힣一-鿿]/.test(w);
     if (w.length > 1 && !STOP.has(w) && (cjk || w.length > 2 || /\d/.test(w))) out.add(w);
